@@ -16,6 +16,7 @@ const { URL } = require('url');
 const { db, DATA_DIR, UPLOAD_DIR } = require('./db');
 const { smartParse, hasNoticeSignal } = require('./lib/smartparse');
 const { parseMultipart } = require('./lib/multipart');
+const JL = require('./lib/jielong');
 
 const PORT = Number(process.env.PORT || 5757);
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -779,6 +780,256 @@ route('DELETE', '/api/inbox', () => {
   return { ok: true, dismissed: Number(info.changes) };
 });
 
+/* ---------- 班级接龙（独立项目「接龙小助手」并入） ----------
+ * 浏览公开（与信息流一致）；学生提交 /j/:id 无需登录；
+ * 管理操作（编辑/停止/删除/导出）需要管理员登录，或凭该接龙的管理令牌 ?t=（可委托给班委）。
+ * 数据存 SQLite：jielongs（含名单/字段 JSON）+ jielong_entries（按名单槽位 rid 匹配身份）。 */
+function jielongFromRow(row) {
+  if (!row) return null;
+  const entries = db.prepare('SELECT * FROM jielong_entries WHERE jielong_id = ? ORDER BY seq, id').all(row.id)
+    .map((r) => ({
+      rid: r.rid == null ? null : Number(r.rid),
+      id: r.sid || null,
+      name: r.name,
+      values: JL.safeJson(r.values_json, {}),
+      remark: r.remark,
+      time: Number(r.time) || 0,
+      outside: !!r.outside,
+    }));
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    deadline: row.deadline || '',
+    roster: JL.safeJson(row.roster, []),
+    fields: JL.safeJson(row.fields, []),
+    allowOutside: !!row.allow_outside,
+    closed: !!row.closed,
+    adminToken: row.admin_token,
+    createdAt: Number(row.created_at) || 0,
+    entries,
+  };
+}
+function getJielong(id) {
+  return jielongFromRow(db.prepare('SELECT * FROM jielongs WHERE id = ?').get(String(id || '').toLowerCase()));
+}
+// 对外视图：不泄露管理令牌；附进度与自动截止状态
+function jielongView(a) {
+  const p = JL.progressOf(a);
+  return {
+    id: a.id, title: a.title, description: a.description, deadline: a.deadline,
+    createdAt: a.createdAt, closed: a.closed, closedNow: JL.isClosed(a),
+    fields: a.fields, allowOutside: a.allowOutside,
+    roster: a.roster, hasRoster: p.hasRoster, total: p.total, done: p.done,
+    count: a.entries.length,
+    entries: a.entries.map((e) => ({ rid: e.rid, id: e.id, name: e.name, values: e.values, remark: e.remark, time: e.time, outside: !!e.outside })),
+    missing: p.hasRoster ? p.missing : null,
+  };
+}
+// 管理权双重校验：InfoHub 管理员登录，或该接龙自己的管理令牌（委托场景）
+function jielongAdminOk(ctx, a) {
+  if (authOk(ctx.req)) return true;
+  const t = String(ctx.query.get('t') || '');
+  return !!(a && a.adminToken && t && t === a.adminToken);
+}
+function saveJielongEntries(a) {
+  const del = db.prepare('DELETE FROM jielong_entries WHERE jielong_id = ?');
+  const ins = db.prepare(`INSERT INTO jielong_entries (jielong_id, rid, sid, name, values_json, remark, outside, time, seq)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  db.exec('BEGIN');
+  try {
+    del.run(a.id);
+    a.entries.forEach((e, i) => {
+      // seq 固定为当前数组下标：修改提交只更新内容与时间，不改变名单里的先后次序
+      ins.run(a.id, e.rid == null ? null : e.rid, e.id || '', e.name, JSON.stringify(e.values || {}),
+        e.remark || '', e.outside ? 1 : 0, e.time || Date.now(), i);
+    });
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+route('GET', '/api/jielong', () => ({
+  items: db.prepare('SELECT * FROM jielongs ORDER BY created_at DESC, id').all().map((row) => {
+    const a = jielongFromRow(row);
+    const p = JL.progressOf(a);
+    return {
+      id: a.id, title: a.title, description: a.description, deadline: a.deadline,
+      createdAt: a.createdAt, closed: a.closed, closedNow: JL.isClosed(a),
+      hasRoster: p.hasRoster, total: p.total, done: p.done, count: a.entries.length,
+    };
+  }),
+}));
+
+route('POST', '/api/jielong', (ctx) => {
+  if (!authOk(ctx.req)) throw new HttpError(401, '需要管理员登录');
+  const b = ctx.body || {};
+  const title = sField(b.title, 60);
+  if (!title) throw new HttpError(400, '请填写接龙标题');
+  const roster = JL.parseRoster(String(b.rosterRaw || ''), b.keepId === true).list;
+  if (roster.length > 500) throw new HttpError(400, '名单最多 500 人');
+  const deadline = cleanDT(b.deadline) || '';
+  const id = JL.genId(7);
+  db.prepare(`INSERT INTO jielongs (id, title, description, deadline, roster, fields, allow_outside, closed, admin_token, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`)
+    .run(id, title, sField(b.description, 1000), deadline, JSON.stringify(roster),
+      JSON.stringify(JL.sanitizeFields(b.fields)), b.allowOutside === false ? 0 : 1,
+      JL.genToken(), Date.now());
+  return { ok: true, id, adminToken: db.prepare('SELECT admin_token FROM jielongs WHERE id = ?').get(id).admin_token };
+});
+
+route('GET', '/api/jielong/:id', (ctx) => {
+  const a = getJielong(ctx.params.id);
+  if (!a) throw new HttpError(404, '接龙不存在');
+  const view = jielongView(a);
+  // 管理员可取回管理令牌（生成委托给班委的管理链接）；普通访客不返回。
+  // 未设密码时不返回——此时管理本就开放，令牌无需下发。
+  if (CONFIG.password && authOk(ctx.req)) view.adminToken = a.adminToken;
+  return view;
+});
+
+// 学生提交/更新接龙（同一身份重新提交即覆盖，便于修改）；无需登录
+route('POST', '/api/jielong/:id/join', (ctx) => {
+  const a = getJielong(ctx.params.id);
+  if (!a) throw new HttpError(404, '接龙不存在');
+  if (JL.isClosed(a)) throw new HttpError(400, '该接龙已截止，无法再提交');
+  const b = ctx.body || {};
+  const rawName = sField(b.name, 60);
+  if (!rawName) throw new HttpError(400, '请填写姓名');
+
+  // 身份匹配：优先用名单槽位序号（下拉/专属链接选定的），其次按学号/姓名文本匹配
+  let rid = null, id = null, name = rawName, outside = false;
+  if (a.roster.length) {
+    let slot = null;
+    if (Number.isInteger(b.rid) && b.rid >= 0 && b.rid < a.roster.length) {
+      slot = { i: b.rid, r: a.roster[b.rid] };
+    } else {
+      const hits = JL.findRosterHits(a.roster, rawName);
+      if (hits.length) {
+        // 重名时优先绑定还没接龙的槽位
+        slot = hits.find((h) => !a.entries.some((e) => !e.outside && e.rid === h.i)) || hits[0];
+      }
+    }
+    if (slot) { rid = slot.i; id = slot.r.id; name = slot.r.name; }
+    else outside = true;
+  }
+  if (outside && !a.allowOutside) {
+    throw new HttpError(400, '「' + rawName + '」不在接龙名单中，请核对后从下拉列表中选择');
+  }
+
+  const vals = b.values && typeof b.values === 'object' ? b.values : {};
+  const values = {};
+  for (const f of a.fields) {
+    let v = String(vals[f.key] == null ? '' : vals[f.key]).trim().slice(0, 300);
+    if (f.required && !v) throw new HttpError(400, '请填写「' + f.label + '」');
+    if (v) values[f.key] = v;
+  }
+  const remark = sField(b.remark, 300);
+  const exist = a.entries.find((e) => outside
+    ? (e.outside && e.rid == null && e.name === name)
+    : (e.rid != null ? e.rid === rid : (!e.outside && e.name === name)));
+  let updated = false;
+  if (exist) {
+    exist.rid = rid; exist.id = id; exist.name = name;
+    exist.values = values;
+    exist.remark = remark;
+    exist.time = Date.now();
+    exist.outside = outside;
+    updated = true;
+  } else {
+    if (a.entries.length >= 1000) throw new HttpError(400, '接龙人数已达上限');
+    a.entries.push({ rid, id, name, values, remark, time: Date.now(), outside });
+  }
+  saveJielongEntries(a);
+  const p = JL.progressOf(a);
+  return { ok: true, updated, count: a.entries.length, position: a.entries.length, done: p.done, total: p.total, entry: { rid, id, name } };
+});
+
+// 管理：编辑（标题/说明/截止/名单/开关）；名单变更后已接记录自动重新匹配
+route('PUT', '/api/jielong/:id', (ctx) => {
+  const a = getJielong(ctx.params.id);
+  if (!a) throw new HttpError(404, '接龙不存在');
+  if (!jielongAdminOk(ctx, a)) throw new HttpError(401, '令牌无效');
+  const b = ctx.body || {};
+  if (b.title !== undefined) {
+    const t = sField(b.title, 60);
+    if (!t) throw new HttpError(400, '标题不能为空');
+    a.title = t;
+  }
+  if (b.description !== undefined) a.description = sField(b.description, 1000);
+  if (b.deadline !== undefined) a.deadline = cleanDT(b.deadline) || '';
+  if (b.allowOutside !== undefined) a.allowOutside = !!b.allowOutside;
+  if (b.rosterRaw !== undefined) {
+    const newRoster = JL.parseRoster(String(b.rosterRaw || ''), b.keepId === true).list;
+    if (newRoster.length > 500) throw new HttpError(400, '名单最多 500 人');
+    a.roster = newRoster;
+    if (newRoster.length) JL.rematchEntries(a, newRoster); // 无名单接龙编辑时保持记录不变
+  }
+  db.prepare(`UPDATE jielongs SET title = ?, description = ?, deadline = ?, roster = ?, allow_outside = ? WHERE id = ?`)
+    .run(a.title, a.description, a.deadline, JSON.stringify(a.roster), a.allowOutside ? 1 : 0, a.id);
+  saveJielongEntries(a);
+  return jielongView(a);
+});
+
+// 管理：停止 / 重新开启
+route('POST', '/api/jielong/:id/close', (ctx) => {
+  const a = getJielong(ctx.params.id);
+  if (!a) throw new HttpError(404, '接龙不存在');
+  if (!jielongAdminOk(ctx, a)) throw new HttpError(401, '令牌无效');
+  a.closed = !!(ctx.body || {}).closed;
+  db.prepare('UPDATE jielongs SET closed = ? WHERE id = ?').run(a.closed ? 1 : 0, a.id);
+  return { ok: true, closed: a.closed };
+});
+
+// 管理：删除整个接龙（含全部记录，不可恢复）
+route('DELETE', '/api/jielong/:id', (ctx) => {
+  const a = getJielong(ctx.params.id);
+  if (!a) throw new HttpError(404, '接龙不存在');
+  if (!jielongAdminOk(ctx, a)) throw new HttpError(401, '令牌无效');
+  db.prepare('DELETE FROM jielong_entries WHERE jielong_id = ?').run(a.id);
+  db.prepare('DELETE FROM jielongs WHERE id = ?').run(a.id);
+  return { ok: true };
+});
+
+// 管理：删除某条接龙记录（优先按名单槽位 rid 定位，名单外记录按姓名）
+route('DELETE', '/api/jielong/:id/entry', (ctx) => {
+  const a = getJielong(ctx.params.id);
+  if (!a) throw new HttpError(404, '接龙不存在');
+  if (!jielongAdminOk(ctx, a)) throw new HttpError(401, '令牌无效');
+  const ridQ = ctx.query.get('rid');
+  const rid = ridQ !== null && ridQ !== '' ? Number(ridQ) : null;
+  let i = -1;
+  if (rid != null && !isNaN(rid)) {
+    i = a.entries.findIndex((e) => !e.outside && e.rid === rid);
+  } else {
+    const nm = String(ctx.query.get('name') || '');
+    i = a.entries.findIndex((e) => e.name === nm);
+  }
+  if (i >= 0) {
+    a.entries.splice(i, 1);
+    saveJielongEntries(a);
+  }
+  return { ok: true };
+});
+
+// 管理：导出 CSV（带 BOM，Excel 直接打开不乱码）
+route('GET', '/api/jielong/:id/export', (ctx) => {
+  const a = getJielong(ctx.params.id);
+  if (!a) throw new HttpError(404, '接龙不存在');
+  if (!jielongAdminOk(ctx, a)) throw new HttpError(401, '令牌无效');
+  const body = JL.buildCsv(a);
+  const res = ctx.res;
+  res.wrote = true;
+  res.writeHead(200, {
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename="jielong.csv"; filename*=UTF-8''${encodeURIComponent(a.title + '-接龙统计.csv')}`,
+  });
+  res.end(body);
+});
+
+
 /* ---------- 导入备份 ---------- */
 route('POST', '/api/import', (ctx) => {
   const b = ctx.body || {};
@@ -790,7 +1041,7 @@ route('POST', '/api/import', (ctx) => {
   if (exist > 0 && ctx.query.get('force') !== '1') {
     throw new HttpError(400, '当前已有数据，为防止重复导入被拒绝。请先用空数据文件夹再导入');
   }
-  let n = 0, nAtt = 0, nGroups = 0;
+  let n = 0, nAtt = 0, nGroups = 0, nJl = 0, nJlE = 0;
   db.exec('BEGIN'); // 整体导入：任何一步失败就整体回滚，不残留半截数据
   try {
     const insG = db.prepare('INSERT INTO groups (name, platform, color, remark, ext_key, created_at) VALUES (?, ?, ?, ?, ?, ?)');
@@ -841,16 +1092,60 @@ route('POST', '/api/import', (ctx) => {
         nAtt++;
       }
     }
+    // 恢复接龙与接龙记录（id 为随机字符串主键，原样保留；记录按 jielong_id 直接挂回）
+    if (Array.isArray(b.jielongs)) {
+    // roster / fields 允许存成 JSON 文本或数组对象，统一转成合法 JSON 文本入库
+    const asJsonText = (v, fallback) => {
+      if (typeof v === 'string') { try { JSON.parse(v); return v; } catch (e) { return fallback; } }
+      if (v == null) return fallback;
+      try { return JSON.stringify(v); } catch (e) { return fallback; }
+    };
+    const insJ = db.prepare(`INSERT INTO jielongs (id, title, description, deadline, roster, fields, allow_outside, closed, admin_token, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const jlIds = new Set();
+    for (const g of b.jielongs) {
+      const id = /^[a-z0-9]{3,32}$/.test(String(g.id || '')) ? String(g.id) : JL.genId(7);
+      insJ.run(id,
+        sField(g.title, 60) || '未命名接龙',
+        sField(g.description, 1000),
+        cleanDT(g.deadline) || '',
+        asJsonText(g.roster, '[]'),
+        asJsonText(g.fields, '[]'),
+        g.allow_outside === 0 || g.allowOutside === false ? 0 : 1,
+        g.closed ? 1 : 0,
+        sField(g.admin_token, 64),
+        Math.max(0, Number(g.created_at) || Date.now()));
+      jlIds.add(id);
+      nJl++;
+    }
+    if (Array.isArray(b.jielongEntries)) {
+      const insJE = db.prepare(`INSERT INTO jielong_entries (jielong_id, rid, sid, name, values_json, remark, outside, time, seq)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      for (const e of b.jielongEntries) {
+        if (!jlIds.has(String(e.jielong_id || ''))) continue; // 对应接龙不在本次备份中，跳过
+        insJE.run(String(e.jielong_id),
+          Number.isInteger(e.rid) ? e.rid : null,
+          sField(e.sid, 40),
+          sField(e.name, 60),
+          asJsonText(e.values_json, '{}').slice(0, 5000),
+          sField(e.remark, 300),
+          e.outside ? 1 : 0,
+          Math.max(0, Number(e.time) || 0),
+          Math.max(0, Number(e.seq) || 0));
+        nJlE++;
+      }
+    }
+  }
     nGroups = Object.keys(gmap).length;
     db.exec('COMMIT');
   } catch (e) {
     db.exec('ROLLBACK');
     throw new HttpError(500, '导入失败已整体回滚（' + e.message + '），数据库未变动');
   }
-  const summary = `${nGroups} 个群、${n} 条信息、${nAtt} 条附件记录`;
+  const summary = `${nGroups} 个群、${n} 条信息、${nAtt} 条附件记录、${nJl} 个接龙、${nJlE} 条接龙记录`;
   console.log('导入备份：' + summary);
   log('导入备份：' + summary);
-  return { ok: true, groups: nGroups, imported: n, attachments: nAtt };
+  return { ok: true, groups: nGroups, imported: n, attachments: nAtt, jielongs: nJl, jielongEntries: nJlE };
 });
 
 /* ---------- 导出 .ics 日历（截止时间进手机系统日历） ---------- */
@@ -932,6 +1227,9 @@ route('GET', '/api/export', (ctx) => {
     groups: db.prepare('SELECT * FROM groups ORDER BY id').all(),
     messages: db.prepare('SELECT * FROM messages ORDER BY id').all(),
     attachments: db.prepare('SELECT id, message_id, orig_name, stored_name, size, mime, views, downloads, created_at FROM attachments ORDER BY id').all(),
+    // 接龙：id 是随机字符串主键，导出/导入可原样保留，记录按 jielong_id 直接挂回
+    jielongs: db.prepare('SELECT id, title, description, deadline, roster, fields, allow_outside, closed, admin_token, created_at FROM jielongs ORDER BY created_at, id').all(),
+    jielongEntries: db.prepare('SELECT jielong_id, rid, sid, name, values_json, remark, outside, time, seq FROM jielong_entries ORDER BY jielong_id, seq, id').all(),
   };
   const body = JSON.stringify(dump, null, 2);
   const res = ctx.res;
@@ -951,6 +1249,7 @@ function serveStatic(req, res, pathname) {
   if (p === '/' || p === '') p = '/index.html';
   if (p === '/quick') p = '/quick.html';
   if (p === '/login') p = '/login.html';
+  if (/^\/j\/[a-z0-9]+$/i.test(p)) p = '/jielong-join.html'; // 学生接龙页，接龙 ID 由页面脚本从路径解析
   let fp = path.normalize(path.join(PUBLIC_DIR, p));
   if (fp !== PUBLIC_DIR && !fp.startsWith(PUBLIC_DIR + path.sep)) { res.writeHead(403); res.end('Forbidden'); return; }
   if (!fs.existsSync(fp) || !fs.statSync(fp).isFile()) {
@@ -975,8 +1274,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     // 访问门禁：设了管理密码时，浏览（页面与查询接口）对所有人开放——学生可看；
     // 写入类操作需要管理员登录。机器人凭接入令牌通行（ingest 自带令牌校验，不在此拦截）。
+    // /api/jielong/* 同理白名单放行：浏览公开、学生提交无需登录，管理操作由接口自己校验
+    // 管理员登录或该接龙的管理令牌（可委托给班委）。
     // /api/config 含接入令牌、/api/export 是全量备份，仅管理员可读；/api/parse 无副作用，保持开放。
     if (CONFIG.password && !authOk(req)
+      && !pathname.startsWith('/api/jielong')
       && !['/api/login', '/api/logout', '/api/me', '/api/health', '/api/ingest', '/api/parse',
         '/api/onebot/report', '/api/onebot'].includes(pathname)
       && (req.method !== 'GET' || ['/api/config', '/api/export', '/api/inbox'].includes(pathname))) {

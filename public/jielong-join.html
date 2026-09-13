@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>接龙 · 信息汇总</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<style>
+  :root{
+    --pri:#4f6ef2; --pri-d:#3d5bd9; --bg:#f4f6fb; --card:#fff;
+    --tx:#1f2937; --tx2:#6b7280; --bd:#e5e9f2;
+    --ok:#0d9668; --warn:#ea6a12; --danger:#ef4444;
+  }
+  :root[data-theme="dark"]{
+    --pri:#5b78ff; --pri-d:#4a66e8; --bg:#141922; --card:#1d2430;
+    --tx:#e6eaf2; --tx2:#8a94a6; --bd:#2b3442;
+    --ok:#4ade80; --warn:#fdba74;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.65 system-ui,-apple-system,"Segoe UI","PingFang SC","HarmonyOS Sans SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:680px;margin:0 auto;padding:14px 14px 46px}
+  .top{padding:12px 4px 10px;display:flex;align-items:center;gap:8px}
+  .top a{margin-left:auto;font-size:13px;color:var(--pri);text-decoration:none}
+  .logo{font-size:18px;font-weight:700}
+  .card{background:var(--card);border-radius:14px;padding:18px;box-shadow:0 1px 3px rgba(16,24,40,.07);margin-bottom:14px}
+  .card h1{font-size:21px;margin:6px 0;line-height:1.4;word-break:break-word}
+  .act-desc{white-space:pre-wrap;color:var(--tx2);margin:6px 0;font-size:14.5px}
+  .act-meta{font-size:13px;color:var(--tx2);display:flex;gap:8px;flex-wrap:wrap}
+  .badge{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600}
+  .badge.on{background:#e6f8f1;color:#0d9668}
+  :root[data-theme="dark"] .badge.on{background:rgba(16,185,129,.16);color:#4ade80}
+  .badge.off{background:#eef2f6;color:#64748b}
+  .badge.warn{background:#fef3c7;color:#d97706}
+  .prog-num{font-size:14px;color:var(--tx2);margin-bottom:8px}
+  .prog-num b{font-size:30px;color:var(--tx);font-weight:700}
+  .prog-num .sep{margin:0 4px;font-size:20px}
+  .prog-num .unit{margin-left:8px;font-size:13.5px}
+  .progress{height:10px;background:var(--bd);border-radius:99px;overflow:hidden}
+  .progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,#4f6ef2,#3ddc84);border-radius:99px;transition:width .4s}
+  .prog-sub{font-size:13px;color:var(--tx2);margin:8px 0 4px}
+  .toggle-link{display:inline-block;margin:8px 16px 0 0;font-size:14px;color:var(--pri);cursor:pointer;text-decoration:none}
+  #entryList,#missList{margin-top:10px;border-top:1px dashed var(--bd);padding-top:8px}
+  .entry-line{padding:5px 0;font-size:14px;border-bottom:1px dashed var(--bd)}
+  .entry-txt{color:var(--tx2);margin-left:6px}
+  .chip{display:inline-block;padding:3px 12px;border-radius:999px;background:#fef3c7;color:#d97706;font-size:13px;margin:3px 4px 3px 0}
+  :root[data-theme="dark"] .chip{background:rgba(245,158,11,.16);color:#fcd34d}
+  .fl{display:block;font-size:13px;color:var(--tx2);margin:14px 0 6px}
+  .req{color:var(--danger)}
+  input[type=text],textarea,select{width:100%;padding:10px 12px;border:1px solid var(--bd);border-radius:10px;font-size:15px;font-family:inherit;background:var(--card);color:var(--tx)}
+  textarea{resize:vertical}
+  input:focus,textarea:focus,select:focus{outline:none;border-color:var(--pri)}
+  .name-wrap{position:relative}
+  .sugg{position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--card);border:1px solid var(--bd);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.16);z-index:20;max-height:238px;overflow:auto}
+  .sugg div{padding:10px 14px;cursor:pointer;font-size:15px}
+  .sugg div:hover{background:rgba(79,110,242,.08)}
+  .match-hint{font-size:13px;min-height:20px;margin-top:6px}
+  .ok-t{color:var(--ok)} .warn-t{color:var(--warn)}
+  .locked-hint{font-size:13px;background:rgba(13,150,104,.08);border:1px solid rgba(13,150,104,.3);border-radius:10px;padding:8px 12px;margin-top:8px}
+  .locked-hint a{color:var(--pri);cursor:pointer}
+  .ok-banner{background:rgba(13,150,104,.08);border:1px solid rgba(13,150,104,.3);color:var(--ok);border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:6px}
+  .warn-banner{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.35);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:6px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;background:var(--pri);color:#fff;border:none;border-radius:10px;padding:12px 18px;font-size:15.5px;font-weight:600;cursor:pointer;width:100%;margin-top:16px}
+  .btn:disabled{opacity:.55;cursor:default}
+  .btn:active{background:var(--pri-d)}
+  .privacy-tip{font-size:12px;color:var(--tx2);margin-top:10px;text-align:center}
+  .qtheme{position:fixed;top:12px;right:12px;width:36px;height:36px;border-radius:50%;border:1px solid var(--bd);background:var(--card);font-size:15px;line-height:1;z-index:5}
+  .toast{position:fixed;left:50%;bottom:36px;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 18px;border-radius:10px;font-size:14px;z-index:200;display:none;max-width:86vw;text-align:center}
+  .errbox h2{margin:4px 0 8px}
+  .errbox p{color:var(--tx2);font-size:13.5px;margin:4px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top"><div class="logo">🐉 班级接龙 · 信息汇总</div><a href="/">打开信息汇总 →</a></header>
+
+  <div class="card errbox" id="errBox" style="display:none">
+    <h2>😅 打不开这个接龙</h2>
+    <p id="errMsg">接龙不存在或链接有误</p>
+    <p>链接可能有误，或该接龙已被发起人删除。</p>
+  </div>
+
+  <div id="main" style="display:none">
+    <div class="card">
+      <span class="badge on" id="statusBadge"></span>
+      <h1 id="actTitle"></h1>
+      <p id="actDesc" class="act-desc"></p>
+      <div class="act-meta" id="actMeta"></div>
+    </div>
+
+    <div class="card">
+      <div class="prog-num" id="progNum"></div>
+      <div class="progress"><i id="progBar"></i></div>
+      <div class="prog-sub" id="progSub"></div>
+      <div id="toggleEntries" class="toggle-link" style="display:none">已接龙名单 ▾</div>
+      <div id="toggleMiss" class="toggle-link" style="display:none">未接龙名单 ▾</div>
+      <div id="entryList" style="display:none"></div>
+      <div id="missList" style="display:none"></div>
+    </div>
+
+    <div class="card">
+      <h2 id="formTitle" style="font-size:16px;margin:0 0 4px">填写接龙</h2>
+      <div id="closedBanner" class="warn-banner" style="display:none"></div>
+      <div id="okBanner" class="ok-banner" style="display:none"></div>
+      <div id="formBody">
+        <label class="fl"><span id="nameLabel">你的姓名</span> <span class="req">*</span></label>
+        <div class="name-wrap">
+          <input type="text" id="name" maxlength="60" placeholder="输入姓名，可从名单中选择" autocomplete="off">
+          <div class="sugg" id="sugg" style="display:none"></div>
+        </div>
+        <div class="match-hint" id="matchHint"></div>
+        <div class="locked-hint" id="lockedHint" style="display:none"></div>
+        <div id="dynFields"></div>
+        <label class="fl">备注留言（选填）</label>
+        <textarea id="remark" rows="2" maxlength="300" placeholder="想补充的话（选填）"></textarea>
+        <button class="btn" id="submitBtn" type="button">提交接龙</button>
+        <div class="privacy-tip">提交后如需修改，改完再次提交即可覆盖。</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toastEl"></div>
+<button class="qtheme" id="q-theme" title="深色 / 浅色模式">🌙</button>
+<script>
+'use strict';
+const $ = (s) => document.querySelector(s);
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+function pad2(n){return String(n).padStart(2,'0');}
+function fmtTime(ts){if(!ts)return '';const d=new Date(ts);return (d.getMonth()+1)+'月'+d.getDate()+'日 '+pad2(d.getHours())+':'+pad2(d.getMinutes());}
+function fmtDT(s){if(!s)return '';const d=new Date(String(s).replace(' ','T'));return isNaN(d)?'':d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+' '+pad2(d.getHours())+':'+pad2(d.getMinutes());}
+function fmtRemain(ms){const m=Math.max(0,Math.floor(ms/60000));const d=Math.floor(m/1440),h=Math.floor((m%1440)/60),mm=m%60;if(d>0)return d+' 天 '+h+' 小时';if(h>0)return h+' 小时 '+mm+' 分钟';return mm+' 分钟';}
+let toastTimer=null;
+function toast(msg){const t=$('#toastEl');t.textContent=msg;t.style.display='block';clearTimeout(toastTimer);toastTimer=setTimeout(()=>{t.style.display='none';},2200);}
+async function api(url,opt){
+  let r;
+  try{r=await fetch(url,opt);}
+  catch(_){throw new Error('网络异常，请稍后重试');}
+  let j=null;
+  try{j=await r.json();}catch(_){}
+  if(!r.ok){throw new Error((j&&j.error)||('请求失败('+r.status+')'));}
+  return j;
+}
+
+const ACT_ID=((location.pathname.match(/\/j\/([a-z0-9]+)/i)||[])[1]||'').toLowerCase();
+let act=null;
+let my=null;          // 我上次提交的身份 {rid,name}
+let pickedRid=null;   // 从下拉中选中的名单槽位
+let showEntries=false;
+let showMiss=false;
+let lockedRid=null;   // 专属链接锁定的身份
+const urlRid=(()=>{
+  const raw=new URLSearchParams(location.search).get('u');
+  if(raw==null||raw==='')return null; // 注意 Number(null)===0，不能直接转
+  const n=Number(raw);
+  return Number.isInteger(n)&&n>=0?n:null;
+})();
+try{my=JSON.parse(localStorage.getItem('infohub-jielong-my-'+ACT_ID)||'null');}catch(_){my=null;}
+if(typeof my==='string')my={rid:null,name:my};
+
+init();
+async function init(){
+  if(!ACT_ID)return showError('接龙不存在或链接有误');
+  try{act=await api('/api/jielong/'+ACT_ID);}
+  catch(e){return showError(e.message);}
+  document.title=act.title+' · 接龙';
+  $('#main').style.display='';
+  renderHead();
+  renderStatus();
+  renderProgress();
+  renderLists();
+  renderForm();
+  setInterval(refresh,10000);
+}
+function showError(msg){$('#errBox').style.display='';$('#errMsg').textContent=msg;}
+
+const hasIds=()=>(act.roster||[]).some(r=>r.id);
+const slotLabel=r=>(r.id?r.id+' '+r.name:r.name);
+const identityLabel=e=>(e.id?e.name+'（'+e.id+'）':e.name);
+function isIdToken(t){return /^\d{1,12}$/.test(t);}
+// 与服务端一致：学号、姓名、"学号+姓名"均可命中
+function findHits(q){
+  const qq=String(q||'').trim();
+  if(!qq||!act.roster.length)return[];
+  let hits=act.roster.map((r,i)=>({r,i})).filter(x=>x.r.name===qq||(x.r.id&&x.r.id===qq));
+  if(!hits.length&&/\s/.test(qq)){
+    const parts=qq.split(/\s+/);
+    const idPart=parts.find(isIdToken);
+    const namePart=parts.find(p=>p!==idPart);
+    if(idPart&&namePart)hits=act.roster.map((r,i)=>({r,i})).filter(x=>x.r.name===namePart&&x.r.id===idPart);
+  }
+  return hits;
+}
+
+function renderHead(){
+  $('#actTitle').textContent=act.title;
+  $('#actDesc').textContent=act.description||'';
+  $('#actDesc').style.display=act.description?'':'none';
+  const metas=[];
+  if(act.deadline){
+    metas.push('截止：'+fmtDT(act.deadline));
+    const rem=new Date(String(act.deadline).replace(' ','T')).getTime()-Date.now();
+    if(rem>0&&!act.closedNow){
+      const urgent=rem<2*60*60*1000?'<span class="warn-t">':'<span>';
+      metas.push(urgent+'距截止还有 '+fmtRemain(rem)+'</span>');
+    }
+  }
+  metas.push('发起于 '+fmtTime(act.createdAt));
+  $('#actMeta').innerHTML=metas.join(' · ');
+}
+function renderStatus(){
+  const b=$('#statusBadge');
+  if(act.closedNow||act.closed){b.textContent='已截止';b.className='badge off';}
+  else{b.textContent='接龙进行中';b.className='badge on';}
+}
+function renderProgress(){
+  if(act.hasRoster){
+    $('#progNum').innerHTML='<b>'+act.done+'</b><span class="sep">/</span><span>'+act.total+'</span><span class="unit">人已接龙</span>';
+    $('#progBar').style.width=(act.total?Math.round(act.done/act.total*100):0)+'%';
+    const mCnt=(act.missing||[]).length;
+    $('#progSub').textContent=(mCnt?'还有 '+mCnt+' 人未接龙':'全部已接龙 🎉')+(act.count>act.done?'，另有 '+(act.count-act.done)+' 人名单外接龙':'');
+  }else{
+    $('#progNum').innerHTML='<b>'+act.count+'</b><span class="unit">人已接龙</span>';
+    $('#progBar').style.width=(act.count?100:0)+'%';
+    $('#progSub').textContent='未设置名单，仅统计接龙人数';
+  }
+}
+function entryLine(e,i){
+  const parts=act.fields.map(f=>e.values[f.key]).filter(Boolean);
+  let txt=parts.join('，');
+  if(e.remark)txt+=(txt?'，':'')+'备注：'+e.remark;
+  return '<div class="entry-line">'+(i+1)+'. <b>'+esc(identityLabel(e))+'</b>'+
+    (e.outside?' <span class="badge warn">名单外</span>':'')+
+    (txt?'<span class="entry-txt">'+esc(txt)+'</span>':'')+
+    '</div>';
+}
+function renderLists(){
+  $('#toggleEntries').style.display=act.entries.length?'':'none';
+  $('#entryList').innerHTML=act.entries.map(entryLine).join('');
+  $('#entryList').style.display=showEntries&&act.entries.length?'':'none';
+  $('#toggleEntries').textContent=showEntries?'已接龙名单 ▴':'已接龙名单 ▾';
+  const missing=act.missing||[];
+  $('#toggleMiss').style.display=(act.hasRoster&&missing.length)?'':'none';
+  $('#missList').innerHTML=missing.map(r=>'<span class="chip">'+esc(slotLabel(r))+'</span>').join('');
+  $('#missList').style.display=showMiss&&act.hasRoster&&missing.length?'':'none';
+  $('#toggleMiss').textContent=showMiss?'未接龙名单 ▴':'未接龙名单 ▾';
+}
+
+/* ---------- 表单 ---------- */
+function renderForm(){
+  if(act.closedNow||act.closed){
+    $('#closedBanner').style.display='';
+    $('#closedBanner').textContent=act.closed
+      ?'发起人已停止本次接龙，不能再提交了。'
+      :(act.deadline?'本接龙已于 '+fmtDT(act.deadline)+' 截止，感谢大家配合。':'本接龙已截止，感谢大家配合。');
+    $('#formBody').style.display='none';
+    return;
+  }
+  const withIds=hasIds();
+  $('#nameLabel').textContent=withIds?'你的学号或姓名':'你的姓名';
+  $('#name').placeholder=withIds?'输入学号或姓名，从名单中选择':'输入姓名，可从名单中选择';
+
+  const box=$('#dynFields');
+  box.innerHTML='';
+  act.fields.forEach(f=>{
+    const w=document.createElement('div');
+    let inner='<label class="fl">'+esc(f.label)+(f.required?' <span class="req">*</span>':'')+'</label>';
+    if(f.type==='text')inner+='<input type="text" data-fkey="'+f.key+'" maxlength="300" placeholder="请输入'+esc(f.label)+'">';
+    else if(f.type==='textarea')inner+='<textarea rows="2" data-fkey="'+f.key+'" maxlength="300" placeholder="请输入'+esc(f.label)+'"></textarea>';
+    else inner+='<select data-fkey="'+f.key+'"><option value="">请选择</option>'+f.options.map(o=>'<option>'+esc(o)+'</option>').join('')+'</select>';
+    w.innerHTML=inner;
+    box.appendChild(w);
+  });
+
+  // 专属链接：URL 带 u=槽位 时锁定身份
+  if(lockedRid==null&&urlRid!=null&&act.roster.length&&urlRid<act.roster.length)lockedRid=urlRid;
+  const lk=$('#lockedHint');
+  const nameInput=$('#name');
+  if(lockedRid!=null&&act.roster[lockedRid]){
+    pickedRid=lockedRid;
+    nameInput.value=slotLabel(act.roster[lockedRid]);
+    nameInput.readOnly=true;
+    lk.style.display='';
+    lk.innerHTML='当前以 <b>'+esc(slotLabel(act.roster[lockedRid]))+'</b> 的身份接龙。　<a id="unlockBtn">不是本人？解锁</a>';
+    lk.querySelector('#unlockBtn').addEventListener('click',()=>{
+      lockedRid=null;pickedRid=null;
+      nameInput.readOnly=false;nameInput.value='';
+      lk.style.display='none';
+      updateMatchHint();
+      history.replaceState(null,'','/j/'+ACT_ID);
+    });
+  }else{
+    lk.style.display='none';
+    nameInput.readOnly=false;
+  }
+
+  const myEntry=(()=>{
+    if(lockedRid!=null)return act.entries.find(e=>!e.outside&&e.rid===lockedRid)||null;
+    if(!my)return null;
+    if(my.rid!=null)return act.entries.find(e=>!e.outside&&e.rid===my.rid)||null;
+    return act.entries.find(e=>e.name===my.name)||null;
+  })();
+  if(myEntry){
+    $('#formTitle').textContent='修改接龙信息';
+    $('#submitBtn').textContent='更新我的接龙';
+    if(lockedRid==null){
+      pickedRid=myEntry.outside?null:myEntry.rid;
+      nameInput.value=(myEntry.outside||myEntry.rid==null||!act.roster[myEntry.rid])?myEntry.name:slotLabel(act.roster[myEntry.rid]);
+    }
+    act.fields.forEach(f=>{
+      const el=document.querySelector('[data-fkey="'+f.key+'"]');
+      if(el)el.value=myEntry.values[f.key]||'';
+    });
+    $('#remark').value=myEntry.remark||'';
+  }
+  updateMatchHint();
+}
+
+/* ---------- 姓名匹配 ---------- */
+const nameInput=$('#name'),sugg=$('#sugg');
+nameInput.addEventListener('input',()=>{pickedRid=null;updateSugg();updateMatchHint();});
+nameInput.addEventListener('blur',()=>setTimeout(()=>{sugg.style.display='none';},150));
+function updateSugg(){
+  const q=nameInput.value.trim();
+  if(!q||!act.roster.length){sugg.style.display='none';return;}
+  const m=act.roster.map((r,i)=>({r,i}))
+    .filter(x=>slotLabel(x.r).includes(q)||x.r.name.includes(q)||(x.r.id&&x.r.id.includes(q)))
+    .slice(0,8);
+  if(!m.length){sugg.style.display='none';return;}
+  sugg.innerHTML=m.map(x=>'<div data-i="'+x.i+'">'+esc(slotLabel(x.r))+'</div>').join('');
+  sugg.style.display='';
+  sugg.querySelectorAll('div').forEach(d=>d.addEventListener('mousedown',ev=>{
+    ev.preventDefault();
+    pickedRid=+d.dataset.i;
+    nameInput.value=slotLabel(act.roster[pickedRid]);
+    sugg.style.display='none';
+    updateMatchHint();
+  }));
+}
+function updateMatchHint(){
+  const q=nameInput.value.trim();
+  const h=$('#matchHint');
+  if(!q||!act.roster.length){h.innerHTML='';return;}
+  if(pickedRid!=null&&act.roster[pickedRid]){
+    h.innerHTML='<span class="ok-t">✓ 与名单匹配：'+esc(identityLabel({id:act.roster[pickedRid].id,name:act.roster[pickedRid].name}))+'</span>';
+    return;
+  }
+  const hits=findHits(q);
+  if(hits.length===1){
+    pickedRid=hits[0].i;
+    h.innerHTML='<span class="ok-t">✓ 与名单匹配：'+esc(identityLabel(hits[0].r))+'</span>';
+    return;
+  }
+  if(hits.length>1){h.innerHTML='<span class="warn-t">名单中有重名，请从下拉列表中选择带学号的一项</span>';return;}
+  if(!act.allowOutside)h.innerHTML='<span class="warn-t">「'+esc(q)+'」不在名单中，无法提交，请核对</span>';
+  else h.innerHTML='<span class="warn-t">「'+esc(q)+'」不在名单中，将以“名单外”提交</span>';
+}
+
+/* ---------- 提交 ---------- */
+$('#submitBtn').addEventListener('click',async()=>{
+  const name=nameInput.value.trim();
+  if(!name){toast(hasIds()?'请填写学号或姓名':'请填写你的姓名');nameInput.focus();return;}
+  if(act.roster.length&&pickedRid==null&&findHits(name).length===0&&!act.allowOutside){
+    toast('「'+name+'」不在名单中，无法提交');return;
+  }
+  const values={};
+  document.querySelectorAll('[data-fkey]').forEach(el=>{values[el.dataset.fkey]=el.value.trim();});
+  const btn=$('#submitBtn');
+  btn.disabled=true;btn.textContent='提交中…';
+  try{
+    const r=await api('/api/jielong/'+ACT_ID+'/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rid:pickedRid,name,values,remark:$('#remark').value.trim()})});
+    my=r.entry;
+    localStorage.setItem('infohub-jielong-my-'+ACT_ID,JSON.stringify(my));
+    $('#okBanner').style.display='';
+    $('#okBanner').textContent=r.updated?'✓ 已更新你的接龙信息':'🎉 接龙成功！你是第 '+r.position+' 位';
+    $('#formTitle').textContent='修改接龙信息';
+    $('#submitBtn').textContent='更新我的接龙';
+    if(r.entry&&r.entry.rid!=null){
+      pickedRid=r.entry.rid;
+      if(act.roster[r.entry.rid])nameInput.value=slotLabel(act.roster[r.entry.rid]);
+      updateMatchHint();
+    }
+    await refresh();
+    $('#okBanner').scrollIntoView({behavior:'smooth',block:'center'});
+  }catch(e){
+    toast(e.message);
+    btn.textContent=my?'更新我的接龙':'提交接龙';
+  }
+  btn.disabled=false;
+});
+
+$('#toggleEntries').addEventListener('click',()=>{showEntries=!showEntries;renderLists();});
+$('#toggleMiss').addEventListener('click',()=>{showMiss=!showMiss;renderLists();});
+
+async function refresh(){
+  let a2;
+  try{a2=await api('/api/jielong/'+ACT_ID);}catch(_){return;}
+  act=a2;
+  renderHead();
+  renderStatus();
+  renderProgress();
+  renderLists();
+  if((act.closedNow||act.closed)&&$('#formBody').style.display!=='none')renderForm();
+}
+
+/* ---------- 主题 ---------- */
+(function(){
+  const t=localStorage.getItem('infohub-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+  apply(t);
+  function apply(t){document.documentElement.dataset.theme=t;localStorage.setItem('infohub-theme',t);$('#q-theme').textContent=t==='dark'?'☀️':'🌙';}
+  $('#q-theme').addEventListener('click',()=>apply(document.documentElement.dataset.theme==='dark'?'light':'dark'));
+})();
+</script>
+</body>
+</html>

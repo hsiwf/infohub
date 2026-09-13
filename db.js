@@ -64,9 +64,34 @@ CREATE TABLE IF NOT EXISTS inbox (
   received_at TEXT DEFAULT '',
   created_at TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS jielongs (
+  id TEXT PRIMARY KEY,
+  title TEXT DEFAULT '',
+  description TEXT DEFAULT '',
+  deadline TEXT DEFAULT '',
+  roster TEXT DEFAULT '[]',
+  fields TEXT DEFAULT '[]',
+  allow_outside INTEGER DEFAULT 1,
+  closed INTEGER DEFAULT 0,
+  admin_token TEXT DEFAULT '',
+  created_at INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS jielong_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  jielong_id TEXT NOT NULL,
+  rid INTEGER,
+  sid TEXT DEFAULT '',
+  name TEXT DEFAULT '',
+  values_json TEXT DEFAULT '{}',
+  remark TEXT DEFAULT '',
+  outside INTEGER DEFAULT 0,
+  time INTEGER DEFAULT 0,
+  seq INTEGER DEFAULT 0
+);
 CREATE INDEX IF NOT EXISTS idx_messages_group ON messages(group_id);
 CREATE INDEX IF NOT EXISTS idx_messages_deadline ON messages(deadline);
 CREATE INDEX IF NOT EXISTS idx_att_message ON attachments(message_id);
+CREATE INDEX IF NOT EXISTS idx_jl_entries ON jielong_entries(jielong_id);
 `);
 
 // 轻量迁移：老库补 ext_key 列（QQ 群号等外部标识，机器人上报自动归群用）
@@ -79,5 +104,8 @@ db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_ext ON groups(ext_key) WHE
 const acols = db.prepare('PRAGMA table_info(attachments)').all();
 if (!acols.some((c) => c.name === 'views')) db.exec('ALTER TABLE attachments ADD COLUMN views INTEGER DEFAULT 0');
 if (!acols.some((c) => c.name === 'downloads')) db.exec('ALTER TABLE attachments ADD COLUMN downloads INTEGER DEFAULT 0');
+// 轻量迁移：接龙记录补 seq 列（保持首次提交顺序，修改后不重排）
+const jecols = db.prepare('PRAGMA table_info(jielong_entries)').all();
+if (!jecols.some((c) => c.name === 'seq')) db.exec('ALTER TABLE jielong_entries ADD COLUMN seq INTEGER DEFAULT 0');
 
 module.exports = { db, DATA_DIR, UPLOAD_DIR };

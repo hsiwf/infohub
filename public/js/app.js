@@ -136,6 +136,9 @@ const state = {
   cal: { y: new Date().getFullYear(), m: new Date().getMonth() + 1 },
   calByDay: {},
   dividerShown: false,
+  jl: null,        // 接龙详情状态 {id, token}；null = 列表
+  jlBanner: false, // 创建成功横幅（只显示一次）
+  jlQuiet: false,  // 定时刷新中（不滚动）
 };
 
 /* ========= 只读访客 ========= */
@@ -720,7 +723,7 @@ async function loadStats() {
       ${me.authRequired ? (me.loggedIn
         ? '<button class="ghost" id="btn-logout" style="margin-left:10px">🚪 退出登录</button>'
         : '<a class="ghost" href="/login" style="margin-left:10px;text-decoration:none;display:inline-block">🔐 管理员登录</a>') : ''}
-      <p class="hint">导入建议只在空数据时使用（已有数据时服务器会拒绝，防止重复）。JSON 备份会恢复附件记录，但不含附件文件本身——完整备份请复制整个 data/ 文件夹。</p>
+      <p class="hint">导入建议只在空数据时使用（已有数据时服务器会拒绝，防止重复）。JSON 备份会恢复附件记录与接龙数据，但不含附件文件本身——完整备份请复制整个 data/ 文件夹。</p>
     </div>`;
   const copyBtn = $('#btn-copy-ingest');
   if (copyBtn) copyBtn.addEventListener('click', async () => {
@@ -761,7 +764,7 @@ async function loadStats() {
       if (!Array.isArray(data.groups) || !Array.isArray(data.messages)) throw new Error('不是有效的备份文件');
       if (!confirm(`将导入 ${data.groups.length} 个群、${data.messages.length} 条信息。\n若当前已有数据，服务器会拒绝以防重复。继续吗？`)) return;
       const r = await api('/api/import', { method: 'POST', body: data });
-      toast(`导入成功：${r.groups} 个群、${r.imported} 条信息${r.attachments ? `、${r.attachments} 条附件` : ''} ✓`);
+      toast(`导入成功：${r.groups} 个群、${r.imported} 条信息${r.attachments ? `、${r.attachments} 条附件` : ''}${r.jielongs ? `、${r.jielongs} 个接龙` : ''} ✓`);
       refresh();
     } catch (err) {
       toast('导入失败：' + err.message, 'error');
@@ -1014,13 +1017,493 @@ function openGroupModal(group) {
   });
 }
 
+/* ========= 班级接龙（自「接龙小助手」并入） ========= */
+let jlTimer = null;
+function jlStopTimer() { if (jlTimer) { clearInterval(jlTimer); jlTimer = null; } }
+
+function jlMine() {
+  try { return JSON.parse(localStorage.getItem('infohub-jielong-mine') || '[]'); } catch (e) { return []; }
+}
+function jlMineSave(list) {
+  try { localStorage.setItem('infohub-jielong-mine', JSON.stringify(list.slice(0, 50))); } catch (e) { /* 忽略 */ }
+}
+function jlMineRemember(id, token, title) {
+  jlMineSave([{ id, token, title, ts: Date.now() }, ...jlMine().filter((x) => x.id !== id)]);
+}
+function jlTokenOf(id) {
+  const it = jlMine().find((x) => x.id === id);
+  return it ? it.token : '';
+}
+function jlSlotLabel(r) { return r.id ? r.id + ' ' + r.name : r.name; }
+function jlIdentity(e) { return e.id ? e.name + '（' + e.id + '）' : e.name; }
+function jlFmtTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+function jlIsIdToken(t) { return /^\d{1,12}$/.test(t); }
+// 与服务端一致的名单解析（发起/编辑时实时预览）
+function jlParseRoster(raw, keepId) {
+  const result = { list: [], hasIds: false };
+  if (!raw) return result;
+  let pendingId = null, lastNameNoId = -1;
+  const seen = new Set();
+  const push = (id, name) => {
+    name = String(name).replace(/[，,。;；、.]+$/, '').trim();
+    if (!name) return;
+    id = id ? String(id) : null;
+    const key = (id || '') + '|' + name;
+    if (seen.has(key)) return;
+    seen.add(key);
+    if (id) { result.hasIds = true; lastNameNoId = -1; }
+    else lastNameNoId = result.list.length;
+    result.list.push({ id, name });
+  };
+  for (let line of String(raw).split(/[\n\r]+/)) {
+    line = line
+      .replace(/^[([（【]?\d{1,4}\s*[.、)】）\]]\s*/, '')
+      .replace(/(^|\s)[([（【]?\d{1,4}\s*[.、)】）\]]/g, '$1')
+      .replace(/^[-*•·]+\s*/, '')
+      .trim();
+    if (!line) continue;
+    for (let seg of line.split(/[,，、;；]+/)) {
+      seg = seg.trim();
+      if (!seg) continue;
+      const tokens = seg.split(/\s+/).filter(Boolean);
+      const idIdx = tokens.findIndex(jlIsIdToken);
+      if (tokens.length === 1) {
+        const t = tokens[0];
+        if (jlIsIdToken(t)) {
+          if (keepId) {
+            if (lastNameNoId >= 0) { result.list[lastNameNoId].id = t; result.hasIds = true; lastNameNoId = -1; }
+            else pendingId = t;
+          }
+          continue;
+        }
+        push(keepId ? pendingId : null, t);
+        pendingId = null;
+      } else if (idIdx >= 0) {
+        const idTok = tokens[idIdx];
+        tokens.filter((_, i) => i !== idIdx).forEach((n, i) => push(keepId && i === 0 ? idTok : null, n));
+        pendingId = null;
+      } else {
+        tokens.forEach((t) => { push(keepId ? pendingId : null, t); pendingId = null; });
+      }
+    }
+  }
+  return result;
+}
+// 复制：优先 clipboard API，http 局域网等非安全上下文自动降级
+async function jlCopy(text, okMsg) {
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { /* 忽略 */ }
+    document.body.removeChild(ta);
+    toast(ok ? (okMsg || '已复制') : '复制失败，请长按手动复制', ok ? '' : 'error');
+    return ok;
+  };
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); toast(okMsg || '已复制'); return; }
+  } catch (e) { /* 降级 */ }
+  fallback();
+}
+function jlQr(text, box) {
+  if (typeof qrcode !== 'function') { box.innerHTML = '<p class="empty-mini">二维码组件未加载</p>'; return; }
+  try {
+    if (qrcode.stringToBytesFuncs && qrcode.stringToBytesFuncs['UTF-8']) qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
+    const qr = qrcode(0, 'M');
+    qr.addData(String(text));
+    qr.make();
+    box.innerHTML = qr.createSvgTag(4, 0);
+  } catch (e) { box.innerHTML = '<p class="empty-mini">二维码生成失败</p>'; }
+}
+function openJlQrModal(url) {
+  openModal(`<h2>📱 扫码接龙</h2><div class="qrbox">${''}</div>
+    <p class="hint" style="text-align:center">手机扫码打开接龙页，或复制链接发到班群</p>
+    <div class="modal-foot"><button class="ghost" id="btn-cancel">关闭</button></div>`);
+  jlQr(url, $('#modal-root .qrbox'));
+}
+
+const jlStatusBadge = (a) => {
+  if (a.manuallyClosed || a.closed) return '<span class="jl-badge off">已停止</span>';
+  if (a.closedNow) return '<span class="jl-badge off">已截止</span>';
+  return '<span class="jl-badge on">进行中</span>';
+};
+function jlProgressHtml(a) {
+  if (a.hasRoster) {
+    const pct = a.total ? Math.round(a.done / a.total * 100) : 0;
+    const mCnt = (a.missing || []).length;
+    return `<div class="jl-prognum"><b>${a.done}</b><span class="sep">/</span><span>${a.total}</span><span class="unit">人已接龙</span></div>
+      <div class="jl-bar"><i style="width:${pct}%"></i></div>
+      <div class="jl-progsub">${mCnt ? '还有 ' + mCnt + ' 人未接龙' : '全部已接龙 🎉'}${a.count > a.done ? '，另有 ' + (a.count - a.done) + ' 人名单外接龙' : ''}</div>`;
+  }
+  return `<div class="jl-prognum"><b>${a.count}</b><span class="unit">人已接龙</span></div>
+    <div class="jl-bar"><i style="width:${a.count ? 100 : 0}%"></i></div>
+    <div class="jl-progsub">未设置名单，仅统计接龙人数</div>`;
+}
+
+/* ---------- 接龙列表 ---------- */
+async function loadJielong() {
+  jlStopTimer();
+  const view = $('#view');
+  if (state.jl) { await loadJielongDetail(); return; }
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  const data = await api('/api/jielong');
+  // 清理已失效的本地入口（接龙被删除后）
+  const known = new Set(data.items.map((x) => x.id));
+  const mine = jlMine();
+  if (mine.some((x) => !known.has(x.id))) jlMineSave(mine.filter((x) => known.has(x.id)));
+
+  const items = data.items.map((a) => {
+    const hasToken = canEdit() || jlTokenOf(a.id);
+    return `<div class="panel">
+      <div class="jl-head"><h2>${esc(a.title)}</h2>${jlStatusBadge(a)}</div>
+      ${a.description ? `<p class="jl-desc">${esc(a.description.length > 80 ? a.description.slice(0, 80) + '…' : a.description)}</p>` : ''}
+      <div class="jl-meta">${a.deadline ? '⏰ 截止 ' + esc(a.deadline) : ''}
+        <span>${a.hasRoster ? `✅ ${a.done}/${a.total} 已接` : `👥 ${a.count} 人已接`}</span>
+        ${!a.closedNow && !a.closed && a.deadline ? '<span>发起于 ' + jlFmtTime(a.createdAt) + '</span>' : '<span>发起于 ' + jlFmtTime(a.createdAt) + '</span>'}</div>
+      <div class="jl-actions">
+        <button class="ghost" data-jl-open="${a.id}">🔓 打开接龙页</button>
+        <button class="ghost" data-jl-copy="${a.id}">📋 复制学生链接</button>
+        ${hasToken ? `<button class="ghost" data-jl-manage="${a.id}">⚙️ 管理</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  view.innerHTML =
+    `<div class="jl-head"><h2>🐉 班级接龙</h2></div>
+    <p class="hint">接龙链接发到班群，同学点开即填即交；自动比对名单，谁没接龙一目了然。</p>
+    ${canEdit() ? '<div class="jl-actions"><button class="primary" id="btn-jl-create">＋ 发起接龙</button></div>' : ''}
+    ${items || '<div class="empty"><div class="big">🐉</div>还没有接龙' +
+      (canEdit() ? '<br>点上面「发起接龙」，把班群里的接龙搬到这里' : '<br>发起后接龙会出现在这里') + '</div>'}`;
+  const createBtn = $('#btn-jl-create');
+  if (createBtn) createBtn.addEventListener('click', openJielongCreateModal);
+  $$('[data-jl-manage]').forEach((b) => b.addEventListener('click', () => {
+    state.jl = { id: b.dataset.jlManage, token: jlTokenOf(b.dataset.jlManage) };
+    renderView().catch((e) => toast(e.message, 'error'));
+  }));
+  $$('[data-jl-open]').forEach((b) => b.addEventListener('click', () => window.open('/j/' + b.dataset.jlOpen)));
+  $$('[data-jl-copy]').forEach((b) => jlCopy(location.origin + '/j/' + b.dataset.jlCopy, '学生链接已复制，可发到班群'));
+}
+
+/* ---------- 接龙详情（管理台） ---------- */
+async function loadJielongDetail() {
+  const view = $('#view');
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  let a;
+  try { a = await api('/api/jielong/' + state.jl.id); }
+  catch (e) {
+    state.jl = null;
+    toast(e.message, 'error');
+    return loadJielong();
+  }
+  const token = state.jl.token || jlTokenOf(a.id) || (a.adminToken || ''); // 管理员可从详情取回令牌
+  const canManage = canEdit() || !!token;
+  if (token && !jlTokenOf(a.id)) jlMineRemember(a.id, token, a.title); // 委托链接：保存入口
+  const tArg = token ? '?t=' + encodeURIComponent(token) : '';
+  const stuLink = location.origin + '/j/' + a.id;
+
+  const outsideCount = a.entries.filter((e) => e.outside).length;
+  const withId = (a.roster || []).some((r) => r.id) || a.entries.some((e) => e.id);
+  const jlFullText = () => {
+    const lines = ['【' + a.title + '】'];
+    if (a.description) lines.push(a.description);
+    lines.push('— 已接龙 ' + (a.hasRoster ? a.done + '/' + a.total + ' 人' : a.count + ' 人') + ' —');
+    a.entries.forEach((e, i) => {
+      const parts = a.fields.map((f) => e.values[f.key]).filter(Boolean);
+      let txt = parts.join('，');
+      if (e.remark) txt += (txt ? '，' : '') + '备注：' + e.remark;
+      lines.push((i + 1) + '. ' + jlSlotLabel(e) + (e.outside ? '（名单外）' : '') + (txt ? '：' + txt : ''));
+    });
+    if (a.hasRoster && (a.missing || []).length) {
+      lines.push('— 未接龙 ' + a.missing.length + ' 人 —');
+      lines.push(a.missing.map(jlSlotLabel).join('、'));
+    }
+    return lines.join('\n');
+  };
+
+  view.innerHTML = `
+    <button class="ghost jl-back" id="jl-back">← 返回接龙列表</button>
+    ${state.jlBanner ? `<div class="jl-banner">✅ 接龙创建成功！把「学生链接」发到班群即可；本页可随时查看进度、复制提醒文案。<b>管理入口保存在本浏览器</b>，换设备请收藏带令牌的管理链接。</div>` : ''}
+    <div class="panel">
+      <div class="jl-head"><h2>${esc(a.title)}</h2>${jlStatusBadge({ ...a, manuallyClosed: a.closed })}</div>
+      ${a.description ? `<p class="jl-desc">${esc(a.description)}</p>` : ''}
+      <div class="jl-meta">${a.deadline ? '⏰ 截止 ' + esc(a.deadline) : '不限截止时间'}<span>发起于 ${jlFmtTime(a.createdAt)}</span>
+        ${a.closedNow ? '<span class="jl-badge warn">已截止，不能再提交</span>' : ''}</div>
+      <div class="jl-prog">${jlProgressHtml(a)}</div>
+    </div>
+    ${canManage ? `<div class="panel">
+      <div class="jl-linkrow"><input readonly value="${esc(stuLink)}"><button class="ghost" id="jl-copy-stu">复制学生链接</button>
+        <button class="ghost" id="jl-show-qr">二维码</button></div>
+      <div class="jl-actions">
+        <button class="ghost" id="jl-copy-miss">📋 复制未接名单</button>
+        <button class="ghost" id="jl-copy-full">📄 复制接龙全文</button>
+        <a class="ghost" id="jl-export" href="/api/jielong/${a.id}/export${tArg}" download>⬇️ 导出 CSV</a>
+        <button class="ghost" id="jl-per">🔗 专属链接</button>
+        ${canEdit() && token ? '<button class="ghost" id="jl-copy-admin">🤝 复制管理链接</button>' : ''}
+        <button class="ghost" id="jl-edit">✏️ 编辑</button>
+        <button class="ghost" id="jl-close">${a.closed ? '▶️ 重新开启' : '⏹ 停止接龙'}</button>
+        <button class="ghost danger" id="jl-del">🗑 删除接龙</button>
+      </div>
+      <div id="jl-per-box" style="display:none">
+        <p class="jl-sec">🔗 专属链接（打开后姓名锁定，防代填；适合私发个人）</p>
+        <textarea id="jl-per-list" class="form-like" rows="6" readonly style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text);font-size:12.5px;resize:vertical"></textarea>
+        <div class="jl-actions"><button class="ghost" id="jl-per-copy">复制全部</button></div>
+      </div>
+    </div>` : ''}
+    <div class="panel">
+      <h3>👻 已接龙（${a.entries.length} 人）</h3>
+      ${a.entries.length ? `<div class="jl-tblwrap"><table class="jl-table">
+        <thead><tr><th>#</th>${withId ? '<th>学号</th>' : ''}<th>姓名</th>
+        ${a.fields.map((f) => `<th>${esc(f.label)}</th>`).join('')}<th>备注</th><th>时间</th>${canManage ? '<th></th>' : ''}</tr></thead>
+        <tbody>${a.entries.map((e, i) => `
+          <tr><td>${i + 1}</td>
+          ${withId ? `<td>${esc(e.id || '—')}</td>` : ''}
+          <td><b>${esc(e.name)}</b>${e.outside ? ' <span class="jl-badge warn">名单外</span>' : ''}</td>
+          ${a.fields.map((f) => `<td>${esc(e.values[f.key] || '—')}</td>`).join('')}
+          <td>${esc(e.remark || '—')}</td>
+          <td class="dim">${jlFmtTime(e.time)}</td>
+          ${canManage ? `<td><button class="mini danger" data-jl-del-entry="${e.outside || e.rid == null ? 'n:' + esc(e.name) : 'r:' + e.rid}">删除</button></td>` : ''}</tr>`).join('')}</tbody>
+      </table></div>` : '<p class="empty-mini">还没有人接龙，快把学生链接发到班群吧</p>'}
+    </div>
+    ${a.hasRoster ? `<div class="panel">
+      <h3>⏳ 未接龙（${(a.missing || []).length} 人）</h3>
+      ${(a.missing || []).length
+        ? `<div>${a.missing.map((m) => `<span class="jl-chip" data-jl-per="${m.i}" title="点击复制该同学的专属链接">${esc(jlSlotLabel(m))}</span>`).join('')}</div>`
+        : '<p class="empty-mini">🎉 全部完成！</p>'}
+    </div>` : ''}`;
+
+  state.jlBanner = false;
+  $('#jl-back').addEventListener('click', () => { state.jl = null; renderView().catch(() => {}); });
+
+  // 每 5 秒原地刷新（弹窗打开或正在输入时不打扰）
+  jlStopTimer();
+  jlTimer = setInterval(async () => {
+    if ($('#modal-root').children.length) return;
+    const el = document.activeElement;
+    if (el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return;
+    try {
+      const fresh = await api('/api/jielong/' + state.jl.id);
+      const cur = view.innerHTML;
+      state.jlQuiet = true;
+      await loadJielongDetail();
+      state.jlQuiet = false;
+      if (view.innerHTML !== cur) { /* 有更新，保持滚动位置 */ const y = window.scrollY; window.scrollTo(0, y); }
+    } catch (e) { /* 静默 */ }
+  }, 5000);
+  if (!state.jlQuiet) window.scrollTo(0, 0);
+
+  if (!canManage) return;
+
+  $('#jl-copy-stu').addEventListener('click', () => jlCopy(stuLink, '学生链接已复制'));
+  $('#jl-show-qr').addEventListener('click', () => openJlQrModal(stuLink));
+  $('#jl-copy-miss').addEventListener('click', () => {
+    const missing = a.missing || [];
+    if (!a.hasRoster) { toast('本次接龙未设置名单'); return; }
+    if (!missing.length) { toast('全部都已接龙 🎉'); return; }
+    jlCopy('【' + a.title + '】还没有接龙的同学（' + missing.length + '人）：\n' +
+      missing.map(jlSlotLabel).join('、') + '\n请点击链接完成接龙：' + stuLink, '已复制，可粘贴到班群提醒大家');
+  });
+  $('#jl-copy-full').addEventListener('click', () => jlCopy(jlFullText(), '接龙全文已复制，可粘贴到班群'));
+  const copyAdmin = $('#jl-copy-admin');
+  if (copyAdmin) copyAdmin.addEventListener('click', () => jlCopy(location.origin + '/?jl=' + a.id + '&t=' + encodeURIComponent(token), '管理链接已复制，发给班委即可代管本次接龙'));
+  $('#jl-edit').addEventListener('click', () => openJielongEditModal(a, token));
+  $('#jl-close').addEventListener('click', async () => {
+    const target = !a.closed;
+    if (target && !confirm('确定停止接龙？停止后同学将无法再提交（可重新开启）。')) return;
+    try {
+      await api(`/api/jielong/${a.id}/close${tArg}`, { method: 'POST', body: { closed: target } });
+      toast(target ? '已停止接龙' : '已重新开启接龙');
+      loadJielongDetail();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+  $('#jl-del').addEventListener('click', async () => {
+    if (!confirm(`确定删除整个接龙？「${a.title}」的全部数据（含 ${a.entries.length} 条记录）将被清除，不可恢复！`)) return;
+    if (!confirm('再次确认：真的要删除吗？')) return;
+    try {
+      await api(`/api/jielong/${a.id}${tArg}`, { method: 'DELETE' });
+      jlMineSave(jlMine().filter((x) => x.id !== a.id));
+      state.jl = null;
+      toast('接龙已删除');
+      renderView().catch(() => {});
+    } catch (e) { toast(e.message, 'error'); }
+  });
+  const perBtn = $('#jl-per');
+  if (perBtn) perBtn.addEventListener('click', () => {
+    const box = $('#jl-per-box');
+    if (!a.roster.length) { toast('本次接龙未设置名单，没有专属链接'); return; }
+    if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+    $('#jl-per-list').value = a.roster.map((r, i) => jlSlotLabel(r) + '：' + stuLink + '?u=' + i).join('\n');
+    box.style.display = '';
+  });
+  const perCopy = $('#jl-per-copy');
+  if (perCopy) perCopy.addEventListener('click', () => jlCopy($('#jl-per-list').value, '专属链接已全部复制'));
+  $$('[data-jl-per]').forEach((chip) => chip.addEventListener('click', () => {
+    const i = +chip.dataset.jlPer;
+    if (!(a.roster || [])[i]) return;
+    jlCopy(stuLink + '?u=' + i, '已复制 ' + jlSlotLabel(a.roster[i]) + ' 的专属链接');
+  }));
+  $$('[data-jl-del-entry]').forEach((btn) => btn.addEventListener('click', async () => {
+    const key = btn.dataset.jlDelEntry;
+    const label = key.startsWith('r:') ? '该同学的' : `「${key.slice(2)}」的`;
+    if (!confirm(`确定删除${label}接龙记录？`)) return;
+    try {
+      await api(`/api/jielong/${a.id}/entry${tArg}${tArg ? '&' : '?'}${key.startsWith('r:') ? 'rid=' + key.slice(2) : 'name=' + encodeURIComponent(key.slice(2))}`, { method: 'DELETE' });
+      loadJielongDetail();
+    } catch (e) { toast(e.message, 'error'); }
+  }));
+}
+
+/* ---------- 发起 / 编辑接龙 ---------- */
+function openJielongCreateModal() {
+  const fields = [{ label: '接龙内容', type: 'text', required: true, options: [] }];
+  let withIdTouched = false;
+
+  const rosterPreview = () => {
+    const raw = $('#jl-roster').value;
+    if (!withIdTouched) $('#jl-withid').checked = jlParseRoster(raw, true).hasIds;
+    const parsed = jlParseRoster(raw, $('#jl-withid').checked);
+    const pv = $('#jl-roster-pv');
+    if (!parsed.list.length) { pv.innerHTML = ''; return; }
+    pv.innerHTML = `<div>识别到 <b>${parsed.list.length}</b> 人${$('#jl-withid').checked ? '（含学号）' : ''}：</div>` +
+      parsed.list.slice(0, 50).map((r) => `<span class="jl-chip plain">${esc(jlSlotLabel(r))}</span>`).join('') +
+      (parsed.list.length > 50 ? `<span class="jl-chip plain">…共 ${parsed.list.length} 人</span>` : '');
+  };
+  const renderFields = () => {
+    const box = $('#jl-fields');
+    box.innerHTML = '';
+    fields.forEach((f, i) => {
+      const row = document.createElement('div');
+      row.className = 'jl-frow';
+      row.innerHTML = `<div class="line1">
+          <input class="f-label" data-i="${i}" maxlength="30" placeholder="项目名称，如：是否参加" value="${esc(f.label)}">
+          <select class="f-type" data-i="${i}">
+            <option value="text"${f.type === 'text' ? ' selected' : ''}>单行文本</option>
+            <option value="textarea"${f.type === 'textarea' ? ' selected' : ''}>多行文本</option>
+            <option value="select"${f.type === 'select' ? ' selected' : ''}>单选</option>
+          </select>
+          <button class="mini danger f-del" data-i="${i}" type="button">✕</button></div>
+        <div class="line2">
+          <label><input type="checkbox" class="f-required" data-i="${i}"${f.required ? ' checked' : ''}>必填</label>
+          <input class="f-options" data-i="${i}" maxlength="200" placeholder="选项用逗号分隔，如：参加,不参加" value="${esc((f.options || []).join(','))}"${f.type === 'select' ? '' : ' style="display:none"'}>
+        </div>`;
+      box.appendChild(row);
+    });
+    box.querySelectorAll('.f-label').forEach((el) => el.addEventListener('input', () => { fields[+el.dataset.i].label = el.value; }));
+    box.querySelectorAll('.f-type').forEach((el) => el.addEventListener('change', () => { fields[+el.dataset.i].type = el.value; renderFields(); }));
+    box.querySelectorAll('.f-required').forEach((el) => el.addEventListener('change', () => { fields[+el.dataset.i].required = el.checked; }));
+    box.querySelectorAll('.f-options').forEach((el) => el.addEventListener('input', () => {
+      fields[+el.dataset.i].options = el.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+    }));
+    box.querySelectorAll('.f-del').forEach((el) => el.addEventListener('click', () => { fields.splice(+el.dataset.i, 1); renderFields(); }));
+  };
+
+  openModal(`
+    <h2>🐉 发起接龙</h2>
+    <div class="form">
+      <label>接龙标题</label>
+      <input id="jl-title" maxlength="60" placeholder="例如：9月12日春游报名">
+      <label>说明（选填）</label>
+      <textarea id="jl-desc" rows="2" maxlength="1000" placeholder="时间、地点、要求等，同学打开链接就能看到"></textarea>
+      <label>班级名单（选填，用于自动统计谁没接龙；支持直接粘贴 Excel / QQ 名单）</label>
+      <textarea id="jl-roster" rows="5" placeholder="每行一个，支持“学号 姓名”&#10;例如：&#10;2023001 张三&#10;2. 李四&#10;王五"></textarea>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer"><input type="checkbox" id="jl-withid" style="width:auto"> 名单包含学号（输入学号或姓名都能匹配）</label>
+      <div id="jl-roster-pv" class="jl-roster-pv"></div>
+      <label>截止时间（选填）</label>
+      <input id="jl-deadline" type="datetime-local">
+      <label>接龙内容（同学需要填写的项目，可增减）</label>
+      <div id="jl-fields"></div>
+      <button class="ghost" id="jl-addfield" type="button">＋ 添加填写项</button>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer;margin-top:12px"><input type="checkbox" id="jl-outside" checked style="width:auto"> 允许名单外的同学接龙（会标记“名单外”）</label>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" id="btn-cancel">取消</button>
+      <button class="primary" id="jl-save">创建接龙</button>
+    </div>`);
+
+  renderFields();
+  $('#jl-roster').addEventListener('input', rosterPreview);
+  $('#jl-withid').addEventListener('change', () => { withIdTouched = true; rosterPreview(); });
+  $('#jl-addfield').addEventListener('click', () => {
+    if (fields.length >= 8) { toast('最多 8 个填写项', 'error'); return; }
+    fields.push({ label: '', type: 'text', required: true, options: [] });
+    renderFields();
+  });
+  rosterPreview();
+
+  $('#jl-save').addEventListener('click', async () => {
+    const title = $('#jl-title').value.trim();
+    if (!title) { toast('请填写接龙标题', 'error'); return; }
+    try {
+      const r = await api('/api/jielong', { method: 'POST', body: {
+        title,
+        description: $('#jl-desc').value.trim(),
+        rosterRaw: $('#jl-roster').value,
+        keepId: $('#jl-withid').checked,
+        deadline: valToDt($('#jl-deadline').value) || null,
+        allowOutside: $('#jl-outside').checked,
+        fields: fields.filter((f) => f.label.trim()).map((f) => ({ label: f.label.trim(), type: f.type, required: f.required, options: f.options || [] })),
+      } });
+      jlMineRemember(r.id, r.adminToken, title);
+      closeModal();
+      state.jl = { id: r.id, token: r.adminToken };
+      state.jlBanner = true;
+      if (state.view !== 'jielong') state.view = 'jielong';
+      $$('#mainnav button, #tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === 'jielong'));
+      renderView().catch(() => {});
+      toast('接龙创建成功 ✓');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+function openJielongEditModal(a, token) {
+  const tArg = token ? '?t=' + encodeURIComponent(token) : '';
+  openModal(`
+    <h2>✏️ 编辑接龙</h2>
+    <div class="form">
+      <label>标题</label><input id="jl-e-title" maxlength="60" value="${esc(a.title)}">
+      <label>说明</label><textarea id="jl-e-desc" rows="2" maxlength="1000">${esc(a.description || '')}</textarea>
+      <label>截止时间（留空表示不设截止）</label><input id="jl-e-deadline" type="datetime-local" value="${dtToVal(a.deadline)}">
+      <label>名单（保存后已接记录自动重新匹配；不在新名单中的已接记录会转为“名单外”）</label>
+      <textarea id="jl-e-roster" rows="5">${esc((a.roster || []).map(jlSlotLabel).join('\n'))}</textarea>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer"><input type="checkbox" id="jl-e-withid" style="width:auto"${(a.roster || []).some((r) => r.id) ? ' checked' : ''}> 名单包含学号</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer"><input type="checkbox" id="jl-e-outside" style="width:auto"${a.allowOutside ? ' checked' : ''}> 允许名单外的同学接龙</label>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" id="btn-cancel">取消</button>
+      <button class="primary" id="jl-e-save">保存修改</button>
+    </div>`);
+  $('#jl-e-save').addEventListener('click', async () => {
+    if (!$('#jl-e-title').value.trim()) { toast('标题不能为空', 'error'); return; }
+    try {
+      await api(`/api/jielong/${a.id}${tArg}`, { method: 'PUT', body: {
+        title: $('#jl-e-title').value,
+        description: $('#jl-e-desc').value,
+        deadline: valToDt($('#jl-e-deadline').value) || null,
+        rosterRaw: $('#jl-e-roster').value,
+        keepId: $('#jl-e-withid').checked,
+        allowOutside: $('#jl-e-outside').checked,
+      } });
+      closeModal();
+      toast('修改已保存');
+      loadJielongDetail();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
 /* ========= 视图切换 ========= */
 // 顶栏控件只在适用的页面显示：排序只在信息流有用；统计页不响应群筛选
 function syncTopbar() {
-  $('#group-sel').style.display = state.view === 'stats' ? 'none' : '';
+  $('#group-sel').style.display = (state.view === 'stats' || state.view === 'jielong') ? 'none' : '';
   $('#sortsel').style.display = state.view === 'feed' ? '' : 'none';
 }
 async function renderView() {
+  jlStopTimer();
   saveFilters();
   $$('#mainnav button, #tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === state.view));
   syncTopbar();
@@ -1030,6 +1513,7 @@ async function renderView() {
     if (state.view === 'feed') await loadFeed();
     else if (state.view === 'inbox') await loadInbox();
     else if (state.view === 'tasks') await loadTasks();
+    else if (state.view === 'jielong') await loadJielong();
     else if (state.view === 'calendar') await loadCalendar();
     else if (state.view === 'files') await loadFiles();
     else await loadStats();
@@ -1333,5 +1817,18 @@ async function updateInboxBadge() {
 bindEvents();
 initExtras();
 restoreFilters();
+// 管理链接委托入口：/?jl=接龙ID&t=管理令牌 → 直接打开该接龙的管理页（班委无需登录）
+(function jlInitFromUrl() {
+  try {
+    const q = new URLSearchParams(location.search);
+    const id = (q.get('jl') || '').toLowerCase();
+    const t = q.get('t') || '';
+    if (/^[a-z0-9]+$/.test(id)) {
+      state.view = 'jielong';
+      state.jl = { id, token: t };
+      history.replaceState(null, '', location.pathname);
+    }
+  } catch (e) { /* 忽略 */ }
+})();
 // 先取会话状态（决定只读模式），再渲染首屏
 loadMe().finally(() => refresh());

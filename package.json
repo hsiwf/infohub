@@ -1,7 +1,7 @@
 {
   "name": "infohub",
-  "version": "1.1.0",
-  "description": "信息汇总 — 汇总 QQ/微信群老师发的通知、任务与文件（零依赖本地网站）",
+  "version": "1.2.0",
+  "description": "信息汇总 — 汇总 QQ/微信群老师发的通知、任务与文件，附班级接龙统计（零依赖本地网站）",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -14,10 +14,12 @@
     "infohub",
     "notice",
     "notification",
+    "jielong",
     "sqlite",
     "zero-dependency",
     "pwa",
-    "班级通知"
+    "班级通知",
+    "接龙"
   ],
   "author": "hsiwf",
   "license": "MIT",

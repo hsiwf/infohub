@@ -312,3 +312,56 @@ body.readonly #btn-add-group,
 body.readonly #mainnav button[data-view="inbox"],
 body.readonly #tabbar button[data-view="inbox"],
 body.readonly .side-foot { display: none !important; }
+
+/* ---------- 班级接龙 ---------- */
+.jl-head{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;margin:14px 0 4px}
+.jl-head h2{margin:0;font-size:19px;line-height:1.4;word-break:break-word}
+.jl-desc{white-space:pre-wrap;color:var(--text-2);margin:6px 0 0;font-size:14.5px}
+.jl-meta{font-size:13px;color:var(--muted);margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.jl-prog{margin:14px 0 4px}
+.jl-prognum{font-size:14px;color:var(--muted);margin-bottom:8px}
+.jl-prognum b{font-size:28px;color:var(--text);font-weight:700}
+.jl-prognum .sep{margin:0 4px;font-size:19px}
+.jl-prognum .unit{margin-left:8px;font-size:13.5px}
+.jl-bar{height:10px;background:var(--hover);border-radius:99px;overflow:hidden}
+.jl-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--primary),#3ddc84);border-radius:99px;transition:width .4s}
+.jl-progsub{font-size:13px;color:var(--muted);margin:8px 0 2px}
+.jl-stats{display:flex;gap:10px;margin:14px 0;flex-wrap:wrap}
+.jl-stat{flex:1;min-width:96px;background:var(--hover);border-radius:10px;padding:10px 12px;text-align:center}
+.jl-stat b{display:block;font-size:22px}
+.jl-stat span{font-size:12px;color:var(--muted)}
+.jl-stat.ok b{color:#0d9668}
+.jl-stat.warn b{color:#ea6a12}
+:root[data-theme="dark"] .jl-stat.ok b{color:#4ade80}
+:root[data-theme="dark"] .jl-stat.warn b{color:#fdba74}
+.jl-badge{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600}
+.jl-badge.on{background:#e6f8f1;color:#0d9668}
+.jl-badge.off{background:var(--cat-other-bg);color:var(--cat-other-fg)}
+.jl-badge.warn{background:var(--dl-today-bg);color:var(--dl-today-fg)}
+:root[data-theme="dark"] .jl-badge.on{background:rgba(16,185,129,.16);color:#4ade80}
+.jl-actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.jl-chip{display:inline-block;padding:3px 12px;border-radius:999px;background:var(--dl-today-bg);color:var(--dl-today-fg);font-size:13px;margin:3px 4px 3px 0;cursor:pointer}
+.jl-chip.plain{background:var(--hover);color:var(--text);cursor:default}
+.jl-chip:hover{filter:brightness(.96)}
+.jl-tblwrap{overflow-x:auto;margin-top:6px}
+.jl-table{width:100%;border-collapse:collapse;font-size:13.5px}
+.jl-table th,.jl-table td{padding:8px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.jl-table th{color:var(--muted);font-weight:500;font-size:12.5px;white-space:nowrap}
+.jl-table td.dim{color:var(--muted);font-size:12.5px;white-space:nowrap}
+.jl-table td.empty{color:var(--muted);text-align:center;padding:22px}
+.jl-banner{background:#e6f8f1;border:1px solid #bfe8cf;color:#0d9668;border-radius:10px;padding:10px 14px;font-size:14px;margin:10px 0;line-height:1.7}
+:root[data-theme="dark"] .jl-banner{background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.35);color:#4ade80}
+.jl-linkrow{display:flex;gap:8px;margin:6px 0;align-items:center}
+.jl-linkrow input{flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--primary);font-size:12.5px;outline:none}
+.jl-sec{margin:16px 0 6px;font-size:14px;color:var(--muted);font-weight:600}
+.jl-frow{border:1px dashed var(--line);border-radius:10px;padding:10px;margin-bottom:8px;background:var(--hover)}
+.jl-frow .line1{display:flex;gap:8px}
+.jl-frow .line1 input.f-label{flex:1;min-width:0}
+.jl-frow .line1 select{width:104px;flex:none}
+.jl-frow .line2{display:flex;gap:12px;align-items:center;margin-top:8px;flex-wrap:wrap}
+.jl-frow label{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--muted);margin:0;cursor:pointer}
+.jl-frow label input{width:auto}
+.jl-frow .f-options{flex:1;min-width:170px;font-size:13px}
+.jl-roster-pv{margin-top:8px;font-size:13px;color:var(--muted);line-height:2}
+#qr-modal .qrbox{text-align:center}
+#qr-modal .qrbox img,#qr-modal .qrbox svg{width:220px;max-width:70vw;height:auto;border:8px solid #fff;border-radius:8px;background:#fff}
