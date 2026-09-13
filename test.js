@@ -204,15 +204,24 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   r = await post('/api/import', { groups: [], messages: [] });
   ok('有数据时导入被拒（防重复）', r.status === 400);
 
-  // 9.5 force 导入：附件记录一并恢复（附件文件本身不在 JSON 中，随 data/ 目录迁移）
+  // 9.5 force 导入：附件与接龙一并恢复（附件文件本身不在 JSON 中，随 data/ 目录迁移）
   r = await post('/api/import?force=1', {
     groups: [],
     messages: [{ id: 9900, title: '导入附件测试', content: '导入附件测试内容' }],
     attachments: [{ message_id: 9900, orig_name: '导入附件测试.txt', stored_name: '202601/0123456789abcdef.txt', size: 3, mime: 'text/plain', created_at: '2030-01-01 09:00' }],
+    jielongs: [{ id: 'jlimport1', title: '导入接龙测试', description: '', deadline: '2030-01-01 10:00', roster: '[{"id":"2023001","name":"张三"}]', fields: '[]', allow_outside: 1, closed: 0, admin_token: 'importtoken', created_at: 1700000000000 }],
+    jielongEntries: [
+      { jielong_id: 'jlimport1', rid: 0, sid: '2023001', name: '张三', values_json: '{"f0":"参加"}', remark: '', outside: 0, time: 1700000001000, seq: 0 },
+      { jielong_id: '不存在的接龙', rid: null, sid: '', name: '孤儿记录', values_json: '{}', remark: '', outside: 1, time: 1700000002000, seq: 1 },
+    ],
   });
-  ok('force 导入恢复附件记录', r.status === 200 && r.body.attachments === 1, JSON.stringify(r.body));
+  ok('force 导入恢复附件与接龙', r.status === 200 && r.body.attachments === 1 && r.body.jielongs === 1 && r.body.jielongEntries === 1, JSON.stringify(r.body));
   r = await j('/api/files?q=' + encodeURIComponent('导入附件测试.txt'));
   ok('导入的附件出现在文件中心', r.status === 200 && r.body.items.length === 1, JSON.stringify(r.body));
+  r = await j('/api/jielong/jlimport1');
+  ok('导入的接龙可访问（含记录）', r.status === 200 && r.body.title === '导入接龙测试' && r.body.done === 1 && r.body.total === 1 && r.body.entries[0].values.f0 === '参加', JSON.stringify(r.body));
+  r = await j('/api/jielong/jlimport1?t=importtoken', { method: 'DELETE' });
+  ok('导入的接龙可管理（令牌随备份恢复）', r.status === 200);
   const imp = await j('/api/messages?q=' + encodeURIComponent('导入附件测试'));
   for (const it of (imp.body.items || [])) await j('/api/messages/' + it.id, { method: 'DELETE' });
 
@@ -296,6 +305,78 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   }
   const lh = await fetch(BASE + '/login');
   ok('登录页可访问', lh.status === 200);
+  r = await fetch(BASE + '/j/dut9dtk');
+  ok('学生接龙页 /j/:id', r.status === 200 && (await r.text()).includes('班级接龙'));
+  r = await fetch(BASE + '/js/qrcode.min.js');
+  ok('二维码组件可加载', r.status === 200);
+
+  // 12. 班级接龙（名单解析 / 身份匹配 / 进度 / 管理令牌 / CSV）
+  r = await post('/api/jielong', {
+    title: '自检接龙', description: '自检用接龙',
+    rosterRaw: '2023001 张三\n2. 李四\n王五\n2023004 张三', keepId: true,
+    deadline: '2030-01-01 18:00', allowOutside: true,
+    fields: [{ label: '是否参加', type: 'select', required: true, options: ['参加', '不参加'] }],
+  });
+  const jl = r.body || {};
+  ok('发起接龙（名单解析出学号）', r.status === 200 && /^[a-z0-9]{7}$/.test(jl.id || '') && !!jl.adminToken, JSON.stringify(r.body));
+  if (authRequired) {
+    const g4 = await fetch(BASE + '/api/jielong', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'x' }) });
+    ok('访客发起接龙被拒（401）', g4.status === 401);
+  }
+  r = await j('/api/jielong');
+  ok('接龙列表带进度', r.status === 200 && r.body.items.some((x) => x.id === jl.id && x.total === 4), JSON.stringify(r.body));
+  const g7 = await fetch(BASE + '/api/jielong/' + jl.id);
+  const g7j = await g7.json();
+  ok('接龙详情（访客不泄露管理令牌）', g7.status === 200 && g7j.roster.length === 4 && g7j.roster[0].id === '2023001' && g7j.adminToken === undefined && g7j.missing.length === 4);
+  if (authRequired) {
+    r = await j('/api/jielong/' + jl.id);
+    ok('管理员可取回管理令牌', r.status === 200 && r.body.adminToken === jl.adminToken);
+  }
+  r = await post(`/api/jielong/${jl.id}/join`, { name: '张三', values: { f0: '参加' }, remark: '自检' });
+  ok('提交（重名绑定首个未接槽位）', r.status === 200 && r.body.entry.rid === 0 && r.body.entry.id === '2023001' && r.body.done === 1, JSON.stringify(r.body));
+  r = await post(`/api/jielong/${jl.id}/join`, { name: '2023004', values: { f0: '不参加' } });
+  ok('按学号命中另一位重名同学', r.status === 200 && r.body.entry.rid === 3 && r.body.entry.id === '2023004');
+  r = await post(`/api/jielong/${jl.id}/join`, { name: '张三', values: { f0: '不参加' } });
+  ok('重复提交覆盖不新增', r.status === 200 && r.body.updated === true && r.body.count === 2);
+  r = await j('/api/jielong/' + jl.id);
+  ok('修改提交后名单次序不变', r.body.entries[0].name === '张三' && r.body.entries[0].id === '2023001' && r.body.entries[0].values.f0 === '不参加', JSON.stringify(r.body.entries.map((e) => e.name)));
+  const g5 = await fetch(BASE + `/api/jielong/${jl.id}/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '赵六', values: { f0: '参加' } }) });
+  const g5j = await g5.json();
+  ok('名单外可提交且无需登录', g5.status === 200 && g5j.entry.rid === null && g5j.done === 2, JSON.stringify(g5j));
+  r = await post(`/api/jielong/${jl.id}/join`, { rid: 1, name: '李四', values: { f0: '参加' } });
+  ok('专属链接按槽位提交', r.status === 200 && r.body.entry.rid === 1 && r.body.entry.name === '李四');
+  r = await j('/api/jielong/' + jl.id);
+  ok('进度与未接名单', r.body.done === 3 && r.body.total === 4 && r.body.missing.length === 1 && r.body.missing[0].name === '王五', JSON.stringify(r.body.missing));
+  r = await post(`/api/jielong/${jl.id}/join`, { name: '王五', values: {} });
+  ok('必填项缺失被拒', r.status === 400);
+  if (authRequired) {
+    // 密码模式下：无 Cookie 且令牌错误 → 管理操作 401（未设密码时全站开放，无此拒绝路径）
+    const g6 = await fetch(`${BASE}/api/jielong/${jl.id}/export?t=` + encodeURIComponent('错误令牌'));
+    ok('错误管理令牌被拒（401）', g6.status === 401);
+  }
+  const csvRes = await fetch(`${BASE}/api/jielong/${jl.id}/export?t=` + encodeURIComponent(jl.adminToken));
+  const csvBuf = await csvRes.arrayBuffer();
+  const csvBytes = new Uint8Array(csvBuf);
+  const csvText = new TextDecoder('utf-8').decode(csvBuf);
+  ok('CSV 导出（BOM+已接+未接）', csvRes.status === 200
+    && (csvBytes[0] === 0xEF && csvBytes[1] === 0xBB && csvBytes[2] === 0xBF)
+    && csvText.includes('张三') && csvText.includes('未接龙'), csvText.slice(0, 80));
+  r = await j(`/api/jielong/${jl.id}?t=` + encodeURIComponent(jl.adminToken), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rosterRaw: '2023001 张三\n李四\n王五明\n2023004 张三', keepId: true }) });
+  ok('编辑名单', r.status === 200 && r.body.roster.length === 4);
+  r = await j('/api/jielong/' + jl.id);
+  ok('已接记录自动重新匹配', r.body.done === 3 && r.body.missing.length === 1 && r.body.missing[0].name === '王五明', JSON.stringify(r.body.missing));
+  r = await j(`/api/jielong/${jl.id}/entry?rid=0&t=` + encodeURIComponent(jl.adminToken), { method: 'DELETE' });
+  ok('删除单条记录', r.status === 200);
+  r = await j('/api/jielong/' + jl.id);
+  ok('删除后未接名单更新', r.body.done === 2 && r.body.missing.some((m) => m.name === '张三'));
+  r = await post(`/api/jielong/${jl.id}/close?t=` + encodeURIComponent(jl.adminToken), { closed: true });
+  ok('停止接龙', r.status === 200 && r.body.closed === true);
+  r = await post(`/api/jielong/${jl.id}/join`, { name: '王五明', values: { f0: '参加' } });
+  ok('停止后提交被拒', r.status === 400);
+  r = await j(`/api/jielong/${jl.id}?t=` + encodeURIComponent(jl.adminToken), { method: 'DELETE' });
+  ok('删除整个接龙', r.status === 200);
+  r = await j('/api/jielong/' + jl.id);
+  ok('删除后详情 404', r.status === 404);
 
   // ---- 清理自检数据 ----
   for (const id of created.messages) await j('/api/messages/' + id, { method: 'DELETE' });
