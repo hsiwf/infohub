@@ -47,8 +47,8 @@
 ### 方式一：本地源码直接运行
 
 ```bash
-git clone https://github.com/hsiwf/xinxihuizong.git
-cd xinxihuizong
+git clone https://github.com/hsiwf/infohub.git
+cd infohub
 node server.js
 ```
 
@@ -93,7 +93,7 @@ node -v   # 应输出 v22.x
 
 ```bash
 sudo mkdir -p /opt/infohub && sudo chown $USER /opt/infohub
-git clone https://github.com/hsiwf/xinxihuizong.git /opt/infohub
+git clone https://github.com/hsiwf/infohub.git /opt/infohub
 cd /opt/infohub
 ```
 
