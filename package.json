@@ -1,0 +1,28 @@
+{
+  "name": "infohub",
+  "version": "1.0.0",
+  "description": "信息汇总 — 汇总 QQ/微信群老师发的通知、任务与文件（零依赖本地网站）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "keywords": [
+    "infohub",
+    "notice",
+    "notification",
+    "sqlite",
+    "zero-dependency",
+    "pwa",
+    "班级通知"
+  ],
+  "author": "hsiwf",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hsiwf/xinxihuizong.git"
+  }
+}
