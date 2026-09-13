@@ -209,9 +209,9 @@ function cardHTML(it) {
   const body = (it.content || '').replace(/\r/g, '').trim();
   const short = body.length > 150 ? body.slice(0, 150) + '…' : body;
   const atts = (it.attachments || []).map((a) => {
-    // 图片附件直接显示缩略图，点击看大图
+    // 图片附件直接显示缩略图（/raw 不计阅读数），点击看大图才算一次阅读
     if (/^image\//.test(a.mime || '')) {
-      return `<a class="att-thumb" href="/api/attachments/${a.id}/download" target="_blank" title="${esc(a.orig_name)}"><img loading="lazy" src="/api/attachments/${a.id}/download" alt="${esc(a.orig_name)}"></a>`;
+      return `<a class="att-thumb" href="/api/attachments/${a.id}/download" target="_blank" title="${esc(a.orig_name)}"><img loading="lazy" src="/api/attachments/${a.id}/raw" alt="${esc(a.orig_name)}"></a>`;
     }
     return `<a class="att" href="/api/attachments/${a.id}/download" target="_blank">📄 ${esc(a.orig_name)} <span class="att-size">${fmtSize(a.size)}</span></a>`;
   }).join('');
@@ -241,12 +241,13 @@ function cardHTML(it) {
 async function loadFeed(append = false) {
   const view = $('#view');
   if (!append) view.innerHTML = '<div class="loading">加载中…</div>';
-  const offset = append ? $$('.card', view).length : 0; // 已渲染多少条，作为下一页起点
+  // 主列表只放未完成；已完成的单独放底部“已完成”区（offset 只数未完成卡片）
+  const offset = append ? $$('#view .card:not(.done)').length : 0;
   const params = new URLSearchParams();
   if (state.q) params.set('q', state.q);
   if (state.category) params.set('category', state.category);
   if (state.group) params.set('group_id', state.group);
-  if (!state.showDone) params.set('status', 'open');
+  params.set('status', 'open');
   params.set('sort', state.sort);
   params.set('limit', '50');
   params.set('offset', String(offset));
@@ -255,6 +256,24 @@ async function loadFeed(append = false) {
   data.items.forEach((it) => { state.cache[it.id] = it; });
   const more = $('#btn-more');
   if (more) more.closest('.morewrap').remove();
+
+  // 已完成区：勾选“显示已完成”时一次性取最近 100 条，永远固定在最底部
+  let doneSection = '';
+  if (state.showDone && offset === 0) {
+    const dp = new URLSearchParams(params);
+    dp.set('status', 'done');
+    dp.set('sort', 'time');
+    dp.set('limit', '100');
+    dp.delete('offset');
+    try {
+      const d = await api('/api/messages?' + dp);
+      d.items.forEach((it) => { state.cache[it.id] = it; });
+      if (d.items.length) {
+        doneSection = `<div id="done-sec"><div class="feeddivider">✅ 已完成（${d.total}${d.total > d.items.length ? '，显示最近 ' + d.items.length + ' 条' : ''}）</div>${d.items.map(cardHTML).join('')}</div>`;
+      }
+    } catch (e) { /* 已完成区加载失败不影响主列表 */ }
+  }
+
   if (offset === 0) view.innerHTML = '';
   if (state.total === 0) {
     const filtered = !!(state.q || state.category || state.group);
@@ -264,6 +283,7 @@ async function loadFeed(append = false) {
       : canEdit()
         ? `<div class="empty"><div class="big">📭</div>还没有记录<br>点右上角「＋ 添加信息」，把老师发的通知粘贴进来试试</div>`
         : `<div class="empty"><div class="big">📭</div>还没有记录<br>老师发布通知后会出现在这里</div>`;
+    if (doneSection) view.insertAdjacentHTML('beforeend', doneSection);
     return;
   }
   // 提醒功能一次性引导（仅在通知权限未决定时出现）
@@ -275,27 +295,98 @@ async function loadFeed(append = false) {
     if (on) on.addEventListener('click', () => { localStorage.setItem('infohub-notif-dismissed', '1'); onBellClick(); const b = on.closest('.notifbar'); if (b) b.remove(); });
     if (off) off.addEventListener('click', () => { localStorage.setItem('infohub-notif-dismissed', '1'); const b = off.closest('.notifbar'); if (b) b.remove(); });
   }
-  view.insertAdjacentHTML('beforeend', (() => {
-    let html = '';
-    let dividerDone = append && state.dividerShown;
-    if (!append) state.dividerShown = false;
-    for (const it of data.items) {
-      // 按截止时间排序时，给沉底的"无截止时间"信息加一条分隔线
-      if (state.sort === 'deadline' && !dividerDone && !it.deadline) {
-        html += '<div class="feeddivider">以下信息没有截止时间（按收到时间排列）</div>';
-        dividerDone = true;
-        state.dividerShown = true;
-      }
-      html += cardHTML(it);
+  let html = '';
+  let dividerDone = append && state.dividerShown;
+  if (!append) state.dividerShown = false;
+  for (const it of data.items) {
+    // 按截止时间排序时，给沉底的"无截止时间"信息加一条分隔线
+    if (state.sort === 'deadline' && !dividerDone && !it.deadline) {
+      html += '<div class="feeddivider">以下信息没有截止时间（按收到时间排列）</div>';
+      dividerDone = true;
+      state.dividerShown = true;
     }
-    return html;
-  })());
-  const shown = $$('.card', view).length;
-  if (shown < state.total) {
-    view.insertAdjacentHTML('beforeend',
-      `<div class="morewrap"><button id="btn-more" class="ghost">加载更多（已显示 ${shown}/${state.total}）</button></div>`);
-    $('#btn-more').addEventListener('click', () => { loadFeed(true).catch((e) => toast(e.message, 'error')); });
+    html += cardHTML(it);
   }
+  const shown = offset + data.items.length;
+  let moreHtml = '';
+  if (shown < state.total) {
+    moreHtml = `<div class="morewrap"><button id="btn-more" class="ghost">加载更多（已显示 ${shown}/${state.total}）</button></div>`;
+  }
+  // 已完成区存在时，新内容要插在它前面，保证“已完成”永远在最底部
+  const doneSec = $('#done-sec', view);
+  if (doneSec) doneSec.insertAdjacentHTML('beforebegin', html + moreHtml);
+  else view.insertAdjacentHTML('beforeend', html + moreHtml + doneSection);
+  const newMore = $('#btn-more');
+  if (newMore) newMore.addEventListener('click', () => { loadFeed(true).catch((e) => toast(e.message, 'error')); });
+}
+
+/* ========= 待审核收件箱（QQ review 模式） ========= */
+function inboxRow(it) {
+  return `<div class="irow" data-iid="${it.id}">
+    <div class="imain">
+      <div class="itext">${hl(it.content, state.q)}</div>
+      <div class="imeta">
+        ${it.group_name ? `<span class="chip plat-qq">🐧 ${esc(it.group_name)}</span>` : ''}
+        ${it.sender_name ? `<span>👤 ${esc(it.sender_name)}</span>` : ''}
+        <span>⏰ ${esc(fmtReceived(it.received_at))}</span>
+      </div>
+    </div>
+    <span class="spacer"></span>
+    <div class="ibtns">
+      <button class="ghost" data-iact="accept" data-iid="${it.id}">✓ 收录</button>
+      <button class="ghost danger" data-iact="dismiss" data-iid="${it.id}">忽略</button>
+    </div>
+  </div>`;
+}
+async function loadInbox() {
+  const view = $('#view');
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  const data = await api('/api/inbox');
+  setNavBadge('inbox', data.total);
+  const items = !state.q ? data.items : data.items.filter((it) =>
+    ((it.content || '') + (it.sender_name || '') + (it.group_name || '')).toLowerCase().includes(state.q.toLowerCase()));
+  if (!data.items.length) {
+    view.innerHTML = `<div class="empty"><div class="big">🎉</div>没有待审核的消息<br>QQ 机器人的消息会先进到这里，收录后才会出现在信息流</div>`;
+    return;
+  }
+  view.innerHTML = `
+    <div class="inboxhead">
+      <h3>📥 待审核（${items.length}${items.length !== data.total ? '/' + data.total : ''}）</h3>
+      <span class="hint">收录后自动识别分类和截止时间；与已有信息重复的可以直接忽略</span>
+      <span class="spacer"></span>
+      <button class="ghost" id="btn-inbox-accept-all">✓ 全部收录</button>
+      <button class="ghost danger" id="btn-inbox-clear">🗑 全部忽略</button>
+    </div>
+    ${items.map(inboxRow).join('') || '<p class="empty-mini">没有匹配的消息</p>'}`;
+  $('#btn-inbox-accept-all').addEventListener('click', async () => {
+    if (!confirm(`把待审核的 ${data.total} 条全部收录进信息流？`)) return;
+    try {
+      const r = await api('/api/inbox/accept-all', { method: 'POST' });
+      toast(`已收录 ${r.accepted} 条 ✓`);
+      refresh();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+  $('#btn-inbox-clear').addEventListener('click', async () => {
+    if (!confirm(`忽略全部 ${data.total} 条待审核消息？（不再收录）`)) return;
+    try {
+      const r = await api('/api/inbox', { method: 'DELETE' });
+      toast(`已忽略 ${r.dismissed} 条`);
+      refresh();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+  $$('#view [data-iact]').forEach((btn) => btn.addEventListener('click', async () => {
+    const id = btn.dataset.iid;
+    try {
+      if (btn.dataset.iact === 'accept') {
+        await api(`/api/inbox/${id}/accept`, { method: 'POST' });
+        toast('已收录进信息流 ✓');
+      } else {
+        await api('/api/inbox/' + id, { method: 'DELETE' });
+        toast('已忽略');
+      }
+      refresh();
+    } catch (e) { toast(e.message, 'error'); }
+  }));
 }
 
 /* ========= 待办任务 ========= */
@@ -319,11 +410,22 @@ function taskRow(it) {
 async function loadTasks() {
   const view = $('#view');
   view.innerHTML = '<div class="loading">加载中…</div>';
-  const params = new URLSearchParams({ status: 'open', sort: 'deadline', limit: '200' });
-  if (state.q) params.set('q', state.q);
-  if (state.group) params.set('group_id', state.group);
-  const data = await api('/api/messages?' + params);
-  const items = data.items.filter((it) => it.category === 'task' || it.deadline);
+  // 大数据量下分三路取数：最近的逾期（新的在前）、未逾期事项、无截止时间的任务，
+  // 避免一年前的旧逾期按截止升序霸占分页、把近期要紧的事挤出列表
+  const mk = (extra) => {
+    const p = new URLSearchParams({ status: 'open', limit: '200' });
+    if (state.q) p.set('q', state.q);
+    if (state.group) p.set('group_id', state.group);
+    for (const [k, v] of Object.entries(extra)) p.set(k, v);
+    return '/api/messages?' + p;
+  };
+  const [odRes, upRes, tdRes] = await Promise.all([
+    api(mk({ sort: 'deadline_desc', due: 'overdue', limit: '100' })),
+    api(mk({ sort: 'deadline', due: 'after' })),
+    api(mk({ category: 'task' })),
+  ]);
+  const overdueTotal = odRes.total || 0;
+  const items = odRes.items.concat(upRes.items, tdRes.items.filter((it) => !it.deadline));
   items.forEach((it) => { state.cache[it.id] = it; });
   if (!items.length) {
     view.innerHTML = `<div class="empty"><div class="big">🎉</div>没有待办任务，太棒了！<br>任务类信息或带截止时间的信息会出现在这里</div>`;
@@ -344,13 +446,16 @@ async function loadTasks() {
   }
   const sec = (key, title, list) => list.length
     ? `<div class="tasksec sec-${key}"><h3>${title}（${list.length}）</h3>${list.map(taskRow).join('')}</div>` : '';
+  const overdueTitle = overdueTotal > buckets.overdue.length
+    ? `⏰ 已逾期（共 ${overdueTotal} 条，显示最近 ${buckets.overdue.length} 条）`
+    : `⏰ 已逾期（${buckets.overdue.length}）`;
   view.innerHTML =
     `<div class="taskhead"><span class="hint">按截止时间排列，点圆圈打勾完成，点标题可编辑</span>
       <span style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="ghost" id="btn-ics">📅 导出到手机日历（.ics）</button>
         <button class="ghost" id="btn-print">🖨 打印清单</button>
       </span></div>` +
-    sec('overdue', '⏰ 已逾期', buckets.overdue) +
+    sec('overdue', overdueTitle, buckets.overdue) +
     sec('today', '🔥 今天要完成', buckets.today) +
     sec('week', '📅 未来 7 天', buckets.week) +
     sec('later', '🗓 以后 / 无截止', buckets.later);
@@ -362,7 +467,8 @@ async function loadTasks() {
 async function loadCalendar() {
   const view = $('#view');
   view.innerHTML = '<div class="loading">加载中…</div>';
-  const params = new URLSearchParams({ status: 'open', sort: 'deadline', limit: '200' });
+  // 只取未逾期事项（due=after）：大数据量下按截止升序的前 200 条全是历史逾期，当月事项会被挤出
+  const params = new URLSearchParams({ status: 'open', sort: 'deadline', due: 'after', limit: '300' });
   if (state.group) params.set('group_id', state.group);
   const data = await api('/api/messages?' + params);
   state.calByDay = {};
@@ -469,7 +575,13 @@ async function loadFiles() {
     view.innerHTML = `<div class="empty"><div class="big">📂</div>还没有文件<br>在添加/编辑信息时可以上传附件</div>`;
     return;
   }
-  view.innerHTML = data.items.map((a) => {
+  // 「累计」用服务端的全量统计（跟随当前筛选）；老接口无此字段时退回当前页求和
+  const totViews = data.totalViews != null ? data.totalViews : data.items.reduce((s, a) => s + (a.views || 0), 0);
+  const totDls = data.totalDownloads != null ? data.totalDownloads : data.items.reduce((s, a) => s + (a.downloads || 0), 0);
+  view.innerHTML = `
+    <div class="inboxhead"><h3>📁 文件（${data.items.length}）</h3>
+      <span class="hint">📖 累计阅读 ${totViews} 次 · ⬇️ 累计下载 ${totDls} 次</span></div>
+    ` + data.items.map((a) => {
     const [icon, typeName] = extIcon(a.orig_name);
     const plat = a.group_platform ? (PLATS[a.group_platform] || PLATS.other) : null;
     return `<div class="frow">
@@ -478,12 +590,15 @@ async function loadFiles() {
         <div class="fname">${hl(a.orig_name, state.q)} <span class="att-size">${fmtSize(a.size)}</span></div>
         <div class="fmeta">
           <span>${typeName}</span>
+          <span title="打开预览次数">📖 ${a.views || 0}</span>
+          <span title="下载次数">⬇️ ${a.downloads || 0}</span>
           ${a.group_name ? `<span class="chip ${plat ? plat.cls : ''}">${plat ? plat.label : ''}·${esc(a.group_name)}</span>` : ''}
           <span class="fmsg" data-msg="${a.message_id}">来自：${hl(a.message_title || '(无标题)', state.q)}</span>
           <span>${esc(fmtReceived(a.created_at))}</span>
         </div>
       </div>
-      <a class="ghost" href="/api/attachments/${a.id}/download" target="_blank">打开 / 下载</a>
+      <a class="ghost" href="/api/attachments/${a.id}/download" target="_blank">打开</a>
+      <a class="ghost" href="/api/attachments/${a.id}/download?dl=1">下载</a>
     </div>`;
   }).join('');
 }
@@ -502,6 +617,20 @@ async function loadStats() {
   const maxG = Math.max(1, ...st.byGroup.map((g) => g.count));
   const maxC = Math.max(1, ...st.byCategory.map((c) => c.c));
   const ingestUrl = cfg ? `${cfg.lanUrls[0] || `http://localhost:${cfg.port}`}/api/ingest?token=${cfg.ingestToken}` : '';
+  const onebotUrl = cfg ? `${cfg.lanUrls[0] || `http://localhost:${cfg.port}`}/api/onebot/report` : '';
+  const ob = (cfg && cfg.onebot) || { token: '', groups: {} };
+  const obMode = ob.mode === 'auto' ? 'auto' : 'review';
+  const obKeys = Object.keys(ob.groups || {});
+  const obFilter = ob.filter || {};
+  const fparts = [];
+  if (obFilter.minLength) fparts.push(`短于 ${obFilter.minLength} 字的跳过`);
+  if ((obFilter.stopWords || []).length) fparts.push(`水词屏蔽 ${obFilter.stopWords.length} 个`);
+  if ((obFilter.keywords || []).length) fparts.push(`只收录含关键词：${obFilter.keywords.join('、')}`);
+  if (obFilter.adminsOnly) fparts.push('只收录群主/管理员发言');
+  if (obFilter.smart) fparts.push('智能过滤，像通知/任务的才收录');
+  const napcatExample = cfg ? JSON.stringify({ network: { httpClients: [{
+    name: 'infohub', enable: true, url: onebotUrl, messagePostFormat: 'array', reportSelfMessage: false, token: ob.token,
+  }] } }, null, 2) : '';
   view.innerHTML = `
     <div class="statgrid">
       ${statCard('📨 信息总数', st.total)}
@@ -538,11 +667,31 @@ async function loadStats() {
     </div>
     ${cfg ? `<div class="panel">
       <h3>📥 自动接入（进阶）</h3>
-      <p class="hint">把这个接口地址给自动化程序（QQ 机器人、手机快捷指令等）使用，新消息会自动进入信息流，
+      <p class="hint">把这个接口地址给自动化程序（手机快捷指令等）使用，新消息会自动进入信息流，
       并自动识别分类和截止时间。</p>
       <div class="codebox">${esc(ingestUrl)}</div>
       <button class="ghost" id="btn-copy-ingest">📋 复制接口地址</button>
       <p class="hint">请求体示例：<code>{"text":"消息原文","group":"班级通知群","sender":"王老师","platform":"wechat"}</code></p>
+    </div>` : ''}
+    ${cfg ? `<div class="panel">
+      <h3>🐧 QQ 自动接入（OneBot 机器人）</h3>
+      ${obMode === 'auto'
+        ? `<p class="hint">当前为 <b>自动收录</b> 模式：消息通过防闲聊过滤后直接进入信息流。想改成先人工挑一遍，在 data/config.json 里把 onebot.mode 改为 <code>"review"</code>。</p>`
+        : `<p class="hint">当前为 <b>人工审核</b> 模式（默认）：群消息先进侧栏的「📥 待审核」，由你挑哪些收录进信息流，收录时自动识别分类和截止时间。想全自动收录，在 data/config.json 里把 onebot.mode 改为 <code>"auto"</code>。</p>`}
+      <p class="hint">在电脑上用 <b>NapCat / LLOneBot / Lagrange / go-cqhttp</b> 等 OneBot 11 框架登录一个 QQ 小号并拉进班级群，
+      在它的网络配置里添加 <b>HTTP POST 上报</b>，地址和令牌填下面两项。群文件上传也会记录（纯图片/表情消息不收录，避免刷屏）。</p>
+      <div class="codebox">${esc(onebotUrl)}</div>
+      <button class="ghost" id="btn-copy-onebot">📋 复制上报地址</button>
+      <p class="hint">令牌 access_token：<code>${esc(ob.token)}</code>${ob.secretOn ? '（已在 config 里启用签名校验，框架 secret 填同一段密钥）' : '（与接入令牌相同；可在 data/config.json 的 onebot.token 单独设置，或设 onebot.secret 启用签名校验）'}</p>
+      <p class="hint">NapCat / LLOneBot 配置示例（其他框架按各自文档填同样两项）：</p>
+      <div class="codebox">${esc(napcatExample)}</div>
+      <button class="ghost" id="btn-copy-onebot-json">📋 复制配置示例</button>
+      <p class="hint">🛡 防闲聊过滤：${fparts.length
+        ? `${esc(fparts.join('；'))}。在 data/config.json 的 onebot.filter 里调整${obMode === 'review' ? '（关键词、仅管理员、智能过滤仅在 auto 模式参与）' : ''}。`
+        : '当前未启用，群里所有文字消息都会收录。可在 data/config.json 的 onebot.filter 里开启：最短长度、水词屏蔽、关键词白名单、仅群主/管理员、智能过滤（像通知/任务的才收录）。'}</p>
+      ${obKeys.length
+        ? `<p class="hint">已设群白名单，只收录：<code>${obKeys.map((k) => esc(k)).join('</code>、<code>')}</code>（显示名：${obKeys.map((k) => esc(ob.groups[k] || `QQ群 ${k}`)).join('、')}）</p>`
+        : '<p class="hint">未设白名单：机器人所在<b>所有群</b>的消息都会收录。只想收录部分群，在 data/config.json 的 onebot.groups 里配置（如 <code>"groups": {"123456789": "班级通知群"}</code>），保存后重启生效。</p>'}
     </div>` : ''}
     <div class="panel">
       <h3>👥 群管理</h3>
@@ -576,6 +725,16 @@ async function loadStats() {
   const copyBtn = $('#btn-copy-ingest');
   if (copyBtn) copyBtn.addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(ingestUrl); toast('已复制接口地址'); }
+    catch (e) { toast('复制失败，请手动选择复制', 'error'); }
+  });
+  const obCopy = $('#btn-copy-onebot');
+  if (obCopy) obCopy.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(onebotUrl); toast('已复制上报地址'); }
+    catch (e) { toast('复制失败，请手动选择复制', 'error'); }
+  });
+  const obCopyJson = $('#btn-copy-onebot-json');
+  if (obCopyJson) obCopyJson.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(napcatExample); toast('已复制配置示例'); }
     catch (e) { toast('复制失败，请手动选择复制', 'error'); }
   });
   const exportBtn = $('#btn-export');
@@ -869,6 +1028,7 @@ async function renderView() {
   const view = $('#view');
   try {
     if (state.view === 'feed') await loadFeed();
+    else if (state.view === 'inbox') await loadInbox();
     else if (state.view === 'tasks') await loadTasks();
     else if (state.view === 'calendar') await loadCalendar();
     else if (state.view === 'files') await loadFiles();
@@ -887,6 +1047,7 @@ async function refresh() {
     await loadGroups();
     await renderView();
     updateBadge();
+    updateInboxBadge();
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -1080,19 +1241,33 @@ function setupBellState() {
   const btn = $('#btn-bell');
   if (btn) btn.textContent = ('Notification' in window && Notification.permission === 'granted') ? '🔔' : '🔕';
 }
+const BASE_TITLE = document.title; // 页面原始标题
 async function updateBadge() {
   try {
     const st = await api('/api/stats');
     const today = ymd(new Date());
     const n = (st.overdue || 0) + ((st.upcoming || []).filter((it) => String(it.deadline).slice(0, 10) === today).length);
-    // 标题角标：已逾期 + 今天截止的数量
-    document.title = n > 0 ? `(${n}) 信息汇总` : '信息汇总';
+    // 逾期 + 今日截止的数量：同时体现在浏览器标签页标题和铃铛角标上
+    document.title = n > 0 ? `(${n}) ${BASE_TITLE}` : BASE_TITLE;
+    const bell = $('#btn-bell');
+    if (bell) {
+      let dot = $('#bell-badge');
+      if (n > 0) {
+        if (!dot) { dot = document.createElement('span'); dot.id = 'bell-badge'; bell.appendChild(dot); }
+        dot.textContent = n > 99 ? '99+' : String(n);
+      } else if (dot) dot.remove();
+    }
   } catch (e) { /* 忽略 */ }
 }
 async function checkNotifs() {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   try {
-    const data = await api('/api/messages?status=open&sort=deadline&limit=100');
+    // 大数据量下只看：24 小时内到期的未逾期事项 + 最近逾期的 20 条（更久远的逾期不再提醒）
+    const [up, od] = await Promise.all([
+      api('/api/messages?status=open&sort=deadline&due=after&limit=100'),
+      api('/api/messages?status=open&sort=deadline_desc&due=overdue&limit=20'),
+    ]);
+    const data = { items: od.items.concat(up.items) };
     const now = new Date();
     const key = 'infohub-notified-' + ymd(now);
     // 只保留当天的提醒记录，历史 key 会一直占着 localStorage
@@ -1106,7 +1281,7 @@ async function checkNotifs() {
       if (!it.deadline) continue;
       const end = it.deadline.length > 10 ? it.deadline.replace(' ', 'T') : it.deadline + 'T23:59';
       const diffH = (new Date(end) - now) / 3600000;
-      if (diffH > 24) break; // 已按截止时间排序，后面更远
+      if (diffH > 24 || diffH < -24) continue;
       if (done.has(String(it.id))) continue;
       done.add(String(it.id));
       const label = diffH < 0 ? '已逾期' : `还有约 ${Math.max(1, Math.round(diffH))} 小时截止`;
@@ -1134,7 +1309,24 @@ function initExtras() {
   setupBellState();
   updateBadge();
   if ('Notification' in window && Notification.permission === 'granted') checkNotifs();
-  setInterval(() => { updateBadge(); checkNotifs(); }, 5 * 60 * 1000);
+  setInterval(() => { updateBadge(); updateInboxBadge(); checkNotifs(); }, 5 * 60 * 1000);
+}
+/* 待审核数量角标：显示在侧栏和底部导航的「待审核」按钮上 */
+function setNavBadge(viewName, n) {
+  $$('#mainnav button[data-view="' + viewName + '"], #tabbar button[data-view="' + viewName + '"]').forEach((btn) => {
+    let b = btn.querySelector('.navbadge');
+    if (n > 0) {
+      if (!b) { b = document.createElement('span'); b.className = 'navbadge'; btn.appendChild(b); }
+      b.textContent = n > 99 ? '99+' : String(n);
+    } else if (b) b.remove();
+  });
+}
+async function updateInboxBadge() {
+  if (!canEdit()) return;
+  try {
+    const d = await api('/api/inbox?limit=1');
+    setNavBadge('inbox', d.total || 0);
+  } catch (e) { /* 只读访客无权限，静默 */ }
 }
 
 /* ========= 启动 ========= */

@@ -14,7 +14,7 @@ const crypto = require('crypto');
 const { URL } = require('url');
 
 const { db, DATA_DIR, UPLOAD_DIR } = require('./db');
-const { smartParse } = require('./lib/smartparse');
+const { smartParse, hasNoticeSignal } = require('./lib/smartparse');
 const { parseMultipart } = require('./lib/multipart');
 
 const PORT = Number(process.env.PORT || 5757);
@@ -43,18 +43,30 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
-/* ---------- 外部接入令牌（存 data/config.json） ---------- */
+/* ---------- 外部接入令牌 / OneBot 配置（存 data/config.json） ---------- */
 function loadConfig() {
   const p = path.join(DATA_DIR, 'config.json');
-  let c = {};
+  let c = null;
   try {
-    const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) c = parsed;
-  } catch (e) { /* 首次启动生成 */ }
-  let changed = false;
-  if (typeof c.ingestToken !== 'string' || !c.ingestToken) { c.ingestToken = crypto.randomBytes(16).toString('hex'); changed = true; }
-  if (typeof c.password !== 'string') { c.password = ''; changed = true; }
-  if (changed || !fs.existsSync(p)) fs.writeFileSync(p, JSON.stringify(c, null, 2));
+    c = JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch (e) { /* 重新生成 */ }
+  if (!c || typeof c !== 'object') c = {};
+  // 逐字段补缺：不能整体覆盖，否则会把用户已设置的密码清掉
+  if (typeof c.ingestToken !== 'string' || !c.ingestToken) c.ingestToken = crypto.randomBytes(16).toString('hex');
+  if (typeof c.password !== 'string') c.password = '';
+  // OneBot 11（QQ 机器人）接入配置：mode=review 消息先进「待审核」由人工收录（默认），
+  // mode=auto 通过过滤后直接进信息流；token=access_token 鉴权；secret 非空时改用 HMAC 签名校验；
+  // groups 为群白名单 { "QQ群号": "站内显示名" }，留空对象表示收录机器人所在的所有群
+  c.onebot = Object.assign({ mode: 'review', token: '', secret: '', includePrivate: false, groups: {} }, c.onebot || {});
+  // 防闲聊过滤（minLength/stopWords 两种模式都生效；keywords/adminsOnly/smart 仅 auto 模式参与）
+  c.onebot.filter = Object.assign({
+    minLength: 4,
+    stopWords: ['收到', '收到收到', '好的', '好的收到', '嗯', '哦', '1', '+1', '666', 'ok', '谢谢', '谢谢老师', '哈哈', '哈哈哈', '哈哈哈哈'],
+    keywords: [],      // 非空 = 只收录含任一关键词的消息，如 ['通知','作业','提交','截止']
+    adminsOnly: false, // true = 只收录群主/管理员（通常是老师）的发言
+    smart: false,      // true = 智能过滤：像通知/任务（有分类信号或截止时间）才收录
+  }, c.onebot.filter || {});
+  try { fs.writeFileSync(p, JSON.stringify(c, null, 2)); } catch (e) { /* 写不了就用内存值 */ }
   return c;
 }
 const CONFIG = loadConfig();
@@ -141,6 +153,72 @@ function pickColor() {
 // 搜索词按字面匹配：转义 LIKE 通配符 % 和 _
 function likeArg(s) {
   return '%' + String(s).replace(/([\\%_])/g, '\\$1') + '%';
+}
+function fmtSize(n) {
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n < 1024) return n + 'B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + 'KB';
+  return (n / 1048576).toFixed(1) + 'MB';
+}
+
+/* ---------- OneBot 11 上报（QQ 机器人：NapCat / LLOneBot / Lagrange / go-cqhttp 等） ---------- */
+const ONEBOT_CQ = {
+  image: '[图片]', record: '[语音]', video: '[视频]', file: '[文件]',
+  face: '', at: '', reply: '', music: '', node: '',
+  json: '[卡片消息]', forward: '[合并转发]',
+};
+// OneBot 消息段数组 / CQ 码字符串统一成纯文本
+function onebotText(msg) {
+  if (Array.isArray(msg)) {
+    return msg.map((seg) => {
+      if (typeof seg === 'string') return seg;
+      const d = (seg && seg.data) || {};
+      if (seg.type === 'text') return d.text || '';
+      if (seg.type === 'at') return d.qq === 'all' ? '@全体成员' : '';
+      return ONEBOT_CQ[seg.type] !== undefined ? ONEBOT_CQ[seg.type] : '';
+    }).join('').trim();
+  }
+  return String(msg || '').replace(/\[CQ:(\w+)[^\]]*\]/g, (s, t) => (ONEBOT_CQ[t] !== undefined ? ONEBOT_CQ[t] : '')).trim();
+}
+// OneBot 的 unix 秒时间 → 本地 "YYYY-MM-DD HH:MM"（超出合理范围按服务器时间处理）
+function tsToLocal(sec) {
+  const n = Number(sec);
+  if (!Number.isFinite(n)) return null;
+  const d = new Date(n * 1000);
+  if (d.getFullYear() < 2020 || d.getTime() > Date.now() + 86400000) return null;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function onebotSigOk(req, raw) {
+  const secret = CONFIG.onebot.secret;
+  if (!secret) return false;
+  const sig = String(req.headers['x-signature'] || '');
+  const expect = 'sha1=' + crypto.createHmac('sha1', secret).update(raw).digest('hex');
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expect);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+// 鉴权优先级：配置了 secret → 只认 HMAC 签名；否则认 access_token（query 或 Bearer 头）
+function onebotAuthOk(req, query, raw) {
+  if (CONFIG.onebot.secret) return onebotSigOk(req, raw);
+  const token = CONFIG.onebot.token || CONFIG.ingestToken;
+  const q = query.get('access_token');
+  const auth = String(req.headers.authorization || '');
+  const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  return (q === token) || (bearer !== '' && bearer === token);
+}
+// 按 ext_key（qq:群号）绑定站内群；没绑过但白名单里给了显示名 → 按名字绑定并回写 ext_key；都没有 → 自动建群
+function bindOnebotGroup(qqGid, displayName) {
+  const ext = 'qq:' + qqGid;
+  const exist = db.prepare('SELECT * FROM groups WHERE ext_key = ?').get(ext);
+  if (exist) return exist.id;
+  const byName = db.prepare('SELECT * FROM groups WHERE name = ?').get(displayName);
+  if (byName) {
+    db.prepare('UPDATE groups SET ext_key = ? WHERE id = ?').run(ext, byName.id);
+    return byName.id;
+  }
+  const info = db.prepare(`INSERT INTO groups (name, platform, color, ext_key, created_at) VALUES (?, 'qq', ?, ?, ?)`)
+    .run(displayName, pickColor(), ext, nowStr());
+  return Number(info.lastInsertRowid);
 }
 
 function sendJSON(res, code, obj) {
@@ -243,6 +321,14 @@ route('GET', '/api/config', (ctx) => {
     port: PORT,
     ingestToken: CONFIG.ingestToken,
     lanUrls: lanIPs().map((ip) => `http://${ip}:${PORT}`),
+    onebot: {
+      mode: CONFIG.onebot.mode || 'review',
+      token: CONFIG.onebot.token || CONFIG.ingestToken,
+      secretOn: !!CONFIG.onebot.secret,
+      includePrivate: !!CONFIG.onebot.includePrivate,
+      groups: CONFIG.onebot.groups || {},
+      filter: CONFIG.onebot.filter,
+    },
   };
 });
 
@@ -299,16 +385,24 @@ route('GET', '/api/messages', (ctx) => {
   if (cat && CATEGORIES.includes(cat)) { where.push('m.category = ?'); args.push(cat); }
   const st = q.get('status');
   if (st === 'open' || st === 'done') { where.push('m.status = ?'); args.push(st); }
+  // 截止时间范围筛选（due=after 未逾期 / due=overdue 已逾期）：
+  // 大数据量下待办/日历只取相关区间，避免一年前的旧逾期把近期事项挤出分页
+  const DLX = `(CASE WHEN m.deadline IS NULL OR m.deadline = '' THEN NULL WHEN length(m.deadline) = 10 THEN m.deadline || ' 23:59' ELSE m.deadline END)`;
+  const due = q.get('due');
+  if (due === 'after') { where.push(DLX + ' >= ?'); args.push(nowStr()); }
+  else if (due === 'overdue') { where.push(DLX + ' < ?'); args.push(nowStr()); }
+  const sort = q.get('sort') === 'deadline' ? 'deadline' : q.get('sort') === 'deadline_desc' ? 'deadline_desc' : 'time';
+  const orderBy = sort === 'deadline'
+    ? 'ORDER BY (CASE WHEN m.deadline IS NULL OR m.deadline = \'\' THEN 1 ELSE 0 END) ASC, m.deadline ASC, m.pinned DESC'
+    : sort === 'deadline_desc'
+      ? 'ORDER BY (CASE WHEN m.deadline IS NULL OR m.deadline = \'\' THEN 1 ELSE 0 END) ASC, m.deadline DESC, m.pinned DESC'
+      : 'ORDER BY m.pinned DESC, m.received_at DESC, m.id DESC';
   const search = (q.get('q') || '').trim();
   if (search) {
     where.push(`(m.title LIKE ? ESCAPE '\\' OR m.content LIKE ? ESCAPE '\\' OR m.sender_name LIKE ? ESCAPE '\\' OR m.tags LIKE ? ESCAPE '\\')`);
     const like = likeArg(search);
     args.push(like, like, like, like);
   }
-  const sort = q.get('sort') === 'deadline' ? 'deadline' : 'time';
-  const orderBy = sort === 'deadline'
-    ? 'ORDER BY (CASE WHEN m.deadline IS NULL OR m.deadline = \'\' THEN 1 ELSE 0 END) ASC, m.deadline ASC, m.pinned DESC'
-    : 'ORDER BY m.pinned DESC, m.received_at DESC, m.id DESC';
   const limit = Math.min(Number(q.get('limit')) || 50, 200);
   const offset = Math.max(Number(q.get('offset')) || 0, 0);
   const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
@@ -430,23 +524,49 @@ route('POST', '/api/upload', async (ctx) => {
   return { ok: true, ids: saved };
 });
 
-route('GET', '/api/attachments/:id/download', (ctx) => {
-  const id = Number(ctx.params.id);
-  if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
-  const a = db.prepare('SELECT * FROM attachments WHERE id = ?').get(id);
-  if (!a) throw new HttpError(404, '附件不存在');
+/* ---------- 附件 ---------- */
+function serveAttachment(ctx, a, { inline, count, cache } = {}) {
   const fp = path.resolve(UPLOAD_DIR, a.stored_name);
   if (!fp.startsWith(UPLOAD_DIR + path.sep) || !fs.existsSync(fp)) throw new HttpError(404, '文件已丢失');
-  // 仅图片和 PDF 允许浏览器内联预览；其余（含 html/svg 等可执行内容）一律强制下载，避免同源脚本风险
-  const inline = /^(image\/(png|jpeg|gif|webp|bmp)|application\/pdf)$/.test(a.mime || '');
+  if (count === 'view') db.prepare('UPDATE attachments SET views = views + 1 WHERE id = ?').run(a.id);
+  if (count === 'download') db.prepare('UPDATE attachments SET downloads = downloads + 1 WHERE id = ?').run(a.id);
   const res = ctx.res;
   res.wrote = true;
   res.writeHead(200, {
     'Content-Type': a.mime || 'application/octet-stream',
     'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(a.orig_name)}`,
     'X-Content-Type-Options': 'nosniff',
+    ...(cache ? { 'Cache-Control': 'public, max-age=3600' } : {}),
   });
   fs.createReadStream(fp).pipe(res);
+}
+route('GET', '/api/attachments/:id/download', (ctx) => {
+  const id = Number(ctx.params.id);
+  if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
+  const a = db.prepare('SELECT * FROM attachments WHERE id = ?').get(id);
+  if (!a) throw new HttpError(404, '附件不存在');
+  // 仅图片和 PDF 允许浏览器内联预览；其余（含 html/svg 等可执行内容）一律强制下载，避免同源脚本风险
+  const previewable = /^(image\/(png|jpeg|gif|webp|bmp)|application\/pdf)$/.test(a.mime || '');
+  const forceDl = ctx.query.get('dl') === '1';
+  const inline = previewable && !forceDl;
+  // 计数规则：
+  //  - 强制下载（?dl=1）或本身不可预览（点开即下载）→ 下载 +1
+  //  - 可预览文件被打开阅读 → 阅读 +1；但 <img> 内嵌（Sec-Fetch-Dest: image）是页面渲染，不算
+  if (forceDl || !inline) {
+    serveAttachment(ctx, a, { inline, count: 'download' });
+  } else if (String(ctx.req.headers['sec-fetch-dest'] || '') !== 'image') {
+    serveAttachment(ctx, a, { inline, count: 'view' });
+  } else {
+    serveAttachment(ctx, a, { inline });
+  }
+});
+// 缩略图专用：不计阅读数，允许浏览器缓存，信息流里同一张图反复渲染不会虚增统计
+route('GET', '/api/attachments/:id/raw', (ctx) => {
+  const id = Number(ctx.params.id);
+  if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
+  const a = db.prepare('SELECT * FROM attachments WHERE id = ?').get(id);
+  if (!a) throw new HttpError(404, '附件不存在');
+  serveAttachment(ctx, a, { inline: true, cache: true });
 });
 
 route('DELETE', '/api/attachments/:id', (ctx) => {
@@ -472,13 +592,17 @@ route('GET', '/api/files', (ctx) => {
     args.push(like, like);
   }
   const limit = Math.min(Number(ctx.query.get('limit')) || 100, 300);
+  const whereSql = where.join(' AND ');
   const rows = db.prepare(`SELECT a.*, m.title AS message_title, m.status AS message_status, m.group_id,
       g.name AS group_name, g.platform AS group_platform
       FROM attachments a
       JOIN messages m ON m.id = a.message_id
       LEFT JOIN groups g ON g.id = m.group_id
-      WHERE ${where.join(' AND ')} ORDER BY a.id DESC LIMIT ?`).all(...args, limit);
-  return { items: rows };
+      WHERE ${whereSql} ORDER BY a.id DESC LIMIT ?`).all(...args, limit);
+  // 全量统计（跟随当前筛选）：前端「累计阅读/下载」按这个数显示，而不是只汇总当前页
+  const tot = db.prepare(`SELECT COALESCE(SUM(a.views), 0) AS views, COALESCE(SUM(a.downloads), 0) AS downloads
+      FROM attachments a JOIN messages m ON m.id = a.message_id WHERE ${whereSql}`).get(...args);
+  return { items: rows, totalViews: tot.views, totalDownloads: tot.downloads };
 });
 
 /* ---------- 智能解析（供前端"智能识别"按钮） ---------- */
@@ -517,6 +641,144 @@ route('POST', '/api/ingest', (ctx) => {
   return { ok: true, id: Number(info.lastInsertRowid), parsed };
 });
 
+/* ---------- OneBot 11 HTTP POST 上报入口（QQ 群消息自动进站） ---------- */
+function handleOnebotReport(ctx) {
+  if (!onebotAuthOk(ctx.req, ctx.query, ctx.raw || Buffer.alloc(0))) throw new HttpError(401, '令牌无效');
+  const b = ctx.body || {};
+  const wl = CONFIG.onebot.groups || {};
+  const wlKeys = Object.keys(wl);
+  const gid = Number(b.group_id);
+  const type = b.post_type;
+
+  // 群文件上传通知：记一条“文件”消息（暂不下载文件本身）
+  if (type === 'notice') {
+    if (b.notice_type === 'group_upload' && Number.isInteger(gid) && (!wlKeys.length || wlKeys.includes(String(gid)))) {
+      const f = b.file || {};
+      const name = sField(f.name, 120);
+      if (!name) return { ok: true, ignored: true };
+      const size = Number(f.size) || 0;
+      const bound = bindOnebotGroup(gid, (sField(wl[String(gid)], 60)) || `QQ群 ${gid}`);
+      const text = `[文件] ${name}${size ? `（${fmtSize(size)}）` : ''}`;
+      const info = db.prepare(`INSERT INTO messages
+          (title, content, category, status, group_id, sender_name, received_at, created_at, updated_at)
+          VALUES (?, ?, 'file', 'open', ?, 'QQ群文件', ?, ?, ?)`)
+        .run(text, text, bound, tsToLocal(b.time) || nowStr(), nowStr(), nowStr());
+      return { ok: true, id: Number(info.lastInsertRowid) };
+    }
+    return { ok: true, ignored: true };
+  }
+  if (type !== 'message') return { ok: true, ignored: true };
+
+  const isGroup = b.message_type === 'group' && Number.isInteger(gid);
+  const isPrivate = b.message_type === 'private';
+  if (!isGroup && !(isPrivate && CONFIG.onebot.includePrivate)) return { ok: true, ignored: true };
+  if (isGroup && wlKeys.length && !wlKeys.includes(String(gid))) return { ok: true, ignored: true };
+
+  const text = onebotText(b.message != null ? b.message : b.raw_message);
+  // 纯图片 / 表情等没有文字内容的消息不收录，避免刷屏
+  if (!text || !text.replace(/\[(图片|语音|视频|文件|卡片消息|合并转发|表情)\]/g, '').trim()) {
+    return { ok: true, ignored: true };
+  }
+  // 与手动录入接口同一口径：正文上限 20000 字
+  const content = sField(text, 20000);
+
+  // 水言过滤（两种模式都生效）：太短或命中屏蔽词的没有收录/审核价值
+  const flt = CONFIG.onebot.filter || {};
+  const plain = content.trim();
+  const low = plain.toLowerCase();
+  if (flt.minLength && plain.length < flt.minLength) return { ok: true, ignored: true, reason: 'too-short' };
+  if ((flt.stopWords || []).some((w) => String(w).toLowerCase() === low)) return { ok: true, ignored: true, reason: 'stopword' };
+
+  const sender = sField((b.sender && (b.sender.card || b.sender.nickname)) || '', 60);
+  const received = tsToLocal(b.time) || nowStr();
+  // 断线重连时框架可能补发最近消息：同人 + 同内容 + 5 分钟内视为重复上报，直接丢弃
+  const ago = new Date(Date.now() - 5 * 60000);
+  const agoStr = `${ago.getFullYear()}-${pad(ago.getMonth() + 1)}-${pad(ago.getDate())} ${pad(ago.getHours())}:${pad(ago.getMinutes())}`;
+
+  // 人工审核模式（默认）：先进「待审核」，管理员在界面上挑着收录
+  if ((CONFIG.onebot.mode || 'review') !== 'auto') {
+    const dupMsg = db.prepare(`SELECT id FROM messages WHERE sender_name = ? AND content = ? AND received_at >= ? LIMIT 1`)
+      .get(sender, content, agoStr);
+    if (dupMsg) return { ok: true, deduped: true, id: dupMsg.id };
+    const dupInbox = db.prepare(`SELECT id FROM inbox WHERE sender_name = ? AND content = ? AND received_at >= ? LIMIT 1`)
+      .get(sender, content, agoStr);
+    if (dupInbox) return { ok: true, deduped: true, id: dupInbox.id };
+    const info = db.prepare(`INSERT INTO inbox (content, sender_name, group_name, qq_gid, received_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(content, sender, isGroup ? (sField(wl[String(gid)], 60) || `QQ群 ${gid}`) : '', isGroup ? String(gid) : '', received, nowStr());
+    return { ok: true, inbox: true, id: Number(info.lastInsertRowid) };
+  }
+
+  // 自动收录模式：关键词 / 仅管理员 / 智能过滤（review 模式下这些由人工判断，不参与）
+  if (flt.adminsOnly && (!isGroup || !['owner', 'admin'].includes(String((b.sender && b.sender.role) || '')))) {
+    return { ok: true, ignored: true, reason: 'role' };
+  }
+  const kws = (flt.keywords || []).filter(Boolean);
+  if (kws.length && !kws.some((k) => content.includes(k))) return { ok: true, ignored: true, reason: 'keyword' };
+  if (flt.smart && !hasNoticeSignal(content)) return { ok: true, ignored: true, reason: 'chat' };
+
+  let gidInternal = null;
+  if (isGroup) {
+    gidInternal = bindOnebotGroup(gid, (sField(wl[String(gid)], 60)) || `QQ群 ${gid}`);
+    const dup = db.prepare(`SELECT id FROM messages WHERE group_id = ? AND sender_name = ? AND content = ? AND received_at >= ? LIMIT 1`)
+      .get(gidInternal, sender, content, agoStr);
+    if (dup) return { ok: true, deduped: true, id: dup.id };
+  }
+
+  const parsed = smartParse(content);
+  const info = db.prepare(`INSERT INTO messages
+      (title, content, category, status, group_id, sender_name, received_at, deadline, priority, tags, created_at, updated_at)
+      VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(parsed.title || content.slice(0, 40), content, parsed.category, gidInternal, sender,
+      received, parsed.deadline || '', parsed.priority ? 1 : 0, (parsed.tags || []).join(','), nowStr(), nowStr());
+  return { ok: true, id: Number(info.lastInsertRowid), parsed };
+}
+route('POST', '/api/onebot/report', handleOnebotReport);
+route('POST', '/api/onebot', handleOnebotReport);
+
+/* ---------- 待审核收件箱（review 模式：QQ 消息先入箱，管理员挑着收录） ---------- */
+function acceptInboxItem(id) {
+  const item = db.prepare('SELECT * FROM inbox WHERE id = ?').get(id);
+  if (!item) throw new HttpError(404, '待审核消息不存在');
+  const gid = item.qq_gid ? bindOnebotGroup(item.qq_gid, item.group_name || `QQ群 ${item.qq_gid}`) : null;
+  const parsed = smartParse(item.content);
+  const info = db.prepare(`INSERT INTO messages
+      (title, content, category, status, group_id, sender_name, received_at, deadline, priority, tags, created_at, updated_at)
+      VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(parsed.title || item.content.slice(0, 40), item.content, parsed.category, gid, item.sender_name,
+      item.received_at || nowStr(), parsed.deadline || '', parsed.priority ? 1 : 0, (parsed.tags || []).join(','), nowStr(), nowStr());
+  db.prepare('DELETE FROM inbox WHERE id = ?').run(id);
+  return Number(info.lastInsertRowid);
+}
+route('GET', '/api/inbox', (ctx) => {
+  const limit = Math.min(Number(ctx.query.get('limit')) || 300, 500);
+  const total = db.prepare('SELECT COUNT(*) AS c FROM inbox').get().c;
+  const rows = db.prepare('SELECT * FROM inbox ORDER BY id DESC LIMIT ?').all(limit);
+  return { total, items: rows };
+});
+route('POST', '/api/inbox/accept-all', () => {
+  const ids = db.prepare('SELECT id FROM inbox ORDER BY id LIMIT 500').all().map((r) => r.id);
+  for (const id of ids) acceptInboxItem(id);
+  console.log(`待审核批量收录：${ids.length} 条`);
+  return { ok: true, accepted: ids.length };
+});
+route('POST', '/api/inbox/:id/accept', (ctx) => {
+  const id = Number(ctx.params.id);
+  if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
+  return getMessage(acceptInboxItem(id));
+});
+route('DELETE', '/api/inbox/:id', (ctx) => {
+  const id = Number(ctx.params.id);
+  if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
+  const info = db.prepare('DELETE FROM inbox WHERE id = ?').run(id);
+  if (!info.changes) throw new HttpError(404, '待审核消息不存在');
+  return { ok: true };
+});
+route('DELETE', '/api/inbox', () => {
+  const info = db.prepare('DELETE FROM inbox').run();
+  return { ok: true, dismissed: Number(info.changes) };
+});
+
 /* ---------- 导入备份 ---------- */
 route('POST', '/api/import', (ctx) => {
   const b = ctx.body || {};
@@ -528,68 +790,78 @@ route('POST', '/api/import', (ctx) => {
   if (exist > 0 && ctx.query.get('force') !== '1') {
     throw new HttpError(400, '当前已有数据，为防止重复导入被拒绝。请先用空数据文件夹再导入');
   }
-  const insG = db.prepare('INSERT INTO groups (name, platform, color, remark, created_at) VALUES (?, ?, ?, ?, ?)');
-  const gmap = {};
-  for (const g of b.groups) {
-    const info = insG.run(
-      sField(g.name, 60) || '未命名群',
-      PLATFORMS.includes(g.platform) ? g.platform : 'other',
-      /^#[0-9a-fA-F]{6}$/.test(g.color || '') ? g.color : pickColor(),
-      sField(g.remark, 200),
-      cleanDT(g.created_at) || nowStr());
-    if (g.id != null) gmap[String(g.id)] = Number(info.lastInsertRowid);
-  }
-  const insM = db.prepare(`INSERT INTO messages
-      (title, content, category, group_id, sender_name, received_at, deadline, priority, status, pinned, tags, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  let n = 0;
-  const mmap = {}; // 旧 message_id → 新 id，供附件记录恢复关联
-  for (const m of b.messages) {
-    const info = insM.run(
-      sField(m.title, 120),
-      sField(m.content, 20000),
-      CATEGORIES.includes(m.category) ? m.category : 'notice',
-      m.group_id != null && gmap[String(m.group_id)] != null ? gmap[String(m.group_id)] : null,
-      sField(m.sender_name, 60),
-      cleanDT(m.received_at) || nowStr(),
-      cleanDT(m.deadline) || '',
-      m.priority ? 1 : 0,
-      m.status === 'done' ? 'done' : 'open',
-      m.pinned ? 1 : 0,
-      sField(m.tags, 200),
-      cleanDT(m.created_at) || nowStr(),
-      nowStr());
-    if (m.id != null) mmap[String(m.id)] = Number(info.lastInsertRowid);
-    n++;
-  }
-  // 恢复附件记录（附件文件本身不在 JSON 里，需随 data/ 目录整体迁移）
-  let nAtt = 0;
-  if (Array.isArray(b.attachments)) {
-    const insA = db.prepare(`INSERT INTO attachments (message_id, orig_name, stored_name, size, mime, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)`);
-    for (const a of b.attachments) {
-      const mid = mmap[String(a.message_id)];
-      if (!mid) continue; // 对应信息不在本次备份中，跳过
-      const stored = sField(a.stored_name, 200).replace(/\\/g, '/');
-      if (!stored || stored.includes('..') || stored.startsWith('/')) continue;
-      insA.run(mid, sField(a.orig_name, 200), stored, Math.max(0, Number(a.size) || 0),
-        sField(a.mime, 100), cleanDT(a.created_at) || nowStr());
-      nAtt++;
+  let n = 0, nAtt = 0, nGroups = 0;
+  db.exec('BEGIN'); // 整体导入：任何一步失败就整体回滚，不残留半截数据
+  try {
+    const insG = db.prepare('INSERT INTO groups (name, platform, color, remark, ext_key, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+    const gmap = {};
+    for (const g of b.groups) {
+      const info = insG.run(
+        sField(g.name, 60) || '未命名群',
+        PLATFORMS.includes(g.platform) ? g.platform : 'other',
+        /^#[0-9a-fA-F]{6}$/.test(g.color || '') ? g.color : pickColor(),
+        sField(g.remark, 200),
+        sField(g.ext_key, 40),
+        cleanDT(g.created_at) || nowStr());
+      if (g.id != null) gmap[String(g.id)] = Number(info.lastInsertRowid);
     }
+    const insM = db.prepare(`INSERT INTO messages
+        (title, content, category, group_id, sender_name, received_at, deadline, priority, status, pinned, tags, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const mmap = {}; // 旧 message_id → 新 id，供附件记录恢复关联
+    for (const m of b.messages) {
+      const info = insM.run(
+        sField(m.title, 120),
+        sField(m.content, 20000),
+        CATEGORIES.includes(m.category) ? m.category : 'notice',
+        m.group_id != null && gmap[String(m.group_id)] != null ? gmap[String(m.group_id)] : null,
+        sField(m.sender_name, 60),
+        cleanDT(m.received_at) || nowStr(),
+        cleanDT(m.deadline) || '',
+        m.priority ? 1 : 0,
+        m.status === 'done' ? 'done' : 'open',
+        m.pinned ? 1 : 0,
+        sField(m.tags, 200),
+        cleanDT(m.created_at) || nowStr(),
+        nowStr());
+      if (m.id != null) mmap[String(m.id)] = Number(info.lastInsertRowid);
+      n++;
+    }
+    // 恢复附件记录（附件文件本身不在 JSON 里，需随 data/ 目录整体迁移）
+    if (Array.isArray(b.attachments)) {
+      const insA = db.prepare(`INSERT INTO attachments (message_id, orig_name, stored_name, size, mime, created_at)
+          VALUES (?, ?, ?, ?, ?, ?)`);
+      for (const a of b.attachments) {
+        const mid = mmap[String(a.message_id)];
+        if (!mid) continue; // 对应信息不在本次备份中，跳过
+        const stored = sField(a.stored_name, 200).replace(/\\/g, '/');
+        if (!stored || stored.includes('..') || stored.startsWith('/')) continue;
+        insA.run(mid, sField(a.orig_name, 200), stored, Math.max(0, Number(a.size) || 0),
+          sField(a.mime, 100), cleanDT(a.created_at) || nowStr());
+        nAtt++;
+      }
+    }
+    nGroups = Object.keys(gmap).length;
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw new HttpError(500, '导入失败已整体回滚（' + e.message + '），数据库未变动');
   }
-  const summary = `${Object.keys(gmap).length} 个群、${n} 条信息、${nAtt} 条附件记录`;
+  const summary = `${nGroups} 个群、${n} 条信息、${nAtt} 条附件记录`;
   console.log('导入备份：' + summary);
   log('导入备份：' + summary);
-  return { ok: true, groups: Object.keys(gmap).length, imported: n, attachments: nAtt };
+  return { ok: true, groups: nGroups, imported: n, attachments: nAtt };
 });
 
 /* ---------- 导出 .ics 日历（截止时间进手机系统日历） ---------- */
 const CAT_LABEL = { notice: '通知', task: '任务', activity: '活动', file: '文件', other: '其他' };
 route('GET', '/api/calendar.ics', (ctx) => {
+  // 只导出未逾期事项：大数据量下按截止升序的前 500 条早已是陈年旧账
+  const DLX = `(CASE WHEN m.deadline IS NULL OR m.deadline = '' THEN NULL WHEN length(m.deadline) = 10 THEN m.deadline || ' 23:59' ELSE m.deadline END)`;
   const rows = db.prepare(`SELECT m.id, m.title, m.content, m.category, m.deadline
       FROM messages m
-      WHERE m.status = 'open' AND m.deadline IS NOT NULL AND m.deadline <> ''
-      ORDER BY m.deadline LIMIT 500`).all();
+      WHERE m.status = 'open' AND m.deadline IS NOT NULL AND m.deadline <> '' AND ${DLX} >= ?
+      ORDER BY m.deadline LIMIT 500`).all(nowStr());
   const icsEsc = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
   const stamp = nowStr().replace(/[-: ]/g, '') + '00';
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//InfoHub//信息汇总//CN', 'X-WR-CALNAME:信息汇总·截止提醒', 'CALSCALE:GREGORIAN'];
@@ -659,7 +931,7 @@ route('GET', '/api/export', (ctx) => {
     exported_at: nowStr(),
     groups: db.prepare('SELECT * FROM groups ORDER BY id').all(),
     messages: db.prepare('SELECT * FROM messages ORDER BY id').all(),
-    attachments: db.prepare('SELECT id, message_id, orig_name, stored_name, size, mime, created_at FROM attachments ORDER BY id').all(),
+    attachments: db.prepare('SELECT id, message_id, orig_name, stored_name, size, mime, views, downloads, created_at FROM attachments ORDER BY id').all(),
   };
   const body = JSON.stringify(dump, null, 2);
   const res = ctx.res;
@@ -705,8 +977,9 @@ const server = http.createServer(async (req, res) => {
     // 写入类操作需要管理员登录。机器人凭接入令牌通行（ingest 自带令牌校验，不在此拦截）。
     // /api/config 含接入令牌、/api/export 是全量备份，仅管理员可读；/api/parse 无副作用，保持开放。
     if (CONFIG.password && !authOk(req)
-      && !['/api/login', '/api/logout', '/api/me', '/api/health', '/api/ingest', '/api/parse'].includes(pathname)
-      && (req.method !== 'GET' || ['/api/config', '/api/export'].includes(pathname))) {
+      && !['/api/login', '/api/logout', '/api/me', '/api/health', '/api/ingest', '/api/parse',
+        '/api/onebot/report', '/api/onebot'].includes(pathname)
+      && (req.method !== 'GET' || ['/api/config', '/api/export', '/api/inbox'].includes(pathname))) {
       sendJSON(res, 401, { error: '需要管理员登录', authRequired: true });
       return;
     }
@@ -717,8 +990,8 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST' || req.method === 'PUT') {
         const ct = req.headers['content-type'] || '';
         const raw = await readBody(req);
-        if (ct.includes('multipart/form-data')) ctx.raw = raw;
-        else {
+        ctx.raw = raw; // OneBot 签名校验和 multipart 解析都要用原始字节
+        if (!ct.includes('multipart/form-data')) {
           try { ctx.body = raw.length ? JSON.parse(raw.toString('utf8') || '{}') : {}; }
           catch (e) { throw new HttpError(400, 'JSON 格式错误'); }
         }
