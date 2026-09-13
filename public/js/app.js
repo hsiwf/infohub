@@ -99,8 +99,9 @@ async function api(path, opts = {}) {
   if (!r.ok) {
     let msg = `请求失败(${r.status})`;
     try { const j = await r.json(); if (j.error) msg = j.error; } catch (e) { /* ignore */ }
-    // 管理员会话过期：提示后回登录页（只读访客只提示，不跳转）
-    if (r.status === 401 && state.me && state.me.loggedIn) {
+    // 管理员会话过期：提示后回登录页。必须是"密码模式 + 确认处于登录态"才跳转——
+    // 页面刚打开时 state.me 还是默认值，访客的 401（如待审核角标）绝不能触发跳转
+    if (r.status === 401 && state.me.authRequired && state.me.loggedIn) {
       toast(msg, 'error');
       setTimeout(() => { location.href = '/login'; }, 900);
     }
@@ -288,6 +289,7 @@ async function loadFeed(append = false) {
         ? `<div class="empty"><div class="big">📭</div>还没有记录<br>点右上角「＋ 添加信息」，把老师发的通知粘贴进来试试</div>`
         : `<div class="empty"><div class="big">📭</div>还没有记录<br>老师发布通知后会出现在这里</div>`;
     if (doneSection) view.insertAdjacentHTML('beforeend', doneSection);
+    addBdBanner();
     return;
   }
   // 提醒功能一次性引导（仅在通知权限未决定时出现）
@@ -322,6 +324,19 @@ async function loadFeed(append = false) {
   else view.insertAdjacentHTML('beforeend', html + moreHtml + doneSection);
   const newMore = $('#btn-more');
   if (newMore) newMore.addEventListener('click', () => { loadFeed(true).catch((e) => toast(e.message, 'error')); });
+  addBdBanner();
+}
+// 生日横幅：今天有人过生日时，信息页最顶部展示（含空结果页）
+function addBdBanner() {
+  if (!bdTodayCache || !bdTodayCache.length) return;
+  const view = $('#view');
+  view.insertAdjacentHTML('afterbegin', `<div class="bd-feedbanner">🎂 今天是 ${bdTodayCache.map((m) => '<b>' + esc(m.name) + '</b>').join('、')} 的生日，让我们送上祝福！<a data-bd-goto>去看看 →</a></div>`);
+  const goto = $('[data-bd-goto]');
+  if (goto) goto.addEventListener('click', () => {
+    state.view = 'birthday';
+    $$('#mainnav button, #tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === 'birthday'));
+    renderView().catch((e) => toast(e.message, 'error'));
+  });
 }
 
 /* ========= 待审核收件箱（QQ review 模式） ========= */
@@ -1213,7 +1228,7 @@ async function loadJielong() {
   }).join('');
 
   view.innerHTML =
-    `<div class="jl-head"><h2>🐉 班级接龙</h2></div>
+    `<div class="jl-head"><h2>🐉 活动接龙</h2></div>
     <p class="hint">接龙链接发到班群，同学点开即填即交；自动比对名单，谁没接龙一目了然。</p>
     ${canEdit() ? '<div class="jl-actions"><button class="primary" id="btn-jl-create">＋ 发起接龙</button></div>' : ''}
     ${items || '<div class="empty"><div class="big">🐉</div>还没有接龙' +
@@ -1778,10 +1793,244 @@ function openDrawEditModal(d) {
   });
 }
 
+/* ========= 班级生日（倒计时与祝福） ========= */
+// 祝福语：开头 × 主体 × 结尾 随机组合，尽量不重样
+const BD_WISH_OPEN = [
+  '生日快乐！', '🎂 生日快乐！', '叮咚～你的生日祝福已送达：', '今天的主角是你！',
+  '🎉 HAPPY BIRTHDAY 🎉', '又到了一年中属于你的这一天～', '蜡烛已点好，掌声已备好：', '嘿！今天你最大：',
+];
+const BD_WISH_CORE = [
+  '愿新的一岁里，开心每天都有，好运一直都在',
+  '愿你所愿皆成真，所行皆坦途',
+  '愿你被这个世界温柔以待，快乐像蛋糕一样甜',
+  '愿烦恼像气球一样飞走，微笑常挂在嘴角',
+  '愿你眼里有光、心中有爱、前路有期待',
+  '愿你平安喜乐，万事胜意',
+  '愿你保持热爱，也能奔赴山海',
+  '愿所有的好运，都准时降落在你身上',
+  '愿你喜欢的都拥有，失去的都释怀',
+  '愿你永远有敢想敢做的勇气，和说走就走的底气',
+];
+const BD_WISH_TAIL = ['🎂', '🎉 🎈', '（蜡烛已点好，就等你啦）', '✨ 🎂 ✨', '—— 来自班级的祝福', '🥳'];
+function bdWish(m) {
+  if (m.note) return m.note;
+  let s = Math.floor(Math.random() * 100000);
+  const pick = (arr) => { const v = arr[s % arr.length]; s = Math.floor(s / arr.length) + 7; return v; };
+  return pick(BD_WISH_OPEN) + pick(BD_WISH_CORE) + (Math.random() < 0.5 ? ' ' + pick(BD_WISH_TAIL) : '');
+}
+const bdChip = (m) => {
+  if (m.pending) return '<span class="bd-chip pending">生日待填</span>';
+  if (m.isToday) return '<span class="bd-chip today">今天生日 🎂</span>';
+  if (m.daysUntil === 1) return '<span class="bd-chip soon">明天生日</span>';
+  if (m.daysUntil <= 7) return `<span class="bd-chip soon">还有 ${m.daysUntil} 天</span>`;
+  return `<span class="bd-chip later">${m.month} 月 ${m.day} 日 · 还有 ${m.daysUntil} 天</span>`;
+};
+
+let bdTodayCache = null;
+async function refreshBirthdaysToday() {
+  try {
+    bdTodayCache = (await api('/api/birthdays')).today || [];
+    setNavBadge('birthday', bdTodayCache.length, { bday: true }); // 有人过生日时，导航「🎂 生日」亮起弹跳的 🎂
+  } catch (e) { /* 静默 */ }
+  return bdTodayCache || [];
+}
+async function checkBirthdayNotifs() {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    const today = await refreshBirthdaysToday();
+    const key = 'infohub-bday-notified-' + ymd(new Date());
+    // 只保留当天的提醒记录，历史 key 会一直占着 localStorage
+    try {
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith('infohub-bday-notified-') && k !== key)
+        .forEach((k) => localStorage.removeItem(k));
+    } catch (e) { /* 忽略 */ }
+    if (!today.length) return;
+    const done = new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+    for (const m of today) {
+      if (done.has(String(m.id))) continue;
+      done.add(String(m.id));
+      try { new Notification('🎂 今天是 ' + m.name + ' 的生日', { body: bdWish(m), tag: 'infohub-bday-' + m.id }); } catch (e) { /* 忽略 */ }
+    }
+    localStorage.setItem(key, JSON.stringify([...done]));
+  } catch (e) { /* 静默 */ }
+}
+
+async function loadBirthdays() {
+  const view = $('#view');
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  const data = await api('/api/birthdays');
+  const wishes = {};
+  const wishOf = (m) => { if (!wishes[m.id]) wishes[m.id] = bdWish(m); return wishes[m.id]; };
+  const bdAvaColor = (m) => ['linear-gradient(135deg,#f783ac,#f9c74f)', 'linear-gradient(135deg,#a78bfa,#60a5fa)', 'linear-gradient(135deg,#4ade80,#38bdf8)', 'linear-gradient(135deg,#fb923c,#f472b6)'][(m.name || '?').charCodeAt(0) % 4];
+  const bdTint = (m) => ['linear-gradient(135deg,#ffe9f1,#fff6e3)', 'linear-gradient(135deg,#e3f1ff,#e9fff3)', 'linear-gradient(135deg,#fff6d9,#ffe9f1)', 'linear-gradient(135deg,#eef0ff,#e3fbff)', 'linear-gradient(135deg,#f3e9ff,#ffe9f1)', 'linear-gradient(135deg,#e6fff1,#fff6d9)'][(m.name || '?').charCodeAt(0) % 6];
+  const bdWeek = (d) => '周' + '日一二三四五六'[new Date(d + 'T00:00:00').getDay()];
+
+  const todayCards = data.today.map((m) => `
+    <div class="bd-hero">
+      <div class="bd-bunting"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      ${data.today.length === 1 ? `<div class="bd-date">${bdWeek(m.nextDate.slice(0, 10))} · ${esc(m.nextDate.slice(0, 10))}</div>` : ''}
+      ${data.hasBadge ? `<div class="bd-mark" style="background-image:url('/api/class-badge?r=${Date.now()}')"></div>` : ''}
+      <span class="bd-balloon" style="left:5%;animation-delay:0s">🎈</span>
+      <span class="bd-balloon" style="left:15%;animation-delay:2.6s;font-size:16px">🎈</span>
+      <span class="bd-balloon" style="left:88%;animation-delay:1.2s">🎈</span>
+      <span class="bd-balloon" style="left:78%;animation-delay:3.4s;font-size:15px">🎈</span>
+      <span class="bd-spark" style="left:12%;top:18%">✨</span>
+      <span class="bd-spark" style="left:85%;top:26%;animation-delay:1.1s">✨</span>
+      <span class="bd-spark" style="left:70%;top:12%;animation-delay:1.8s;font-size:13px">✨</span>
+      ${['#f9a8d4', '#fcd34d', '#a5b4fc', '#86efac'].map((c, i) => `<i class="bd-cf" style="left:${8 + i * 22}%;background:${c};animation-delay:${i * 0.9}s"></i>`).join('')}
+      <div class="bd-cake">🎂</div>
+      <div class="bd-todaylabel">今 天 过 生 日</div>
+      <div class="bd-name">${esc(m.name)}</div>
+      ${m.turningAge != null ? `<div class="bd-role"><span class="jl-badge on">将满 ${m.turningAge} 岁的生日 🎉</span></div>` : ''}
+      <div class="bd-wish">「${esc(wishOf(m))}」</div>
+      <div class="bd-from">—— 全班同学 ——</div>
+      <div class="bd-actions"><button class="ghost" data-bd-copy="${m.id}">📋 复制祝福发到班群</button></div>
+    </div>`).join('');
+  const nearest = data.items.find((x) => !x.pending && !x.isToday && x.daysUntil != null);
+  const todayWrap = data.today.length
+    ? `<div class="bd-todaygrid">${todayCards}</div>`
+    : `<div class="bd-calm">🎈 今天没有寿星${nearest ? `，最近的是 <b>${esc(nearest.name)}</b>（${nearest.month} 月 ${nearest.day} 日，还有 ${nearest.daysUntil} 天）` : ''}，每一天都值得被温柔对待</div>`;
+
+  const upCards = data.items.filter((m) => !m.isToday).map((m, i) => `
+    <div class="bd-card${m.pending ? ' pending' : (!m.pending && m.daysUntil <= 7 ? ' soon' : '')}${canEdit() ? ' has-acts' : ''}" style="background:${m.pending ? 'var(--hover)' : (m.daysUntil <= 7 ? 'linear-gradient(135deg,#fff3d6,#ffe0ea)' : bdTint(m))};animation-delay:${Math.min(i * 45, 600)}ms">
+      <div class="bd-ava" style="background:${m.pending ? 'var(--hover)' : bdAvaColor(m)}">${m.pending ? '❓' : esc((m.name || '?')[0])}</div>
+      <div class="bd-uinfo">
+        <div class="bd-uname">${esc(m.name)}</div>
+        <div class="bd-usub">${m.pending ? '生日待填' : `🎂 ${m.month} 月 ${m.day} 日${m.turningAge != null ? ' · 将满 ' + m.turningAge + ' 岁' : ''}`}</div>
+      </div>
+      <div class="bd-dayspill">${m.pending ? '<span style="font-size:12px">待填</span>' : `<b>${m.daysUntil}</b><span>天后</span>`}</div>
+      ${canEdit() ? `<div class="bd-acts"><button class="mini" data-bd-edit="${m.id}">✏️</button><button class="mini danger" data-bd-del="${m.id}">🗑</button></div>` : ''}
+    </div>`).join('');
+
+  // 名单库导入控件
+  let libHtml = '';
+  if (canEdit()) {
+    let lib = [];
+    try { lib = (await api('/api/rosters')).items; } catch (e) { /* 忽略 */ }
+    if (lib.length) {
+      libHtml = `
+      <div class="jl-actions">
+        <select id="bd-import-lib" style="max-width:260px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text)">
+          ${lib.map((r) => `<option value="${r.id}">${esc(r.name)}（${r.count} 人）</option>`).join('')}
+        </select>
+        <button class="ghost" id="bd-import">📥 导入名单</button>
+        <span class="hint" style="margin:0">导入后逐个补填生日即可</span>
+      </div>`;
+    }
+  }
+  // 班徽背景管理
+  const badgeHtml = canEdit() ? `
+    <div class="jl-actions" style="margin-top:6px">
+      <label class="ghost" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px">🖼 上传班徽背景<input id="bd-badge-file" type="file" accept="image/*" style="display:none"></label>
+      ${data.hasBadge ? '<button class="ghost" id="bd-badge-del">移除班徽</button>' : ''}
+      <span class="hint" style="margin:0">上传后作为生日祝福墙的水印背景（半透明，不挡文字）</span>
+    </div>` : '';
+
+  view.innerHTML = `
+    <div class="bd-page">
+    <div class="jl-head"><h2>🎂 生日祝福</h2></div>
+    <p class="hint">每一岁都值得庆祝，每一个人都值得被记得 🎈 生日当天这里会变成祝福墙，信息页和浏览器通知也会提醒。</p>
+    ${todayWrap}
+    <div class="panel">
+      <div class="jl-head" style="margin:0 0 4px"><h3 style="margin:0">🎈 生日倒计时（${data.items.filter((x) => !x.isToday).length} 人）</h3></div>
+      ${upCards ? `<div class="bd-grid">${upCards}</div>` : `<div class="empty"><div class="big">🎈</div>还没有成员<br>${canEdit() ? '先在名单库保存班级名单，再从下面一键导入' : '等老师添加成员后，这里就会热闹起来'}</div>`}
+      ${libHtml}
+      ${badgeHtml}
+      ${canEdit() ? '<div class="jl-actions"><button class="primary" id="btn-bd-add">＋ 添加成员</button></div>' : ''}
+    </div>
+    </div>`;
+  setNavBadge('birthday', data.todayCount, { bday: true });
+
+  const addBtn = $('#btn-bd-add');
+  if (addBtn) addBtn.addEventListener('click', () => openBdayModal(null));
+  const badgeFile = $('#bd-badge-file');
+  if (badgeFile) badgeFile.addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const fd = new FormData();
+    fd.append('files', f, f.name);
+    try {
+      await api('/api/class-badge', { method: 'POST', body: fd });
+      toast('班徽背景已上传 ✓');
+      loadBirthdays();
+    } catch (err) { toast(err.message, 'error'); }
+    e.target.value = '';
+  });
+  const badgeDel = $('#bd-badge-del');
+  if (badgeDel) badgeDel.addEventListener('click', async () => {
+    if (!confirm('移除班徽背景？')) return;
+    try { await api('/api/class-badge', { method: 'DELETE' }); toast('已移除'); loadBirthdays(); }
+    catch (e) { toast(e.message, 'error'); }
+  });
+  $$('[data-bd-copy]').forEach((copyBtn) => copyBtn.addEventListener('click', () => {
+    const m = data.today.find((x) => String(x.id) === copyBtn.dataset.bdCopy);
+    if (!m) return;
+    jlCopy(`🎂 今天是 ${m.name} 的生日！${wishOf(m)}`, '祝福已复制，快发到班群吧');
+  }));
+  const importBtn = $('#bd-import');
+  if (importBtn) importBtn.addEventListener('click', async () => {
+    try {
+      const r = await api('/api/birthdays/import', { method: 'POST', body: { rosterId: Number($('#bd-import-lib').value) } });
+      toast(`导入 ${r.created} 人${r.skipped ? `、跳过 ${r.skipped} 人（已存在）` : ''} ✓`);
+      loadBirthdays();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+  $$('[data-bd-edit]').forEach((b) => b.addEventListener('click', () => {
+    const m = data.items.find((x) => String(x.id) === b.dataset.bdEdit);
+    if (m) openBdayModal(m);
+  }));
+  $$('[data-bd-del]').forEach((b) => b.addEventListener('click', async () => {
+    const m = data.items.find((x) => String(x.id) === b.dataset.bdDel);
+    if (!m || !confirm(`删除「${m.name}」的生日记录？`)) return;
+    try { await api('/api/birthdays/' + m.id, { method: 'DELETE' }); toast('已删除'); loadBirthdays(); }
+    catch (e) { toast(e.message, 'error'); }
+  }));
+}
+
+function openBdayModal(m) {
+  openModal(`
+    <h2>${m ? '✏️ 编辑成员' : '🎂 添加成员'}</h2>
+    <div class="form">
+      <label>姓名</label>
+      <input id="bd-name" maxlength="60" value="${m ? esc(m.name) : ''}" placeholder="班级里的每一位成员">
+      <div class="grid2">
+        <div><label>生日月</label><input id="bd-month" type="number" min="1" max="12" value="${m ? m.month || '' : ''}" placeholder="1-12"></div>
+        <div><label>生日日</label><input id="bd-day" type="number" min="1" max="31" value="${m ? m.day || '' : ''}" placeholder="1-31"></div>
+        <div><label>出生年份（选填，填了会显示年龄）</label><input id="bd-year" type="number" min="1900" max="2100" value="${m && m.year ? m.year : ''}" placeholder="选填"></div>
+      </div>
+      <label>自定义祝福语（选填，留空则自动生成）</label>
+      <textarea id="bd-note" rows="2" maxlength="200" placeholder="例如：生日快乐，蛋糕给你留最大的一块 🎂">${m ? esc(m.note || '') : ''}</textarea>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" id="btn-cancel">取消</button>
+      <button class="primary" id="bd-save">保存</button>
+    </div>`);
+  $('#bd-save').addEventListener('click', async () => {
+    const body = {
+      name: $('#bd-name').value.trim(),
+      month: Number($('#bd-month').value) || 0,
+      day: Number($('#bd-day').value) || 0,
+      year: Number($('#bd-year').value) || 0,
+      note: $('#bd-note').value.trim(),
+    };
+    if (!body.name) { toast('请填写姓名', 'error'); return; }
+    if (!body.month || !body.day) { toast('请填写生日月和日', 'error'); return; }
+    try {
+      if (m) await api('/api/birthdays/' + m.id, { method: 'PUT', body });
+      else await api('/api/birthdays', { method: 'POST', body });
+      closeModal();
+      toast('已保存 ✓');
+      refreshBirthdaysToday();
+      loadBirthdays();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
 /* ========= 视图切换 ========= */
 // 顶栏控件只在适用的页面显示：排序只在信息流有用；统计页不响应群筛选
 function syncTopbar() {
-  $('#group-sel').style.display = (state.view === 'stats' || state.view === 'jielong' || state.view === 'draw') ? 'none' : '';
+  $('#group-sel').style.display = (state.view === 'stats' || state.view === 'jielong' || state.view === 'draw' || state.view === 'birthday') ? 'none' : '';
   $('#sortsel').style.display = state.view === 'feed' ? '' : 'none';
 }
 async function renderView() {
@@ -1797,6 +2046,7 @@ async function renderView() {
     else if (state.view === 'tasks') await loadTasks();
     else if (state.view === 'jielong') await loadJielong();
     else if (state.view === 'draw') await loadDraw();
+    else if (state.view === 'birthday') await loadBirthdays();
     else if (state.view === 'calendar') await loadCalendar();
     else if (state.view === 'files') await loadFiles();
     else await loadStats();
@@ -1977,11 +2227,21 @@ function restoreFilters() {
 }
 
 /* ========= 主题 / 截止提醒 / 标题角标 ========= */
-function applyTheme(t) {
+// 三档外观：浅色 / 深色 / 自动（19:00–次日 7:00 深色，其余浅色）
+const THEME_DARK_FROM = 19, THEME_DARK_TO = 7;
+function themeAutoResolved() {
+  const h = new Date().getHours();
+  return (h >= THEME_DARK_FROM || h < THEME_DARK_TO) ? 'dark' : 'light';
+}
+function applyTheme(mode) {
+  const t = mode === 'auto' ? themeAutoResolved() : mode;
   document.documentElement.dataset.theme = t;
-  localStorage.setItem('infohub-theme', t);
+  localStorage.setItem('infohub-theme', mode);
   const btn = $('#btn-theme');
-  if (btn) btn.textContent = t === 'dark' ? '☀️' : '🌙';
+  if (btn) {
+    btn.textContent = mode === 'auto' ? '🌗' : t === 'dark' ? '🌙' : '☀️';
+    btn.title = '外观：' + (mode === 'auto' ? '自动（19:00–次日 7:00 深色，当前' + (t === 'dark' ? '深色' : '浅色') + '）' : mode === 'dark' ? '深色' : '浅色') + '，点击切换';
+  }
 }
 function onBellClick() {
   localStorage.setItem('infohub-notif-dismissed', '1');
@@ -2063,10 +2323,19 @@ async function checkNotifs() {
   } catch (e) { /* 忽略 */ }
 }
 function initExtras() {
-  applyTheme(localStorage.getItem('infohub-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  applyTheme(localStorage.getItem('infohub-theme') || 'auto');
+  // 点 🌙 按钮三档循环：浅色 → 深色 → 自动
   $('#btn-theme').addEventListener('click', () => {
-    applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+    const cur = localStorage.getItem('infohub-theme') || 'auto';
+    const order = ['light', 'dark', 'auto'];
+    const next = order[(order.indexOf(cur) + 1) % order.length];
+    applyTheme(next);
+    toast('外观：' + (next === 'auto' ? '自动（19:00–次日 7:00 深色）' : next === 'dark' ? '深色' : '浅色'));
   });
+  // 自动模式下每 10 分钟复查一次，跨过 19:00 / 7:00 时页面自动变色
+  setInterval(() => {
+    if ((localStorage.getItem('infohub-theme') || 'auto') === 'auto') applyTheme('auto');
+  }, 10 * 60 * 1000);
   // 弹窗里有没保存的内容时，关闭/刷新页面先提醒
   window.addEventListener('beforeunload', (e) => {
     const c = $('#f-content');
@@ -2075,16 +2344,19 @@ function initExtras() {
   $('#btn-bell').addEventListener('click', onBellClick);
   setupBellState();
   updateBadge();
-  if ('Notification' in window && Notification.permission === 'granted') checkNotifs();
-  setInterval(() => { updateBadge(); updateInboxBadge(); checkNotifs(); }, 5 * 60 * 1000);
+  updateInboxBadge();
+  refreshBirthdaysToday(); // 生日横幅数据（有无通知权限都加载）
+  if ('Notification' in window && Notification.permission === 'granted') { checkNotifs(); checkBirthdayNotifs(); }
+  setInterval(() => { updateBadge(); updateInboxBadge(); checkNotifs(); checkBirthdayNotifs(); }, 5 * 60 * 1000);
 }
-/* 待审核数量角标：显示在侧栏和底部导航的「待审核」按钮上 */
-function setNavBadge(viewName, n) {
+/* 角标：普通视图显示数字；生日视图显示弹跳的 🎂（庆祝，不是待办） */
+function setNavBadge(viewName, n, opts = {}) {
   $$('#mainnav button[data-view="' + viewName + '"], #tabbar button[data-view="' + viewName + '"]').forEach((btn) => {
     let b = btn.querySelector('.navbadge');
     if (n > 0) {
       if (!b) { b = document.createElement('span'); b.className = 'navbadge'; btn.appendChild(b); }
-      b.textContent = n > 99 ? '99+' : String(n);
+      b.classList.toggle('bday', !!opts.bday);
+      b.textContent = opts.bday ? '🎂' : (n > 99 ? '99+' : String(n));
     } else if (b) b.remove();
   });
 }

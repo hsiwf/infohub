@@ -7,13 +7,15 @@
 <style>
   *{box-sizing:border-box}
   body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#eef1fb,#f7f5ff);font-family:system-ui,-apple-system,"Microsoft YaHei",sans-serif;padding:20px}
-  .card{background:#fff;border-radius:18px;box-shadow:0 12px 40px rgba(30,41,80,.14);padding:34px 30px;width:100%;max-width:360px;text-align:center}
+  .card{background:#fff;border-radius:18px;box-shadow:0 12px 40px rgba(30,41,80,.14);padding:34px 30px;width:100%;max-width:360px;text-align:center;animation:l-in .45s ease both}
+  @keyframes l-in{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}
   .logo{font-size:26px;font-weight:700;margin-bottom:4px}
   .sub{color:#6b7280;font-size:13px;margin:0 0 22px}
   input{width:100%;padding:12px 14px;font-size:16px;border:1px solid #dde3ee;border-radius:12px;outline:none;text-align:center}
   input:focus{border-color:#4f6ef2}
-  button{width:100%;margin-top:14px;padding:12px;font-size:16px;font-weight:600;border:0;border-radius:12px;background:#4f6ef2;color:#fff;cursor:pointer}
-  button:active{background:#3d5bd9}
+  button{width:100%;margin-top:14px;padding:12px;font-size:16px;font-weight:600;border:0;border-radius:12px;background:linear-gradient(135deg,#4f6ef2,#6a86f5);color:#fff;cursor:pointer;box-shadow:0 4px 14px rgba(79,110,242,.30);transition:filter .15s,transform .12s}
+  button:hover{filter:brightness(1.06)}
+  button:active{transform:translateY(1px)}
   button:disabled{opacity:.6}
   .msg{color:#ef4444;font-size:13px;min-height:18px;margin:12px 0 0}
   .hint{color:#9aa3b2;font-size:11px;margin-top:18px;line-height:1.6}
