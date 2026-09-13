@@ -150,7 +150,7 @@ fetch('/api/me').then(r=>r.json()).then(me=>{
 loadGroups();
 loadToday();
 (function(){
-  const t=localStorage.getItem('infohub-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+  const t=(()=>{const v=localStorage.getItem('infohub-theme')||'auto';if(v!=='auto')return v;const h=new Date().getHours();return (h>=19||h<7)?'dark':'light';})();
   apply(t);
   function apply(t){document.documentElement.dataset.theme=t;localStorage.setItem('infohub-theme',t);document.querySelector('#q-theme').textContent=t==='dark'?'☀️':'🌙';}
   document.querySelector('#q-theme').addEventListener('click',()=>apply(document.documentElement.dataset.theme==='dark'?'light':'dark'));

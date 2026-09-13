@@ -110,6 +110,15 @@ CREATE TABLE IF NOT EXISTS rosters (
   created_at TEXT DEFAULT '',
   updated_at TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS birthdays (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT DEFAULT '',
+  month INTEGER DEFAULT 0,
+  day INTEGER DEFAULT 0,
+  year INTEGER DEFAULT 0,
+  note TEXT DEFAULT '',
+  created_at TEXT DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS idx_messages_group ON messages(group_id);
 CREATE INDEX IF NOT EXISTS idx_messages_deadline ON messages(deadline);
 CREATE INDEX IF NOT EXISTS idx_att_message ON attachments(message_id);
@@ -130,5 +139,8 @@ if (!acols.some((c) => c.name === 'downloads')) db.exec('ALTER TABLE attachments
 // 轻量迁移：接龙记录补 seq 列（保持首次提交顺序，修改后不重排）
 const jecols = db.prepare('PRAGMA table_info(jielong_entries)').all();
 if (!jecols.some((c) => c.name === 'seq')) db.exec('ALTER TABLE jielong_entries ADD COLUMN seq INTEGER DEFAULT 0');
+// 轻量迁移：生日成员去掉 role 列（生日面前人人平等，不再划分身份）
+const bdcols = db.prepare('PRAGMA table_info(birthdays)').all();
+if (bdcols.length && bdcols.some((c) => c.name === 'role')) db.exec('ALTER TABLE birthdays DROP COLUMN role');
 
 module.exports = { db, DATA_DIR, UPLOAD_DIR };

@@ -200,7 +200,7 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   ok('统计数据', r.status === 200 && typeof r.body.total === 'number' && Array.isArray(r.body.upcoming));
   const ex = await j('/api/export');
   const dump = ex.body;
-  ok('JSON 导出', ex.status === 200 && Array.isArray(dump.messages) && Array.isArray(dump.groups) && Array.isArray(dump.jielongs) && Array.isArray(dump.draws) && Array.isArray(dump.rosters));
+  ok('JSON 导出', ex.status === 200 && Array.isArray(dump.messages) && Array.isArray(dump.groups) && Array.isArray(dump.jielongs) && Array.isArray(dump.draws) && Array.isArray(dump.rosters) && Array.isArray(dump.birthdays));
   r = await post('/api/import', { groups: [], messages: [] });
   ok('有数据时导入被拒（防重复）', r.status === 400);
 
@@ -217,8 +217,9 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
     draws: [{ id: 'dwimport1', title: '导入签箱测试', roster: '[{"id":"2023001","name":"张三"}]', per_draw: 1, created_at: 1700000000000 }],
     drawRounds: [{ draw_id: 'dwimport1', picked: '[{"id":"2023001","name":"张三"}]', count: 1, time: 1700000001000 }],
     rosters: [{ name: '导入名单', roster: '张三\n李四', keep_id: 1, created_at: '', updated_at: '' }],
+    birthdays: [{ name: '导入寿星', month: 3, day: 8, year: 0, note: '', created_at: '' }],
   });
-  ok('force 导入恢复附件与接龙', r.status === 200 && r.body.attachments === 1 && r.body.jielongs === 1 && r.body.jielongEntries === 1 && r.body.draws === 1 && r.body.drawRounds === 1 && r.body.rosters === 1, JSON.stringify(r.body));
+  ok('force 导入恢复附件与接龙', r.status === 200 && r.body.attachments === 1 && r.body.jielongs === 1 && r.body.jielongEntries === 1 && r.body.draws === 1 && r.body.drawRounds === 1 && r.body.rosters === 1 && r.body.birthdays === 1, JSON.stringify(r.body));
   r = await j('/api/files?q=' + encodeURIComponent('导入附件测试.txt'));
   ok('导入的附件出现在文件中心', r.status === 200 && r.body.items.length === 1, JSON.stringify(r.body));
   r = await j('/api/jielong/jlimport1');
@@ -231,6 +232,9 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   r = await j('/api/rosters');
   ok('导入的名单进入名单库', r.status === 200 && r.body.items.length === 1 && r.body.items[0].name === '导入名单', JSON.stringify(r.body));
   for (const it of r.body.items) await j('/api/rosters/' + it.id, { method: 'DELETE' });
+  r = await j('/api/birthdays');
+  ok('导入的生日成员进入生日列表', r.status === 200 && r.body.items.some((x) => x.name === '导入寿星' && x.month === 3 && x.day === 8), JSON.stringify(r.body));
+  for (const it of r.body.items) await j('/api/birthdays/' + it.id, { method: 'DELETE' });
   const imp = await j('/api/messages?q=' + encodeURIComponent('导入附件测试'));
   for (const it of (imp.body.items || [])) await j('/api/messages/' + it.id, { method: 'DELETE' });
 
@@ -315,7 +319,7 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   const lh = await fetch(BASE + '/login');
   ok('登录页可访问', lh.status === 200);
   r = await fetch(BASE + '/j/dut9dtk');
-  ok('学生接龙页 /j/:id', r.status === 200 && (await r.text()).includes('班级接龙'));
+  ok('学生接龙页 /j/:id', r.status === 200 && (await r.text()).includes('活动接龙'));
   r = await fetch(BASE + '/js/qrcode.min.js');
   ok('二维码组件可加载', r.status === 200);
 
@@ -445,6 +449,71 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   ok('删除名单', r.status === 200);
   r = await j('/api/rosters');
   ok('删除后名单库为空', r.status === 200 && r.body.items.length === 0);
+
+  // 15. 班级生日（倒计时 / 当天祝福 / 名单导入）
+  const pad2t = (n) => String(n).padStart(2, '0');
+  const plus5 = new Date(Date.now() + 5 * 86400000);
+  const in5m = plus5.getMonth() + 1, in5d = plus5.getDate();
+  const nowD = new Date();
+  const todayMm = nowD.getMonth() + 1, todayDd = nowD.getDate();
+  r = await post('/api/birthdays', { name: '自检寿星', month: in5m, day: in5d, year: 2010, note: '自检祝福语' });
+  const bdId = r.body.id;
+  const expAge = Number(r.body.nextDate.slice(0, 4)) - 2010;
+  ok('添加生日成员（5 天后倒计时 + 年龄）', r.status === 200 && r.body.daysUntil === 5 && r.body.turningAge === expAge && r.body.note === '自检祝福语', JSON.stringify(r.body));
+  r = await post('/api/birthdays', { name: '今天寿星', month: todayMm, day: todayDd });
+  ok('添加今天生日成员', r.status === 200 && r.body.isToday === true && r.body.daysUntil === 0, JSON.stringify(r.body));
+  const bdToday = r.body.id;
+  r = await post('/api/birthdays', { name: '无效日期', month: 2, day: 30 });
+  ok('无效日期被拒（2 月 30 日）', r.status === 400);
+  r = await post('/api/birthdays', { name: '无效日期', month: 13, day: 1 });
+  ok('无效月份被拒（13 月）', r.status === 400);
+  r = await post('/api/birthdays', { name: '闰日同学', month: 2, day: 29 });
+  const bdLeap = r.body.id;
+  ok('2 月 29 日可保存', r.status === 200 && /^(\d{4})-02-(28|29)$/.test(r.body.nextDate), JSON.stringify(r.body));
+  r = await j('/api/birthdays');
+  ok('生日列表按倒计时排序（今天在前）', r.status === 200 && r.body.todayCount === 1 && r.body.items[0].isToday === true && r.body.items[0].id === bdToday, JSON.stringify(r.body.today));
+  if (authRequired) {
+    const g10 = await fetch(BASE + '/api/birthdays', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'x', month: 1, day: 1 }) });
+    ok('访客添加生日成员被拒（401）', g10.status === 401);
+  }
+  r = await j('/api/birthdays/' + bdId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '自检寿星改' }) });
+  ok('编辑生日成员', r.status === 200 && r.body.name === '自检寿星改');
+  // 名单库导入生日成员
+  r = await post('/api/rosters', { name: '生日导入名单', rosterRaw: '导入同学甲\n导入同学乙', keepId: false });
+  const ridBd = r.body.id;
+  r = await post('/api/birthdays/import', { rosterId: ridBd });
+  ok('从名单库导入生日成员', r.status === 200 && r.body.created === 2 && r.body.skipped === 0, JSON.stringify(r.body));
+  r = await post('/api/birthdays/import', { rosterId: ridBd });
+  ok('重复导入自动跳过', r.status === 200 && r.body.created === 0 && r.body.skipped === 2, JSON.stringify(r.body));
+  r = await j('/api/birthdays');
+  const pendingOk = r.body.items.filter((x) => x.pending).length === 2 && r.body.items.every((x) => x.pending ? x.daysUntil === null : true);
+  ok('未填生日的成员排在末尾且标记待填', pendingOk, JSON.stringify(r.body.items.filter((x) => x.pending)));
+  await j('/api/rosters/' + ridBd, { method: 'DELETE' });
+  r = await j('/api/birthdays');
+  for (const it of (r.body.items || [])) await j('/api/birthdays/' + it.id, { method: 'DELETE' });
+  r = await j('/api/birthdays');
+  ok('生日成员清理完成', r.status === 200 && r.body.items.length === 0);
+
+  // 16. 班徽背景（上传 / 访问 / 删除）
+  const pngBadge = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const bbd = '----bd' + Date.now();
+  const bmp = Buffer.concat([
+    Buffer.from(`--${bbd}\r\nContent-Disposition: form-data; name="files"; filename="badge.png"\r\nContent-Type: image/png\r\n\r\n`),
+    pngBadge, Buffer.from(`\r\n--${bbd}--\r\n`),
+  ]);
+  r = await j('/api/class-badge', { method: 'POST', headers: { 'Content-Type': 'multipart/form-data; boundary=' + bbd }, body: new Uint8Array(bmp) });
+  ok('上传班徽', r.status === 200, JSON.stringify(r.body));
+  const bgRes = await fetch(BASE + '/api/class-badge');
+  const bgLen = (await bgRes.arrayBuffer()).byteLength;
+  ok('班徽可访问（PNG 原样）', bgRes.status === 200 && bgLen === pngBadge.length, 'len=' + bgLen);
+  if (authRequired) {
+    const g12 = await fetch(BASE + '/api/class-badge', { method: 'DELETE' });
+    ok('访客删除班徽被拒（401）', g12.status === 401);
+  }
+  r = await j('/api/class-badge', { method: 'DELETE' });
+  ok('移除班徽', r.status === 200);
+  const bg404 = await fetch(BASE + '/api/class-badge');
+  ok('移除后班徽 404', bg404.status === 404);
 
   // ---- 清理自检数据 ----
   for (const id of created.messages) await j('/api/messages/' + id, { method: 'DELETE' });

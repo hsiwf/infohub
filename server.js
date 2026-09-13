@@ -1217,6 +1217,159 @@ route('DELETE', '/api/draw/:id', (ctx) => {
   return { ok: true };
 });
 
+/* ---------- 生日（班级成员生日倒计时与祝福） ----------
+ * 生日面前人人平等：不分老师/同学，只有"班级成员"。
+ * 生日只存月日（年份选填，填了会显示"将满 N 岁"）；2 月 29 日在平年按 2 月 28 日庆祝。
+ * 倒计时按服务器本地时间实时计算，不入库。 */
+function bdayValid(month, day) {
+  if (!Number.isInteger(month) || !Number.isInteger(day) || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const t = new Date(2024, month - 1, day); // 2024 为闰年，允许 2 月 29 日
+  return t.getDate() === day && t.getMonth() === month - 1;
+}
+function bdayInfo(m, now) {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (!m.month || !m.day) {
+    return { id: m.id, name: m.name, month: 0, day: 0, year: Number(m.year) || 0,
+      note: m.note || '', nextDate: '', daysUntil: null, isToday: false, turningAge: null, pending: true };
+  }
+  const occur = (yy) => new Date(yy, m.month - 1, (m.month === 2 && m.day === 29 && !(new Date(yy, 1, 29).getMonth() === 1)) ? 28 : m.day);
+  let next = occur(now.getFullYear());
+  if (next < today) next = occur(now.getFullYear() + 1);
+  const daysUntil = Math.round((next - today) / 86400000);
+  return {
+    id: m.id, name: m.name,
+    month: m.month, day: m.day,
+    year: Number(m.year) || 0,
+    note: m.note || '',
+    nextDate: `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`,
+    daysUntil,
+    isToday: daysUntil === 0,
+    turningAge: m.year ? next.getFullYear() - Number(m.year) : null,
+    pending: false,
+  };
+}
+function bdayRowFromBody(b) {
+  const month = Number(b.month), day = Number(b.day);
+  if (!bdayValid(month, day)) throw new HttpError(400, '生日日期无效（月 1-12，日 1-31，注意每月天数）');
+  const year = Number(b.year) || 0;
+  if (year && (year < 1900 || year > 2100)) throw new HttpError(400, '出生年份应在 1900-2100 之间');
+  return {
+    name: sField(b.name, 60),
+    month, day, year,
+    note: sField(b.note, 200),
+  };
+}
+function getBday(id) {
+  const row = db.prepare('SELECT * FROM birthdays WHERE id = ?').get(id);
+  return row ? { ...row, year: Number(row.year) || 0 } : null;
+}
+
+route('GET', '/api/birthdays', () => {
+  const now = new Date();
+  const items = db.prepare('SELECT * FROM birthdays').all()
+    .map((r) => bdayInfo({ ...r, year: Number(r.year) || 0 }, now))
+    .sort((a, b) => (a.daysUntil ?? 9999) - (b.daysUntil ?? 9999) || a.name.localeCompare(b.name, 'zh'));
+  const today = items.filter((i) => i.isToday);
+  let hasBadge = false;
+  try { hasBadge = fs.statSync(BADGE_FILE).isFile(); } catch (e) { /* 无班徽 */ }
+  return { items, today, todayCount: today.length, hasBadge };
+});
+
+route('POST', '/api/birthdays', (ctx) => {
+  const m = bdayRowFromBody(ctx.body || {});
+  if (!m.name) throw new HttpError(400, '请填写成员姓名');
+  const info = db.prepare('INSERT INTO birthdays (name, month, day, year, note, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(m.name, m.month, m.day, m.year, m.note, nowStr());
+  const row = getBday(Number(info.lastInsertRowid));
+  return bdayInfo(row, new Date());
+});
+
+route('PUT', '/api/birthdays/:id', (ctx) => {
+  const id = Number(ctx.params.id);
+  if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
+  const old = getBday(id);
+  if (!old) throw new HttpError(404, '成员不存在');
+  const b = ctx.body || {};
+  const m = bdayRowFromBody({
+    name: b.name !== undefined ? b.name : old.name,
+    month: b.month !== undefined ? b.month : old.month,
+    day: b.day !== undefined ? b.day : old.day,
+    year: b.year !== undefined ? b.year : old.year,
+    note: b.note !== undefined ? b.note : old.note,
+  });
+  if (!m.name) throw new HttpError(400, '请填写成员姓名');
+  db.prepare('UPDATE birthdays SET name = ?, month = ?, day = ?, year = ?, note = ? WHERE id = ?')
+    .run(m.name, m.month, m.day, m.year, m.note, id);
+  return bdayInfo(getBday(id), new Date());
+});
+
+route('DELETE', '/api/birthdays/:id', (ctx) => {
+  const id = Number(ctx.params.id);
+  if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
+  const info = db.prepare('DELETE FROM birthdays WHERE id = ?').run(id);
+  if (!info.changes) throw new HttpError(404, '成员不存在');
+  return { ok: true };
+});
+
+// 从名单库批量导入（同名成员跳过，防止重复导入）
+route('POST', '/api/birthdays/import', (ctx) => {
+  const b = ctx.body || {};
+  const rosterId = Number(b.rosterId);
+  if (!Number.isInteger(rosterId)) throw new HttpError(400, '参数错误');
+  const roster = db.prepare('SELECT * FROM rosters WHERE id = ?').get(rosterId);
+  if (!roster) throw new HttpError(404, '名单不存在，请先在名单库保存班级名单');
+  const list = JL.parseRoster(roster.roster, !!roster.keep_id).list;
+  const existNames = new Set(db.prepare('SELECT name FROM birthdays').all().map((r) => r.name));
+  const ins = db.prepare('INSERT INTO birthdays (name, month, day, year, note, created_at) VALUES (?, 0, 0, 0, ?, ?)');
+  let created = 0, skipped = 0;
+  for (const p of list) {
+    if (existNames.has(p.name)) { skipped++; continue; }
+    ins.run(p.name, '', nowStr());
+    created++;
+  }
+  const summary = `导入 ${created} 人、跳过 ${skipped} 人（重名已存在）`;
+  log('生日成员' + summary);
+  return { ok: true, created, skipped };
+});
+
+/* ---------- 班徽背景（生日页可自定义水印，可选） ---------- */
+const BADGE_FILE = path.join(DATA_DIR, 'class-badge');
+function sniffImage(buf) {
+  if (!buf || buf.length < 6) return '';
+  if (buf[0] === 0x89 && buf[1] === 0x50) return 'image/png';
+  if (buf[0] === 0xff && buf[1] === 0xd8) return 'image/jpeg';
+  if (buf[0] === 0x47 && buf[1] === 0x49) return 'image/gif';
+  if (buf.slice(0, 4).toString('ascii') === 'RIFF') return 'image/webp';
+  if (buf.slice(0, 300).toString('utf8').toLowerCase().includes('<svg')) return 'image/svg+xml';
+  return '';
+}
+route('GET', '/api/class-badge', (ctx) => {
+  let buf;
+  try { buf = fs.readFileSync(BADGE_FILE); } catch (e) { throw new HttpError(404, '未设置班徽'); }
+  const res = ctx.res;
+  res.wrote = true;
+  res.writeHead(200, {
+    'Content-Type': sniffImage(buf) + '; charset=utf-8',
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'no-cache',
+  });
+  res.end(buf);
+});
+route('POST', '/api/class-badge', async (ctx) => {
+  if (!ctx.raw) throw new HttpError(400, '需要 multipart 表单');
+  const { files } = parseMultipart(ctx.raw, ctx.req.headers['content-type'] || '');
+  if (!files.length) throw new HttpError(400, '请选择班徽图片');
+  const buf = files[0].data;
+  if (!buf.length || buf.length > 5 * 1024 * 1024) throw new HttpError(400, '图片需小于 5MB');
+  if (!sniffImage(buf)) throw new HttpError(400, '仅支持 PNG / JPG / GIF / WebP / SVG 图片');
+  fs.writeFileSync(BADGE_FILE, buf);
+  return { ok: true };
+});
+route('DELETE', '/api/class-badge', (ctx) => {
+  try { fs.unlinkSync(BADGE_FILE); } catch (e) { /* 本来就没有 */ }
+  return { ok: true };
+});
+
 /* ---------- 导入备份 ---------- */
 route('POST', '/api/import', (ctx) => {
   const b = ctx.body || {};
@@ -1228,7 +1381,7 @@ route('POST', '/api/import', (ctx) => {
   if (exist > 0 && ctx.query.get('force') !== '1') {
     throw new HttpError(400, '当前已有数据，为防止重复导入被拒绝。请先用空数据文件夹再导入');
   }
-  let n = 0, nAtt = 0, nGroups = 0, nJl = 0, nJlE = 0, nDw = 0, nDwR = 0, nRs = 0;
+  let n = 0, nAtt = 0, nGroups = 0, nJl = 0, nJlE = 0, nDw = 0, nDwR = 0, nRs = 0, nBd = 0;
   db.exec('BEGIN'); // 整体导入：任何一步失败就整体回滚，不残留半截数据
   try {
     const insG = db.prepare('INSERT INTO groups (name, platform, color, remark, ext_key, created_at) VALUES (?, ?, ?, ?, ?, ?)');
@@ -1358,16 +1511,26 @@ route('POST', '/api/import', (ctx) => {
       nRs++;
     }
   }
+  // 恢复生日成员
+  if (Array.isArray(b.birthdays)) {
+    const insB = db.prepare('INSERT INTO birthdays (name, month, day, year, note, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+    for (const g of b.birthdays) {
+      insB.run(sField(g.name, 60) || '未命名成员',
+        Math.max(0, Number(g.month) || 0), Math.max(0, Number(g.day) || 0),
+        Math.max(0, Number(g.year) || 0), sField(g.note, 200), cleanDT(g.created_at) || nowStr());
+      nBd++;
+    }
+  }
     nGroups = Object.keys(gmap).length;
     db.exec('COMMIT');
   } catch (e) {
     db.exec('ROLLBACK');
     throw new HttpError(500, '导入失败已整体回滚（' + e.message + '），数据库未变动');
   }
-  const summary = `${nGroups} 个群、${n} 条信息、${nAtt} 条附件记录、${nJl} 个接龙、${nJlE} 条接龙记录、${nDw} 个抽签、${nDwR} 轮抽签历史、${nRs} 份名单`;
+  const summary = `${nGroups} 个群、${n} 条信息、${nAtt} 条附件记录、${nJl} 个接龙、${nJlE} 条接龙记录、${nDw} 个抽签、${nDwR} 轮抽签历史、${nRs} 份名单、${nBd} 位生日成员`;
   console.log('导入备份：' + summary);
   log('导入备份：' + summary);
-  return { ok: true, groups: nGroups, imported: n, attachments: nAtt, jielongs: nJl, jielongEntries: nJlE, draws: nDw, drawRounds: nDwR, rosters: nRs };
+  return { ok: true, groups: nGroups, imported: n, attachments: nAtt, jielongs: nJl, jielongEntries: nJlE, draws: nDw, drawRounds: nDwR, rosters: nRs, birthdays: nBd };
 });
 
 /* ---------- 导出 .ics 日历（截止时间进手机系统日历） ---------- */
@@ -1456,6 +1619,7 @@ route('GET', '/api/export', (ctx) => {
     draws: db.prepare('SELECT id, title, roster, per_draw, created_at FROM draws ORDER BY created_at, id').all(),
     drawRounds: db.prepare('SELECT draw_id, picked, count, time FROM draw_rounds ORDER BY draw_id, id').all(),
     rosters: db.prepare('SELECT * FROM rosters ORDER BY id').all(),
+    birthdays: db.prepare('SELECT id, name, month, day, year, note, created_at FROM birthdays ORDER BY id').all(),
   };
   const body = JSON.stringify(dump, null, 2);
   const res = ctx.res;
