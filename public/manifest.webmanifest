@@ -1,0 +1,12 @@
+{
+  "name": "信息汇总",
+  "short_name": "信息汇总",
+  "description": "汇总 QQ/微信群老师发的通知、任务与文件",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f6fb",
+  "theme_color": "#4f6ef2",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

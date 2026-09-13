@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>信息汇总</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#4f6ef2">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="logo">📥<b>信息汇总</b><span class="logo-sub">重要通知不遗漏</span></div>
+    <nav id="mainnav">
+      <button data-view="feed" class="active">📨 信息中心</button>
+      <button data-view="tasks">✅ 待办任务</button>
+      <button data-view="calendar">📅 日历详情</button>
+      <button data-view="files">📁 文件中心</button>
+      <button data-view="stats">📊 统计接入</button>
+    </nav>
+    <div class="side-sec">
+      <div class="side-title">群列表 <button id="btn-add-group" title="添加群">＋</button></div>
+      <div id="grouplist"></div>
+    </div>
+    <div class="side-foot">数据保存在本机 data/ 文件夹<br>双击群名可编辑</div>
+  </aside>
+  <div id="right">
+    <header id="topbar">
+      <input id="search" type="search" placeholder="🔍 搜索标题、内容、发送人、标签…（按 / 聚焦）">
+      <select id="group-sel"></select>
+      <select id="sortsel">
+        <option value="time">最近收到</option>
+        <option value="deadline">按截止时间</option>
+      </select>
+      <button id="btn-theme" class="iconbtn" title="深色 / 浅色模式">🌙</button>
+      <button id="btn-bell" class="iconbtn" title="截止提醒：开启浏览器通知">🔔</button>
+      <button id="btn-login" class="iconbtn" title="管理员登录（学生无需登录，可直接浏览）" style="display:none">🔒</button>
+      <button id="btn-add" class="primary">＋ 添加信息</button>
+    </header>
+    <div id="chips"></div>
+    <main id="view"><div class="loading">加载中…</div></main>
+  </div>
+</div>
+<nav id="tabbar">
+  <button data-view="feed" class="active">📨<span>信息</span></button>
+  <button data-view="tasks">✅<span>待办</span></button>
+  <button data-view="calendar">📅<span>日历</span></button>
+  <button data-view="files">📁<span>文件</span></button>
+  <button data-view="stats">📊<span>统计</span></button>
+</nav>
+<button id="fab" title="添加信息">＋</button>
+<div id="modal-root"></div>
+<div id="toast"></div>
+<script>
+if ('serviceWorker' in navigator) {
+  addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+</script>
+<script src="/js/app.js"></script>
+</body>
+</html>

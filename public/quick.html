@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>快速记录 · 信息汇总</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#4f6ef2">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+  .qwrap{max-width:640px;margin:0 auto;padding:18px 16px 60px}
+  .qwrap h2{display:flex;align-items:center;gap:8px;font-size:20px;margin:6px 0 14px}
+  .qwrap h2 a{font-size:13px;color:var(--primary);text-decoration:none;margin-left:auto}
+  .qtheme{position:fixed;top:14px;right:14px;width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--card);font-size:16px;line-height:1}
+  .qarea{width:100%;min-height:170px;font-size:16px;line-height:1.7;padding:12px;border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--text);resize:vertical;outline:none}
+  .qarea:focus{border-color:var(--primary)}
+  .qrow{display:flex;gap:10px;margin:10px 0}
+  .qrow select,.qrow input{flex:1;min-width:0;padding:11px 12px;font-size:15px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--text);outline:none}
+  .qparsed{font-size:13.5px;color:var(--muted);background:#eef1fb;border-radius:10px;padding:8px 12px;margin:8px 0;display:none;line-height:1.7}
+  .qsave{width:100%;padding:14px;font-size:17px;font-weight:600;border:0;border-radius:14px;background:var(--primary);color:#fff;margin-top:6px}
+  .qsave:active{background:var(--primary-dark)}
+  .qlist{margin-top:26px}
+  .qlist h3{font-size:14px;color:var(--muted);margin:0 0 8px}
+  .qitem{background:var(--card);color:var(--text);border-radius:12px;box-shadow:var(--shadow);padding:10px 14px;margin:8px 0;font-size:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .qitem .qt{font-weight:600;flex:1;min-width:150px}
+  .qtoast{position:fixed;left:50%;bottom:40px;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 20px;border-radius:12px;font-size:15px;opacity:0;transition:.3s;pointer-events:none}
+  .qtoast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="qwrap">
+  <h2>📥 快速记录 <a href="/">打开完整版 →</a></h2>
+  <textarea id="q-text" class="qarea" placeholder="把老师发的通知、任务原文粘贴到这里…
+保存时会自动识别标题、分类和截止时间"></textarea>
+  <div id="q-parsed" class="qparsed"></div>
+  <div class="qrow">
+    <select id="q-group"></select>
+    <input id="q-sender" placeholder="发送人（选填）">
+  </div>
+  <button id="q-save" class="qsave">保 存</button>
+  <div class="qlist">
+    <h3>⏰ 最近要截止的事</h3>
+    <div id="q-today"><p class="empty-mini">加载中…</p></div>
+  </div>
+</div>
+<div id="q-toast" class="qtoast"></div>
+<button id="q-theme" class="qtheme" title="深色 / 浅色模式">🌙</button>
+<script>
+if ('serviceWorker' in navigator) {
+  addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+</script>
+<script>
+'use strict';
+const $ = (s) => document.querySelector(s);
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function pad(n){return String(n).padStart(2,'0');}
+function ymd(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
+const CATL={notice:'📢 通知',task:'📝 任务',activity:'🎪 活动',file:'📎 文件',other:'💬 其他'};
+
+function qtoast(msg){const el=$('#q-toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2000);}
+function friendly(ds){
+  const now=new Date();const t=ymd(now);
+  if(ds===t)return '今天';
+  if(ds===ymd(new Date(now.getTime()+86400000)))return '明天';
+  if(ds===ymd(new Date(now.getTime()-86400000)))return '昨天';
+  const d=new Date(ds+'T00:00:00');
+  return isNaN(d)?ds:(d.getMonth()+1)+'月'+d.getDate()+'日';
+}
+function fdl(s){const [d,t]=String(s).split(' ');return friendly(d)+(t?' '+t.slice(0,5):'');}
+
+async function loadGroups(){
+  try{
+    const r=await fetch('/api/groups').then(r=>r.json());
+    $('#q-group').innerHTML='<option value="">（不选群）</option>'+r.items.map(g=>`<option value="${g.id}">${esc(g.name)}</option>`).join('');
+  }catch(e){}
+}
+
+let parseTimer=null;
+$('#q-text').addEventListener('keydown',(e)=>{
+  if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();$('#q-save').click();}
+});
+$('#q-text').addEventListener('input',()=>{
+  clearTimeout(parseTimer);
+  parseTimer=setTimeout(async()=>{
+    const v=$('#q-text').value.trim();
+    const box=$('#q-parsed');
+    if(!v){box.style.display='none';return;}
+    try{
+      const r=await fetch('/api/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:v})}).then(r=>r.json());
+      const p=r.parsed;
+      box.style.display='block';
+      box.innerHTML=`识别为：<b>${CATL[p.category]||p.category}</b>${p.deadline?' · ⏰ 截止 '+esc(p.deadline):''}${p.priority?' · ⭐ 重要':''}${p.title?'<br>标题：'+esc(p.title):''}`;
+    }catch(e){box.style.display='none';}
+  },400);
+});
+
+$('#q-save').addEventListener('click',async()=>{
+  if(qReadOnly){location.href='/login';return;}
+  const text=$('#q-text').value.trim();
+  if(!text){qtoast('请先粘贴或输入内容');return;}
+  const btn=$('#q-save');btn.disabled=true;btn.textContent='保存中…';
+  try{
+    const body={content:text,received_at:(()=>{const d=new Date();return ymd(d)+' '+pad(d.getHours())+':'+pad(d.getMinutes());})()};
+    try{
+      const r=await fetch('/api/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}).then(r=>r.json());
+      const p=r.parsed;
+      body.title=p.title;body.category=p.category;body.deadline=p.deadline;body.priority=p.priority;
+      if((p.tags||[]).length)body.tags=p.tags.join(',');
+    }catch(e){}
+    if($('#q-sender').value.trim())body.sender_name=$('#q-sender').value.trim();
+    if($('#q-group').value)body.group_id=Number($('#q-group').value);
+    const r=await fetch('/api/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.ok){
+      $('#q-text').value='';$('#q-parsed').style.display='none';
+      qtoast('已保存 ✓');loadToday();
+    }else{const e=await r.json().catch(()=>({}));qtoast(e.error||'保存失败');}
+  }catch(e){qtoast('网络错误');}
+  btn.disabled=false;btn.textContent='保 存';
+});
+
+async function loadToday(){
+  try{
+    const d=await fetch('/api/messages?status=open&sort=deadline&limit=30').then(r=>r.json());
+    const now=new Date();
+    const past=ymd(new Date(now.getTime()-86400000));
+    const soon=ymd(new Date(now.getTime()+3*86400000));
+    const items=d.items.filter(it=>it.deadline&&it.deadline.slice(0,10)>=past&&it.deadline.slice(0,10)<=soon);
+    $('#q-today').innerHTML=items.length?items.map(it=>{
+      const overdue=(it.deadline.length>10?it.deadline:it.deadline+' 23:59')<`${ymd(now)} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+      return `<div class="qitem"><span class="qt">${esc(it.title||(it.content||'').slice(0,26))}</span>
+        <span class="dlchip ${overdue?'overdue':'soon'}">${overdue?'已逾期 · ':''}${esc(fdl(it.deadline))}</span></div>`;
+    }).join(''):'<p class="empty-mini">3 天内没有要截止的事 🎉</p>';
+  }catch(e){$('#q-today').innerHTML='<p class="empty-mini">加载失败</p>';}
+}
+
+let qReadOnly=false;
+fetch('/api/me').then(r=>r.json()).then(me=>{
+  if(me&&me.readOnly){
+    qReadOnly=true;
+    $('#q-save').disabled=true;$('#q-save').textContent='🔒 需要管理员登录';
+    $('#q-text').placeholder='浏览模式：快速记录仅管理员可用';
+  }
+}).catch(e=>{});
+loadGroups();
+loadToday();
+(function(){
+  const t=localStorage.getItem('infohub-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+  apply(t);
+  function apply(t){document.documentElement.dataset.theme=t;localStorage.setItem('infohub-theme',t);document.querySelector('#q-theme').textContent=t==='dark'?'☀️':'🌙';}
+  document.querySelector('#q-theme').addEventListener('click',()=>apply(document.documentElement.dataset.theme==='dark'?'light':'dark'));
+})();
+</script>
+</body>
+</html>
