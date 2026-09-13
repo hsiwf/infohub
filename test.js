@@ -88,6 +88,24 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   r = await j('/api/messages?q=' + encodeURIComponent('100%'));
   ok('搜索通配符按字面匹配（100%）', r.status === 200 && r.body.total === 0);
 
+  // 5.5 截止时间范围筛选（大数据量下待办/日历依赖）
+  r = await post('/api/messages', { title: '自检逾期信息', content: '内容', category: 'task', deadline: '2020-01-01 09:00' });
+  const odMid = r.body.id;
+  created.messages.push(odMid);
+  r = await j('/api/messages?status=open&sort=deadline&due=after&limit=200');
+  const nowStr2 = new Date();
+  const nowCmp = nowStr2.getFullYear() + '-' + String(nowStr2.getMonth() + 1).padStart(2, '0') + '-' + String(nowStr2.getDate()).padStart(2, '0') + ' ' + String(nowStr2.getHours()).padStart(2, '0') + ':' + String(nowStr2.getMinutes()).padStart(2, '0');
+  ok('due=after 只含未逾期', r.status === 200 && r.body.total > 0
+    && r.body.items.every((it) => it.deadline && (it.deadline.length > 10 ? it.deadline : it.deadline + ' 23:59') >= nowCmp)
+    && r.body.items.every((it) => it.id !== odMid));
+  r = await j('/api/messages?status=open&sort=deadline_desc&due=overdue&limit=50');
+  const odItems = r.body.items || [];
+  const descOk = odItems.every((it, i) => i === 0 || (odItems[i - 1].deadline || '') >= (it.deadline || ''));
+  ok('due=overdue 按截止倒序只含逾期', r.status === 200 && odItems.length > 0
+    && odItems.every((it) => it.deadline && (it.deadline.length > 10 ? it.deadline : it.deadline + ' 23:59') < nowCmp) && descOk);
+  r = await j('/api/messages?status=open&sort=deadline_desc&due=overdue&q=' + encodeURIComponent('自检逾期'));
+  ok('due=overdue 叠加搜索命中目标', r.status === 200 && r.body.total === 1 && r.body.items[0] && r.body.items[0].id === odMid);
+
   // 6. 附件：传 → 查 → 下一步（含安全头）→ 删
   const boundary = '----infoboundary' + Date.now();
   const fileBody = Buffer.from('test-content-自检');
@@ -107,6 +125,47 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   ok('非白名单类型强制下载', (d.headers.get('content-disposition') || '').startsWith('attachment'));
   r = await j('/api/files?q=' + encodeURIComponent('自检.txt'));
   ok('文件中心搜索', r.status === 200 && r.body.items.length === 1);
+
+  // 6.5 附件阅读/下载计数
+  const dl2 = await fetch(`${BASE}/api/attachments/${aid}/download?dl=1`);
+  await dl2.arrayBuffer();
+  const rawRes = await fetch(`${BASE}/api/attachments/${aid}/raw`);
+  await rawRes.arrayBuffer();
+  r = await j('/api/files?q=' + encodeURIComponent('自检.txt'));
+  const fa0 = r.body.items[0] || {};
+  ok('附件下载计数（强制下载 2 次，缩略图不计）', fa0.downloads === 2 && fa0.views === 0, JSON.stringify(fa0));
+
+  // 图片：打开（Sec-Fetch-Dest: document）计阅读，内嵌渲染（image）不计
+  const http = require('http');
+  const fetchWithDest = (path2, dest) => new Promise((resolve, reject) => {
+    const u = new URL(BASE);
+    const req = http.get({ host: u.hostname, port: u.port || 80, path: path2, headers: dest ? { 'sec-fetch-dest': dest } : {} }, (res2) => {
+      const chunks = [];
+      res2.on('data', (c) => chunks.push(c));
+      res2.on('end', () => resolve({ status: res2.statusCode, body: Buffer.concat(chunks) }));
+    });
+    req.on('error', reject);
+  });
+  const boundary2 = '----infoboundary' + Date.now();
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const mp2 = Buffer.concat([
+    Buffer.from(`--${boundary2}\r\nContent-Disposition: form-data; name="message_id"\r\n\r\n${mid}\r\n`),
+    Buffer.from(`--${boundary2}\r\nContent-Disposition: form-data; name="files"; filename="自检图.png"\r\nContent-Type: image/png\r\n\r\n`),
+    png, Buffer.from(`\r\n--${boundary2}--\r\n`),
+  ]);
+  r = await j('/api/upload', { method: 'POST', headers: { 'Content-Type': 'multipart/form-data; boundary=' + boundary2 }, body: new Uint8Array(mp2) });
+  const pid = r.body.ids && r.body.ids[0];
+  ok('上传图片附件', r.status === 200 && pid > 0);
+  created.attachments.push(pid);
+  const openRes = await fetchWithDest(`/api/attachments/${pid}/download`, 'document');
+  ok('图片内联打开（inline）', openRes.status === 200 && (openRes.body.length || 0) > 0);
+  await fetchWithDest(`/api/attachments/${pid}/download`, 'image');
+  r = await j('/api/files?q=' + encodeURIComponent('自检图.png'));
+  const fa1 = r.body.items[0] || {};
+  ok('图片打开计阅读、内嵌渲染不计', fa1.views === 1 && fa1.downloads === 0, JSON.stringify(fa1));
+  // 全量统计不带筛选查（totalViews/totalDownloads 跟随当前筛选，此处应=两个附件之和）
+  r = await j('/api/files');
+  ok('文件中心返回全量统计', r.body.totalViews === 1 && r.body.totalDownloads === 2, JSON.stringify({ v: r.body.totalViews, d: r.body.totalDownloads }));
 
   // 7. 智能解析
   r = await post('/api/parse', { text: '王老师：请同学们周五下午5点前把回执交给班主任，务必完成【重要】' });
@@ -157,9 +216,78 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   const imp = await j('/api/messages?q=' + encodeURIComponent('导入附件测试'));
   for (const it of (imp.body.items || [])) await j('/api/messages/' + it.id, { method: 'DELETE' });
 
+  // 9.6 导入原子性：中途失败（重复 ext_key 触发唯一索引）必须整体回滚，不残留半截数据
+  const gBefore = (await j('/api/groups')).body.items.length;
+  r = await post('/api/import?force=1', {
+    groups: [{ id: 1, name: '回滚测试甲', ext_key: 'qq:rb' }, { id: 2, name: '回滚测试乙', ext_key: 'qq:rb' }],
+    messages: [{ title: '回滚测试信息' }],
+  });
+  ok('导入中途失败返回 500', r.status === 500, JSON.stringify(r.body));
+  const gAfter = (await j('/api/groups')).body.items;
+  ok('导入失败整体回滚（无残留）', gAfter.length === gBefore && !gAfter.some((g) => g.name === '回滚测试甲'), JSON.stringify(r.body));
+
   // 10. 登录接口（未设密码时随意输都放行；设了密码时用正确密码再验一次）
   r = await post('/api/login', { password: authRequired ? adminPw : 'x' });
   ok('登录接口' + (authRequired ? '（密码校验）' : '（未启用密码时不拦）'), r.status === 200);
+
+  // 10.5 OneBot 11 上报（QQ 机器人接入；review=待审核默认 / auto=自动收录，按部署配置分支）
+  const obToken = cfg.onebot && cfg.onebot.token ? cfg.onebot.token : cfg.ingestToken;
+  const reviewMode = (cfg.onebot && cfg.onebot.mode) !== 'auto';
+  const rep = (payload, tok) => j('/api/onebot/report?access_token=' + encodeURIComponent(tok == null ? obToken : tok),
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const obPayload = {
+    post_type: 'message', message_type: 'group', group_id: 987654321,
+    time: Math.floor(Date.now() / 1000), self_id: 10000,
+    sender: { card: '王老师', nickname: 'wang' },
+    message: [{ type: 'at', data: { qq: 'all' } }, { type: 'text', data: { text: '请同学们明天下午5点前把回执交到班委，务必完成' } }],
+  };
+  r = await rep(obPayload);
+  let acceptedMid = 0;
+  if (reviewMode) {
+    ok('OneBot 上报进入待审核', r.status === 200 && r.body.inbox === true && r.body.id > 0, JSON.stringify(r.body));
+    const iid = r.body.id;
+    r = await j('/api/inbox');
+    ok('待审核列表可查', r.status === 200 && r.body.items.some((x) => x.id === iid));
+    r = await post('/api/inbox/' + iid + '/accept');
+    ok('审核收录→信息流（自动识别）', r.status === 200 && r.body.id > 0 && !!r.body.deadline && r.body.group_name === 'QQ群 987654321', JSON.stringify(r.body));
+    acceptedMid = r.body.id;
+    r = await rep(obPayload);
+    ok('OneBot 重复上报去重（审核模式）', r.status === 200 && r.body.deduped === true, JSON.stringify(r.body));
+    let r2 = await rep({ ...obPayload, sender: { card: '李老师', nickname: 'li' }, message: [{ type: 'text', data: { text: '待审核忽略流程测试消息，请忽略这条本身' } }] });
+    r = await j('/api/inbox/' + r2.body.id, { method: 'DELETE' });
+    ok('忽略待审核消息', r.status === 200 && r.body.ok === true);
+    // 待审核 limit 生效且 total 为全量（角标轮询 ?limit=1 不用拉全量）
+    await rep({ ...obPayload, sender: { card: '赵老师', nickname: 'z' }, message: [{ type: 'text', data: { text: '待审核分页测试甲，请同学们查收通知' } }] });
+    await rep({ ...obPayload, sender: { card: '钱老师', nickname: 'q' }, message: [{ type: 'text', data: { text: '待审核分页测试乙，请同学们查收通知' } }] });
+    r = await j('/api/inbox?limit=1');
+    ok('待审核 limit 生效且 total 为全量', r.body.items.length === 1 && r.body.total === 2, JSON.stringify(r.body));
+    // 超长正文截断（与手动录入同一口径 20000）
+    await rep({ ...obPayload, sender: { card: '长文', nickname: 'c' }, message: [{ type: 'text', data: { text: '截断测试开头，请同学们查收。' + '长'.repeat(25000) } }] });
+    r = await j('/api/inbox?limit=1');
+    ok('OneBot 超长正文截断到 20000', (r.body.items[0].content || '').length === 20000, '实际长度 ' + (r.body.items[0] ? (r.body.items[0].content || '').length : '无'));
+    r = await j('/api/inbox', { method: 'DELETE' });
+    ok('清空待审核', r.status === 200 && r.body.dismissed === 3, JSON.stringify(r.body));
+  } else {
+    ok('OneBot 群消息上报+自动识别', r.status === 200 && r.body.ok && r.body.id > 0 && r.body.parsed && !!r.body.parsed.deadline, JSON.stringify(r.body));
+    if (r.body.id) created.messages.push(r.body.id);
+    r = await rep(obPayload);
+    ok('OneBot 重复上报自动去重', r.status === 200 && r.body.deduped === true, JSON.stringify(r.body));
+  }
+  if (acceptedMid) created.messages.push(acceptedMid);
+  r = await rep({ post_type: 'meta_event', meta_event_type: 'heartbeat', time: Math.floor(Date.now() / 1000), status: {} });
+  ok('OneBot 心跳事件忽略', r.status === 200 && r.body.ignored === true);
+  r = await rep({ post_type: 'message', message_type: 'private', user_id: 1, time: Math.floor(Date.now() / 1000), sender: { nickname: 'x' }, message: '私信内容测试' });
+  ok('OneBot 私信默认不收录', r.status === 200 && r.body.ignored === true, JSON.stringify(r.body));
+  r = await rep({ post_type: 'message', message_type: 'group', group_id: 987654321, time: Math.floor(Date.now() / 1000), sender: { nickname: 'bot' }, message: [{ type: 'image', data: { file: 'a.jpg', url: 'http://x/a.jpg' } }] });
+  ok('OneBot 纯图片消息不收录', r.status === 200 && r.body.ignored === true, JSON.stringify(r.body));
+  r = await rep({ post_type: 'message', message_type: 'group', group_id: 987654321, time: Math.floor(Date.now() / 1000), sender: { nickname: '同学甲' }, message: '收到' });
+  ok('OneBot 水言“收到”被防闲聊过滤', r.status === 200 && r.body.ignored === true && !!r.body.reason, JSON.stringify(r.body));
+  r = await rep(obPayload, 'wrong-token');
+  ok('OneBot 错误令牌被拒（401）', r.status === 401);
+  r = await j('/api/groups?withCounts=1');
+  const obG = r.body.items.find((g) => g.name === 'QQ群 987654321');
+  ok('OneBot 上报自动建群（QQ 平台）', !!obG && obG.platform === 'qq');
+  if (obG) created.groups.push(obG.id);
 
   // 11. 静态页面
   for (const p2 of ['/', '/quick', '/css/style.css', '/js/app.js', '/icon.svg', '/manifest.webmanifest', '/sw.js']) {

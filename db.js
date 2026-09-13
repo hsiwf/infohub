@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS groups (
   platform TEXT DEFAULT 'other',
   color TEXT DEFAULT '#4f6ef2',
   remark TEXT DEFAULT '',
+  ext_key TEXT DEFAULT '',
   created_at TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS messages (
@@ -50,11 +51,33 @@ CREATE TABLE IF NOT EXISTS attachments (
   stored_name TEXT DEFAULT '',
   size INTEGER DEFAULT 0,
   mime TEXT DEFAULT '',
+  views INTEGER DEFAULT 0,
+  downloads INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS inbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  content TEXT DEFAULT '',
+  sender_name TEXT DEFAULT '',
+  group_name TEXT DEFAULT '',
+  qq_gid TEXT DEFAULT '',
+  received_at TEXT DEFAULT '',
   created_at TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_messages_group ON messages(group_id);
 CREATE INDEX IF NOT EXISTS idx_messages_deadline ON messages(deadline);
 CREATE INDEX IF NOT EXISTS idx_att_message ON attachments(message_id);
 `);
+
+// 轻量迁移：老库补 ext_key 列（QQ 群号等外部标识，机器人上报自动归群用）
+const gcols = db.prepare('PRAGMA table_info(groups)').all();
+if (!gcols.some((c) => c.name === 'ext_key')) {
+  db.exec("ALTER TABLE groups ADD COLUMN ext_key TEXT DEFAULT ''");
+}
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_ext ON groups(ext_key) WHERE ext_key <> ''`);
+// 轻量迁移：老库补附件阅读/下载计数列
+const acols = db.prepare('PRAGMA table_info(attachments)').all();
+if (!acols.some((c) => c.name === 'views')) db.exec('ALTER TABLE attachments ADD COLUMN views INTEGER DEFAULT 0');
+if (!acols.some((c) => c.name === 'downloads')) db.exec('ALTER TABLE attachments ADD COLUMN downloads INTEGER DEFAULT 0');
 
 module.exports = { db, DATA_DIR, UPLOAD_DIR };

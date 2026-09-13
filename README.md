@@ -25,12 +25,12 @@
 
 ## ✨ 功能特性
 
-- **看板管理**：通知 / 任务 / 活动 / 文件 / 其他五类，置顶、完成勾选、优先级、全文搜索、按截止时间排序
+- **看板管理**：通知 / 任务 / 活动 / 文件 / 其他五类，置顶、完成勾选、优先级、全文搜索、按截止时间排序；已完成事项固定沉底单独成区
 - **智能识别**：粘贴消息原文，自动解析标题、分类、发送人、截止时间、重要程度和标签（纯本地启发式规则，结果可手工修改）
-- **自动录入**：Webhook 接口配合 QQ / 微信机器人或手机快捷指令，消息自动进库、自动建群；手机还有 `/quick` 快捷录入页
-- **文件与提醒**：图片 / PDF 在线预览，附件一键下载；截止提醒一键导出 `.ics` 进手机系统日历；重复信息自动提示
+- **自动录入**：Webhook 接口配合微信机器人或手机快捷指令，消息自动进库、自动建群；QQ 群可用 **OneBot 11 机器人**（NapCat / LLOneBot 等）自动接入——默认先进「待审核」由管理员挑着收录，也可切换全自动收录（带防闲聊过滤、群白名单、仅管理员发言等策略）；手机还有 `/quick` 快捷录入页
+- **文件与提醒**：图片 / PDF 在线预览，附件一键下载，附件**阅读 / 下载次数统计**；截止提醒一键导出 `.ics` 进手机系统日历（只导未逾期事项）；重复信息自动提示
 - **共享安全**：可选管理密码——所有人可浏览，增删改需管理员登录（适合班级共享）
-- **省心运维**：每天自动备份数据库（保留 14 份）、JSON 导出 / 导入、统计面板、PWA 可安装到手机桌面
+- **省心运维**：每天自动备份数据库（保留 14 份）、JSON 导出 / 导入（含附件记录）、统计面板、深色模式、PWA 可安装到手机桌面
 
 ## 📦 安装部署
 
@@ -185,6 +185,7 @@ Node 项目设置 → 域名管理绑定域名 → SSL 里申请 Let's Encrypt �
 | --- | --- |
 | `password` | 管理密码。**留空** = 不启用访问控制；设置后重启生效：所有人可浏览，写入操作需在 `/login` 登录（自带限速：同一 IP 每分钟最多 10 次）。局域网自用可不设，**公网部署务必设置** |
 | `ingestToken` | 外部接入令牌，供机器人 / 快捷指令调用 Webhook；泄露后改掉重启即可作废旧令牌 |
+| `onebot.*` | QQ 机器人（OneBot 11）接入配置：`mode`（`review` 人工审核=默认 / `auto` 自动收录）、`token`（上报令牌，默认用 ingestToken）、`secret`（非空改用 HMAC 签名校验）、`includePrivate`（是否收录私信）、`groups`（群白名单 `{ "QQ群号": "站内显示名" }`，留空 = 收录机器人所在全部群）、`filter`（防闲聊过滤，见下文）。详见「[QQ 机器人接入](#-qq-机器人接入onebot-11)」 |
 
 可通过环境变量调整的行为（加在启动命令前，或写入 systemd 的 `Environment=`）：
 
@@ -230,6 +231,26 @@ curl -X POST "http://localhost:5757/api/ingest?token=你的令牌" \
 
 </details>
 
+## 🐧 QQ 机器人接入（OneBot 11）
+
+在电脑上用 [NapCat](https://napneko.github.io/) / LLOneBot / Lagrange / go-cqhttp 等 OneBot 11 框架登录一个 QQ 小号并拉进班级群，在它的网络配置里添加 **HTTP POST 上报**，指向本项目的上报接口，群消息就会自动进站：
+
+| 配置项 | 值 |
+| --- | --- |
+| 上报地址 | `http://你的服务器地址:5757/api/onebot/report` |
+| access_token | `data/config.json` 里的 `onebot.token`（默认与 `ingestToken` 相同） |
+
+统计页「🐧 QQ 自动接入」面板会直接生成上报地址和 NapCat / LLOneBot 的配置示例，可一键复制。
+
+**两种收录模式**（`data/config.json` 的 `onebot.mode`，改后重启生效）：
+
+- `review` 人工审核（**默认**）：群消息先进侧栏「📥 待审核」，管理员挑着收录，收录时自动识别分类和截止时间——宁可多看一眼，不让闲聊进信息流
+- `auto` 自动收录：通过防闲聊过滤后直接进入信息流
+
+**防闲聊过滤**（`onebot.filter`）：`minLength` 最短长度（默认 4，太短的跳过）、`stopWords` 水词屏蔽（"收到""好的"等，默认内置一批）、`keywords` 关键词白名单、`adminsOnly` 只收录群主/管理员发言、`smart` 智能过滤（像通知/任务的才收录，`hasNoticeSignal` 启发式）。后三项仅 `auto` 模式参与——review 模式下这些判断交给人。
+
+其他行为：群文件上传会记一条「文件」消息；纯图片/表情等无文字消息不收录；同一发送人 5 分钟内的重复上报自动去重；群号通过 `ext_key` 与站内群绑定，改名不丢关联。
+
 ## 🧪 自检测试
 
 先启动服务，另开一个终端运行：
@@ -267,22 +288,27 @@ infohub/
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/health` | 健康检查 |
-| GET / POST | `/api/messages` | 信息列表（支持 `q` / `group_id` / `category` / `status` / `sort` / 分页）/ 新增 |
+| GET / POST | `/api/messages` | 信息列表（支持 `q` / `group_id` / `category` / `status` / `sort`（`time`/`deadline`/`deadline_desc`）/ `due=after\|overdue` 截止范围 / 分页）/ 新增 |
 | GET / PUT / DELETE | `/api/messages/:id` | 详情 / 修改 / 删除（含附件文件） |
 | POST | `/api/messages/:id/toggle` | 切换完成状态 |
 | POST | `/api/messages/:id/pin` | 切换置顶 |
-| GET / POST | `/api/groups` | 群列表（`withCounts=1` 带数量）/ 新增 |
+| GET / POST | `/api/groups` | 群列表（`withCounts=1` 带数量）/ 新增（同名返回 409） |
 | PUT / DELETE | `/api/groups/:id` | 修改 / 删除群（群下信息保留） |
 | POST | `/api/upload` | 上传附件（multipart/form-data，需 `message_id`） |
-| GET | `/api/attachments/:id/download` | 下载附件（图片 / PDF 内联预览） |
+| GET | `/api/attachments/:id/download` | 下载附件（图片 / PDF 内联预览；`?dl=1` 强制下载；自动统计阅读 / 下载次数） |
+| GET | `/api/attachments/:id/raw` | 附件原始内容（信息流缩略图专用，不计数、允许缓存） |
 | DELETE | `/api/attachments/:id` | 删除附件 |
-| GET | `/api/files` | 附件列表（支持 `q` / `group_id`） |
+| GET | `/api/files` | 附件列表（支持 `q` / `group_id`，含阅读 / 下载计数） |
 | POST | `/api/parse` | 智能解析文本（不落库） |
 | POST | `/api/similar` | 相似信息检测（防重复录入） |
 | POST | `/api/ingest?token=` | 外部接入 Webhook |
-| GET | `/api/calendar.ics` | 导出截止提醒日历 |
-| GET | `/api/export` | 导出 JSON 备份（仅管理员） |
-| POST | `/api/import?force=1` | 导入 JSON 备份（仅空库时允许） |
+| POST | `/api/onebot/report` | OneBot 11 HTTP POST 上报（QQ 机器人，`access_token` 鉴权） |
+| GET | `/api/inbox` | 待审核收件箱列表（仅管理员） |
+| POST | `/api/inbox/:id/accept`、`/api/inbox/accept-all` | 收录待审核消息（单个 / 全部） |
+| DELETE | `/api/inbox/:id`、`/api/inbox` | 忽略待审核消息（单个 / 全部） |
+| GET | `/api/calendar.ics` | 导出截止提醒日历（只含未逾期事项） |
+| GET | `/api/export` | 导出 JSON 备份（仅管理员，含附件记录） |
+| POST | `/api/import?force=1` | 导入 JSON 备份（仅空库时允许，附件记录一并恢复） |
 | GET | `/api/stats` | 统计数据 |
 | POST | `/api/login` / `/api/logout` | 管理员登录 / 登出（设置了密码时） |
 
