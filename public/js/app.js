@@ -571,7 +571,7 @@ async function loadStats() {
       ${me.authRequired ? (me.loggedIn
         ? '<button class="ghost" id="btn-logout" style="margin-left:10px">🚪 退出登录</button>'
         : '<a class="ghost" href="/login" style="margin-left:10px;text-decoration:none;display:inline-block">🔐 管理员登录</a>') : ''}
-      <p class="hint">导入建议只在空数据时使用（已有数据时服务器会拒绝，防止重复）。JSON 备份不含附件文件，附件请用文件夹方式备份。</p>
+      <p class="hint">导入建议只在空数据时使用（已有数据时服务器会拒绝，防止重复）。JSON 备份会恢复附件记录，但不含附件文件本身——完整备份请复制整个 data/ 文件夹。</p>
     </div>`;
   const copyBtn = $('#btn-copy-ingest');
   if (copyBtn) copyBtn.addEventListener('click', async () => {
@@ -602,7 +602,7 @@ async function loadStats() {
       if (!Array.isArray(data.groups) || !Array.isArray(data.messages)) throw new Error('不是有效的备份文件');
       if (!confirm(`将导入 ${data.groups.length} 个群、${data.messages.length} 条信息。\n若当前已有数据，服务器会拒绝以防重复。继续吗？`)) return;
       const r = await api('/api/import', { method: 'POST', body: data });
-      toast(`导入成功：${r.groups} 个群、${r.imported} 条信息 ✓`);
+      toast(`导入成功：${r.groups} 个群、${r.imported} 条信息${r.attachments ? `、${r.attachments} 条附件` : ''} ✓`);
       refresh();
     } catch (err) {
       toast('导入失败：' + err.message, 'error');
@@ -1085,7 +1085,8 @@ async function updateBadge() {
     const st = await api('/api/stats');
     const today = ymd(new Date());
     const n = (st.overdue || 0) + ((st.upcoming || []).filter((it) => String(it.deadline).slice(0, 10) === today).length);
-    document.title = '信息汇总';
+    // 标题角标：已逾期 + 今天截止的数量
+    document.title = n > 0 ? `(${n}) 信息汇总` : '信息汇总';
   } catch (e) { /* 忽略 */ }
 }
 async function checkNotifs() {
@@ -1094,6 +1095,12 @@ async function checkNotifs() {
     const data = await api('/api/messages?status=open&sort=deadline&limit=100');
     const now = new Date();
     const key = 'infohub-notified-' + ymd(now);
+    // 只保留当天的提醒记录，历史 key 会一直占着 localStorage
+    try {
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith('infohub-notified-') && k !== key)
+        .forEach((k) => localStorage.removeItem(k));
+    } catch (e) { /* 忽略 */ }
     const done = new Set(JSON.parse(localStorage.getItem(key) || '[]'));
     for (const it of data.items) {
       if (!it.deadline) continue;

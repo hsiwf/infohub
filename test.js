@@ -112,6 +112,10 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   r = await post('/api/parse', { text: '王老师：请同学们周五下午5点前把回执交给班主任，务必完成【重要】' });
   const p = r.body.parsed || {};
   ok('智能解析（分类/截止/重要/发送人）', p.category === 'task' && !!p.deadline && p.priority === 1 && p.sender === '王老师', JSON.stringify(p));
+  r = await post('/api/parse', { text: '9月20日 16:30 前提交表格' });
+  ok('智能解析保留分钟（16:30）', r.status === 200 && (r.body.parsed.deadline || '').endsWith('16:30'), JSON.stringify(r.body.parsed));
+  r = await post('/api/parse', { text: '明天下午4点半前交回执' });
+  ok('智能解析「点半」（16:30）', r.status === 200 && (r.body.parsed.deadline || '').endsWith('16:30'), JSON.stringify(r.body.parsed));
 
   // 7.5 相似检测与 .ics 日历
   r = await post('/api/similar', { text: '自检信息的内容包含唯一标记' });
@@ -140,6 +144,18 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   ok('JSON 导出', ex.status === 200 && Array.isArray(dump.messages) && Array.isArray(dump.groups));
   r = await post('/api/import', { groups: [], messages: [] });
   ok('有数据时导入被拒（防重复）', r.status === 400);
+
+  // 9.5 force 导入：附件记录一并恢复（附件文件本身不在 JSON 中，随 data/ 目录迁移）
+  r = await post('/api/import?force=1', {
+    groups: [],
+    messages: [{ id: 9900, title: '导入附件测试', content: '导入附件测试内容' }],
+    attachments: [{ message_id: 9900, orig_name: '导入附件测试.txt', stored_name: '202601/0123456789abcdef.txt', size: 3, mime: 'text/plain', created_at: '2030-01-01 09:00' }],
+  });
+  ok('force 导入恢复附件记录', r.status === 200 && r.body.attachments === 1, JSON.stringify(r.body));
+  r = await j('/api/files?q=' + encodeURIComponent('导入附件测试.txt'));
+  ok('导入的附件出现在文件中心', r.status === 200 && r.body.items.length === 1, JSON.stringify(r.body));
+  const imp = await j('/api/messages?q=' + encodeURIComponent('导入附件测试'));
+  for (const it of (imp.body.items || [])) await j('/api/messages/' + it.id, { method: 'DELETE' });
 
   // 10. 登录接口（未设密码时随意输都放行；设了密码时用正确密码再验一次）
   r = await post('/api/login', { password: authRequired ? adminPw : 'x' });
