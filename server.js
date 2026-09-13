@@ -46,12 +46,15 @@ const MIME = {
 /* ---------- 外部接入令牌（存 data/config.json） ---------- */
 function loadConfig() {
   const p = path.join(DATA_DIR, 'config.json');
+  let c = {};
   try {
-    const c = JSON.parse(fs.readFileSync(p, 'utf8'));
-    if (c && c.ingestToken) return c;
-  } catch (e) { /* 重新生成 */ }
-  const c = { ingestToken: crypto.randomBytes(16).toString('hex'), password: '' };
-  fs.writeFileSync(p, JSON.stringify(c, null, 2));
+    const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) c = parsed;
+  } catch (e) { /* 首次启动生成 */ }
+  let changed = false;
+  if (typeof c.ingestToken !== 'string' || !c.ingestToken) { c.ingestToken = crypto.randomBytes(16).toString('hex'); changed = true; }
+  if (typeof c.password !== 'string') { c.password = ''; changed = true; }
+  if (changed || !fs.existsSync(p)) fs.writeFileSync(p, JSON.stringify(c, null, 2));
   return c;
 }
 const CONFIG = loadConfig();
@@ -256,6 +259,7 @@ route('POST', '/api/groups', (ctx) => {
   const b = ctx.body || {};
   const name = sField(b.name, 60);
   if (!name) throw new HttpError(400, '群名称不能为空');
+  if (db.prepare('SELECT id FROM groups WHERE name = ?').get(name)) throw new HttpError(409, '已存在同名群，请换个名字');
   const platform = PLATFORMS.includes(b.platform) ? b.platform : 'other';
   const color = /^#[0-9a-fA-F]{6}$/.test(b.color || '') ? b.color : pickColor();
   const info = db.prepare('INSERT INTO groups (name, platform, color, created_at) VALUES (?, ?, ?, ?)')
@@ -270,6 +274,7 @@ route('PUT', '/api/groups/:id', (ctx) => {
   const b = ctx.body || {};
   const name = sField(b.name, 60);
   if (!name) throw new HttpError(400, '群名称不能为空');
+  if (db.prepare('SELECT id FROM groups WHERE name = ? AND id <> ?').get(name, id)) throw new HttpError(409, '已存在同名群，请换个名字');
   const platform = PLATFORMS.includes(b.platform) ? b.platform : 'other';
   const color = /^#[0-9a-fA-F]{6}$/.test(b.color || '') ? b.color : pickColor();
   db.prepare('UPDATE groups SET name = ?, platform = ?, color = ? WHERE id = ?').run(name, platform, color, id);
@@ -358,7 +363,7 @@ route('PUT', '/api/messages/:id', (ctx) => {
     status: b.status === 'done' ? 'done' : b.status === 'open' ? 'open' : old.status,
     group_id: 'group_id' in b ? getGroupRef(b.group_id) : old.group_id,
     sender_name: 'sender_name' in b ? sField(b.sender_name, 60) : old.sender_name,
-    received_at: cleanDT(b.received_at) || old.received_at,
+    received_at: 'received_at' in b ? (cleanDT(b.received_at) || '') : old.received_at,
     deadline: 'deadline' in b ? (cleanDT(b.deadline) || '') : old.deadline,
     priority: 'priority' in b ? (b.priority ? 1 : 0) : old.priority,
     pinned: 'pinned' in b ? (b.pinned ? 1 : 0) : old.pinned,
@@ -538,8 +543,9 @@ route('POST', '/api/import', (ctx) => {
       (title, content, category, group_id, sender_name, received_at, deadline, priority, status, pinned, tags, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   let n = 0;
+  const mmap = {}; // 旧 message_id → 新 id，供附件记录恢复关联
   for (const m of b.messages) {
-    insM.run(
+    const info = insM.run(
       sField(m.title, 120),
       sField(m.content, 20000),
       CATEGORIES.includes(m.category) ? m.category : 'notice',
@@ -553,11 +559,28 @@ route('POST', '/api/import', (ctx) => {
       sField(m.tags, 200),
       cleanDT(m.created_at) || nowStr(),
       nowStr());
+    if (m.id != null) mmap[String(m.id)] = Number(info.lastInsertRowid);
     n++;
   }
-  console.log(`导入备份：${Object.keys(gmap).length} 个群、${n} 条信息`);
-  log(`导入备份：${Object.keys(gmap).length} 个群、${n} 条信息`);
-  return { ok: true, groups: Object.keys(gmap).length, imported: n };
+  // 恢复附件记录（附件文件本身不在 JSON 里，需随 data/ 目录整体迁移）
+  let nAtt = 0;
+  if (Array.isArray(b.attachments)) {
+    const insA = db.prepare(`INSERT INTO attachments (message_id, orig_name, stored_name, size, mime, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)`);
+    for (const a of b.attachments) {
+      const mid = mmap[String(a.message_id)];
+      if (!mid) continue; // 对应信息不在本次备份中，跳过
+      const stored = sField(a.stored_name, 200).replace(/\\/g, '/');
+      if (!stored || stored.includes('..') || stored.startsWith('/')) continue;
+      insA.run(mid, sField(a.orig_name, 200), stored, Math.max(0, Number(a.size) || 0),
+        sField(a.mime, 100), cleanDT(a.created_at) || nowStr());
+      nAtt++;
+    }
+  }
+  const summary = `${Object.keys(gmap).length} 个群、${n} 条信息、${nAtt} 条附件记录`;
+  console.log('导入备份：' + summary);
+  log('导入备份：' + summary);
+  return { ok: true, groups: Object.keys(gmap).length, imported: n, attachments: nAtt };
 });
 
 /* ---------- 导出 .ics 日历（截止时间进手机系统日历） ---------- */
@@ -636,7 +659,7 @@ route('GET', '/api/export', (ctx) => {
     exported_at: nowStr(),
     groups: db.prepare('SELECT * FROM groups ORDER BY id').all(),
     messages: db.prepare('SELECT * FROM messages ORDER BY id').all(),
-    attachments: db.prepare('SELECT id, message_id, orig_name, size, mime, created_at FROM attachments ORDER BY id').all(),
+    attachments: db.prepare('SELECT id, message_id, orig_name, stored_name, size, mime, created_at FROM attachments ORDER BY id').all(),
   };
   const body = JSON.stringify(dump, null, 2);
   const res = ctx.res;
@@ -657,7 +680,7 @@ function serveStatic(req, res, pathname) {
   if (p === '/quick') p = '/quick.html';
   if (p === '/login') p = '/login.html';
   let fp = path.normalize(path.join(PUBLIC_DIR, p));
-  if (!fp.startsWith(PUBLIC_DIR)) { res.writeHead(403); res.end('Forbidden'); return; }
+  if (fp !== PUBLIC_DIR && !fp.startsWith(PUBLIC_DIR + path.sep)) { res.writeHead(403); res.end('Forbidden'); return; }
   if (!fs.existsSync(fp) || !fs.statSync(fp).isFile()) {
     if (!path.extname(p)) fp = path.join(PUBLIC_DIR, 'index.html'); // 前端路由回退
     else { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Not Found'); return; }
@@ -675,9 +698,8 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname.startsWith('/api/')) {
     if (process.env.INFOHUB_DEBUG === '1') console.log('[debug]', req.method, pathname + u.search);
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Token');
+    // 不开放跨域：避免未设密码时，用户浏览器里打开的任意网页都能读取局域网内的数据。
+    // 机器人 / 快捷指令走 curl 等非浏览器客户端，不受同源策略影响。
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     // 访问门禁：设了管理密码时，浏览（页面与查询接口）对所有人开放——学生可看；
     // 写入类操作需要管理员登录。机器人凭接入令牌通行（ingest 自带令牌校验，不在此拦截）。
