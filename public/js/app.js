@@ -139,6 +139,7 @@ const state = {
   jl: null,        // 接龙详情状态 {id, token}；null = 列表
   jlBanner: false, // 创建成功横幅（只显示一次）
   jlQuiet: false,  // 定时刷新中（不滚动）
+  draw: null,      // 抽签详情的签箱 id；null = 列表
 };
 
 /* ========= 只读访客 ========= */
@@ -1017,6 +1018,42 @@ function openGroupModal(group) {
   });
 }
 
+/* ========= 班级名单库（创建接龙 / 签箱时复用名单） ========= */
+// 在弹窗里绑定"从名单库选择 + 删除"控件；applyRoster(选中项) 由调用方填充表单
+async function setupRosterLib(prefix, applyRoster) {
+  const sel = $('#' + prefix + '-roster-lib');
+  const delBtn = $('#' + prefix + '-roster-lib-del');
+  if (!sel) return;
+  let lib = [];
+  try { lib = (await api('/api/rosters')).items; } catch (e) { /* 拉取失败按空处理 */ }
+  const renderOptions = () => {
+    sel.innerHTML = '<option value="">— 手动粘贴名单 —</option>' +
+      lib.map((r) => `<option value="${r.id}">${esc(r.name)}（${r.count} 人）</option>`).join('');
+  };
+  renderOptions();
+  sel.addEventListener('change', () => {
+    const r = lib.find((x) => String(x.id) === sel.value);
+    delBtn.style.display = r ? '' : 'none';
+    if (r) applyRoster(r);
+  });
+  delBtn.addEventListener('click', async () => {
+    const r = lib.find((x) => String(x.id) === sel.value);
+    if (!r || !confirm(`从名单库删除「${r.name}」？`)) return;
+    try {
+      await api('/api/rosters/' + r.id, { method: 'DELETE' });
+      lib = lib.filter((x) => x.id !== r.id);
+      renderOptions();
+      sel.value = '';
+      delBtn.style.display = 'none';
+      toast('已从名单库删除');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+// 保存到名单库（名称留空则跳过）；失败抛错由调用方提示
+async function saveRosterToLib(prefix, name, rosterRaw, keepId) {
+  return api('/api/rosters', { method: 'POST', body: { name, rosterRaw, keepId } });
+}
+
 /* ========= 班级接龙（自「接龙小助手」并入） ========= */
 let jlTimer = null;
 function jlStopTimer() { if (jlTimer) { clearInterval(jlTimer); jlTimer = null; } }
@@ -1410,10 +1447,17 @@ function openJielongCreateModal() {
       <input id="jl-title" maxlength="60" placeholder="例如：9月12日春游报名">
       <label>说明（选填）</label>
       <textarea id="jl-desc" rows="2" maxlength="1000" placeholder="时间、地点、要求等，同学打开链接就能看到"></textarea>
+      <label>从名单库选择（可选）</label>
+      <div class="labrow">
+        <select id="jl-roster-lib" style="flex:1;min-width:0"><option value="">— 手动粘贴名单 —</option></select>
+        <button type="button" class="mini danger" id="jl-roster-lib-del" style="display:none;white-space:nowrap">🗑 删除</button>
+      </div>
       <label>班级名单（选填，用于自动统计谁没接龙；支持直接粘贴 Excel / QQ 名单）</label>
       <textarea id="jl-roster" rows="5" placeholder="每行一个，支持“学号 姓名”&#10;例如：&#10;2023001 张三&#10;2. 李四&#10;王五"></textarea>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer"><input type="checkbox" id="jl-withid" style="width:auto"> 名单包含学号（输入学号或姓名都能匹配）</label>
       <div id="jl-roster-pv" class="jl-roster-pv"></div>
+      <label>保存到名单库（选填，同名覆盖，下次创建时可直接选用）</label>
+      <input id="jl-roster-libname" maxlength="60" placeholder="例如：三年二班名单">
       <label>截止时间（选填）</label>
       <input id="jl-deadline" type="datetime-local">
       <label>接龙内容（同学需要填写的项目，可增减）</label>
@@ -1435,11 +1479,19 @@ function openJielongCreateModal() {
     renderFields();
   });
   rosterPreview();
+  setupRosterLib('jl', (r) => {
+    $('#jl-roster').value = r.roster;
+    $('#jl-withid').checked = !!r.keepId;
+    withIdTouched = true;
+    rosterPreview();
+  });
 
   $('#jl-save').addEventListener('click', async () => {
     const title = $('#jl-title').value.trim();
     if (!title) { toast('请填写接龙标题', 'error'); return; }
     try {
+      const libName = $('#jl-roster-libname').value.trim();
+      if (libName) await saveRosterToLib('jl', libName, $('#jl-roster').value, $('#jl-withid').checked);
       const r = await api('/api/jielong', { method: 'POST', body: {
         title,
         description: $('#jl-desc').value.trim(),
@@ -1496,10 +1548,240 @@ function openJielongEditModal(a, token) {
   });
 }
 
+/* ========= 抽签（按班级名单公平轮抽） ========= */
+async function loadDraw() {
+  const view = $('#view');
+  if (state.draw) { await loadDrawDetail(); return; }
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  const data = await api('/api/draw');
+  const items = data.items.map((d) => `
+    <div class="panel">
+      <div class="jl-head"><h2>${esc(d.title)}</h2>${d.remainingCount ? `<span class="jl-badge on">箱内剩 ${d.remainingCount}/${d.total}</span>` : '<span class="jl-badge off">本轮已抽完</span>'}</div>
+      <div class="jl-meta"><span>每次抽 ${d.perDraw} 人</span><span>已抽 ${d.roundCount} 轮</span><span>名单 ${d.total} 人</span></div>
+      <div class="jl-actions">
+        <button class="primary" data-dw-open="${d.id}">🎲 进入抽签</button>
+        ${canEdit() ? `<button class="ghost danger" data-dw-del="${d.id}">🗑 删除</button>` : ''}
+      </div>
+    </div>`).join('');
+  view.innerHTML = `
+    <div class="jl-head"><h2>🎲 抽签点名</h2></div>
+    <p class="hint">按班级名单建签箱：抽过的人自动排除，下次不会被抽到；箱内抽空后自动开始新一轮，保证大家轮流参加。</p>
+    ${canEdit() ? '<div class="jl-actions"><button class="primary" id="btn-dw-create">＋ 新建签箱</button></div>' : ''}
+    ${items || `<div class="empty"><div class="big">🎲</div>还没有签箱<br>${canEdit() ? '点上面「新建签箱」，粘贴班级名单就能开始抽签' : '发起后签箱会出现在这里'}</div>`}`;
+  const createBtn = $('#btn-dw-create');
+  if (createBtn) createBtn.addEventListener('click', openDrawCreateModal);
+  $$('[data-dw-open]').forEach((b) => b.addEventListener('click', () => {
+    state.draw = b.dataset.dwOpen;
+    renderView().catch((e) => toast(e.message, 'error'));
+  }));
+  $$('[data-dw-del]').forEach((b) => b.addEventListener('click', async () => {
+    const box = data.items.find((x) => x.id === b.dataset.dwDel);
+    if (!confirm(`确定删除签箱「${box ? box.title : ''}」？抽签历史一并清除，不可恢复！`)) return;
+    try { await api('/api/draw/' + b.dataset.dwDel, { method: 'DELETE' }); toast('签箱已删除'); loadDraw(); }
+    catch (e) { toast(e.message, 'error'); }
+  }));
+}
+
+async function loadDrawDetail() {
+  const view = $('#view');
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  let d;
+  try { d = await api('/api/draw/' + state.draw); }
+  catch (e) { state.draw = null; toast(e.message, 'error'); return loadDraw(); }
+  renderDrawDetail(d);
+}
+
+function renderDrawDetail(d) {
+  const view = $('#view');
+  const pct = d.total ? Math.round((d.total - d.remainingCount) / d.total * 100) : 0;
+  const done = d.total > 0 && d.remainingCount === 0;
+  const last = d.rounds[d.rounds.length - 1];
+  // 已抽完时输入框预置"新一轮"的默认人数，而不是 1
+  const nextN = done ? Math.min(d.perDraw, d.total) : Math.min(d.perDraw, Math.max(d.remainingCount, 1));
+  const nextMax = Math.max(done ? d.total : d.remainingCount, 1);
+  view.innerHTML = `
+    <button class="ghost jl-back" id="dw-back">← 返回抽签列表</button>
+    <div class="panel">
+      <div class="jl-head"><h2>${esc(d.title)}</h2>${done ? '<span class="jl-badge off">本轮已抽完</span>' : `<span class="jl-badge on">箱内剩 ${d.remainingCount}/${d.total}</span>`}</div>
+      <div class="jl-meta"><span>名单 ${d.total} 人</span><span>已抽 ${d.roundCount} 轮</span></div>
+      <div class="jl-prog"><div class="jl-bar"><i style="width:${pct}%"></i></div></div>
+    </div>
+    <div class="panel">
+      <div class="dw-countrow">本次抽 <input id="dw-count" type="number" min="1" max="${nextMax}" value="${nextN}"> 人
+        <span class="hint" style="margin:0">${done ? '箱内已抽空，下次抽签自动开始新一轮' : `还剩 ${d.remainingCount} 人未被抽到`}</span></div>
+      <div class="dw-result" id="dw-result">${last ? last.picked.map((p) => `<span class="dw-name">${esc(p.name)}</span>`).join('') : '<span class="dw-empty">点下面按钮开始抽签 🎲</span>'}</div>
+      ${canEdit() ? `
+      <button class="dw-go" id="dw-go">🎲 开始抽签${done ? '（新一轮）' : ''}</button>
+      <div class="jl-actions">
+        <button class="ghost" id="dw-undo" ${d.roundCount ? '' : 'disabled'}>↩️ 撤销上一轮</button>
+        <button class="ghost" id="dw-reset" ${d.roundCount ? '' : 'disabled'}>♻️ 重置箱子</button>
+        <span class="hint" style="margin:0">重置后所有人重新可被抽到</span>
+      </div>` : ''}
+    </div>
+    <div class="panel">
+      <h3>📜 抽签记录（${d.roundCount} 轮）</h3>
+      ${d.roundCount ? d.rounds.slice().reverse().map((r, i) => `
+        <div class="dw-round"><span class="dw-rtime">第 ${d.roundCount - i} 轮 · ${jlFmtTime(r.time)}</span>
+          <span class="dw-rnames">${r.picked.map((p) => `<span class="dw-rname">${esc(p.name)}</span>`).join('')}</span>
+        </div>`).join('') : '<p class="empty-mini">还没有抽过</p>'}
+    </div>
+    ${canEdit() ? `<div class="jl-actions">
+      <button class="ghost" id="dw-edit">✏️ 编辑签箱</button>
+      <button class="ghost danger" id="dw-del">🗑 删除签箱</button>
+    </div>` : ''}`;
+  $('#dw-back').addEventListener('click', () => { state.draw = null; renderView().catch(() => {}); });
+  if (!canEdit()) return;
+
+  $('#dw-go').addEventListener('click', async () => {
+    const n = Math.max(1, Number($('#dw-count').value) || d.perDraw);
+    const btn = $('#dw-go');
+    btn.disabled = true; btn.textContent = '抽签中…';
+    try {
+      const r = await api(`/api/draw/${d.id}/go`, { method: 'POST', body: { count: n } });
+      await loadDrawDetail();
+      toast(`抽中 ${r.count} 人${r.reset ? '，已自动开始新一轮' : ''}`);
+    } catch (e) {
+      toast(e.message, 'error');
+      btn.disabled = false; btn.textContent = '🎲 开始抽签';
+    }
+  });
+  $('#dw-undo').addEventListener('click', async () => {
+    if (!confirm('撤销最近一轮抽签？这一轮抽到的人重新可被抽到。')) return;
+    try {
+      const r = await api(`/api/draw/${d.id}/undo`, { method: 'POST' });
+      toast(`已撤销，${r.restored.map((p) => p.name).join('、')} 重新可抽`);
+      loadDrawDetail();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+  $('#dw-reset').addEventListener('click', async () => {
+    if (!confirm('重置签箱？所有人重新可被抽到（历史记录清空）。')) return;
+    try { await api(`/api/draw/${d.id}/reset`, { method: 'POST' }); toast('签箱已重置'); loadDrawDetail(); }
+    catch (e) { toast(e.message, 'error'); }
+  });
+  $('#dw-edit').addEventListener('click', () => openDrawEditModal(d));
+  $('#dw-del').addEventListener('click', async () => {
+    if (!confirm(`确定删除签箱「${d.title}」？抽签历史一并清除，不可恢复！`)) return;
+    try {
+      await api('/api/draw/' + d.id, { method: 'DELETE' });
+      state.draw = null;
+      toast('签箱已删除');
+      renderView().catch(() => {});
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+function openDrawCreateModal() {
+  let withIdTouched = false;
+  const rosterPreview = () => {
+    const raw = $('#dw-roster').value;
+    if (!withIdTouched) $('#dw-withid').checked = jlParseRoster(raw, true).hasIds;
+    const parsed = jlParseRoster(raw, $('#dw-withid').checked);
+    const pv = $('#dw-roster-pv');
+    if (!parsed.list.length) { pv.innerHTML = ''; return; }
+    pv.innerHTML = `<div>识别到 <b>${parsed.list.length}</b> 人${$('#dw-withid').checked ? '（含学号）' : ''}：</div>` +
+      parsed.list.slice(0, 50).map((r) => `<span class="jl-chip plain">${esc(jlSlotLabel(r))}</span>`).join('') +
+      (parsed.list.length > 50 ? `<span class="jl-chip plain">…共 ${parsed.list.length} 人</span>` : '');
+  };
+  openModal(`
+    <h2>🎲 新建签箱</h2>
+    <div class="form">
+      <label>抽签标题</label>
+      <input id="dw-title" maxlength="60" placeholder="例如：运动会志愿者抽签">
+      <label>从名单库选择（可选）</label>
+      <div class="labrow">
+        <select id="dw-roster-lib" style="flex:1;min-width:0"><option value="">— 手动粘贴名单 —</option></select>
+        <button type="button" class="mini danger" id="dw-roster-lib-del" style="display:none;white-space:nowrap">🗑 删除</button>
+      </div>
+      <label>班级名单（支持直接粘贴 Excel / QQ 名单）</label>
+      <textarea id="dw-roster" rows="5" placeholder="每行一个，支持“学号 姓名”&#10;例如：&#10;2023001 张三&#10;2. 李四&#10;王五"></textarea>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer"><input type="checkbox" id="dw-withid" style="width:auto"> 名单包含学号（重名班级建议保留，按学号区分）</label>
+      <div id="dw-roster-pv" class="jl-roster-pv"></div>
+      <label>保存到名单库（选填，同名覆盖，下次创建时可直接选用）</label>
+      <input id="dw-roster-libname" maxlength="60" placeholder="例如：三年二班名单">
+      <label>每次抽几人（抽签时还可以临时改）</label>
+      <input id="dw-perdraw" type="number" min="1" value="1">
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" id="btn-cancel">取消</button>
+      <button class="primary" id="dw-save">创建签箱</button>
+    </div>`);
+  rosterPreview();
+  setupRosterLib('dw', (r) => {
+    $('#dw-roster').value = r.roster;
+    $('#dw-withid').checked = !!r.keepId;
+    withIdTouched = true;
+    rosterPreview();
+  });
+  $('#dw-roster').addEventListener('input', rosterPreview);
+  $('#dw-withid').addEventListener('change', () => { withIdTouched = true; rosterPreview(); });
+  $('#dw-save').addEventListener('click', async () => {
+    const title = $('#dw-title').value.trim();
+    if (!title) { toast('请填写抽签标题', 'error'); return; }
+    try {
+      const libName = $('#dw-roster-libname').value.trim();
+      if (libName) await saveRosterToLib('dw', libName, $('#dw-roster').value, $('#dw-withid').checked);
+      const r = await api('/api/draw', { method: 'POST', body: {
+        title,
+        rosterRaw: $('#dw-roster').value,
+        keepId: $('#dw-withid').checked,
+        perDraw: Number($('#dw-perdraw').value) || 1,
+      } });
+      closeModal();
+      state.draw = r.id;
+      if (state.view !== 'draw') state.view = 'draw';
+      $$('#mainnav button, #tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === 'draw'));
+      renderView().catch(() => {});
+      toast('签箱创建成功 ✓');
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+function openDrawEditModal(d) {
+  let withIdTouched = true;
+  const rosterPreview = () => {
+    const parsed = jlParseRoster($('#dw-e-roster').value, $('#dw-e-withid').checked);
+    const pv = $('#dw-e-roster-pv');
+    if (!parsed.list.length) { pv.innerHTML = ''; return; }
+    pv.innerHTML = `<div>识别到 <b>${parsed.list.length}</b> 人${$('#dw-e-withid').checked ? '（含学号）' : ''}</div>`;
+  };
+  openModal(`
+    <h2>✏️ 编辑签箱</h2>
+    <div class="form">
+      <label>标题</label><input id="dw-e-title" maxlength="60" value="${esc(d.title)}">
+      <label>名单（保存后按“学号+姓名”匹配已抽记录；不在新名单中的已抽记录自动失效）</label>
+      <textarea id="dw-e-roster" rows="5">${esc(d.roster ? d.roster.map(jlSlotLabel).join('\n') : '')}</textarea>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer"><input type="checkbox" id="dw-e-withid" style="width:auto"${(d.roster || []).some((r) => r.id) ? ' checked' : ''}> 名单包含学号</label>
+      <div id="dw-e-roster-pv" class="jl-roster-pv"></div>
+      <label>每次抽几人</label>
+      <input id="dw-e-perdraw" type="number" min="1" value="${d.perDraw}">
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" id="btn-cancel">取消</button>
+      <button class="primary" id="dw-e-save">保存修改</button>
+    </div>`);
+  rosterPreview();
+  $('#dw-e-roster').addEventListener('input', rosterPreview);
+  $('#dw-e-withid').addEventListener('change', rosterPreview);
+  $('#dw-e-save').addEventListener('click', async () => {
+    if (!$('#dw-e-title').value.trim()) { toast('标题不能为空', 'error'); return; }
+    try {
+      await api('/api/draw/' + d.id, { method: 'PUT', body: {
+        title: $('#dw-e-title').value,
+        rosterRaw: $('#dw-e-roster').value,
+        keepId: $('#dw-e-withid').checked,
+        perDraw: Number($('#dw-e-perdraw').value) || 1,
+      } });
+      closeModal();
+      toast('修改已保存');
+      loadDrawDetail();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
 /* ========= 视图切换 ========= */
 // 顶栏控件只在适用的页面显示：排序只在信息流有用；统计页不响应群筛选
 function syncTopbar() {
-  $('#group-sel').style.display = (state.view === 'stats' || state.view === 'jielong') ? 'none' : '';
+  $('#group-sel').style.display = (state.view === 'stats' || state.view === 'jielong' || state.view === 'draw') ? 'none' : '';
   $('#sortsel').style.display = state.view === 'feed' ? '' : 'none';
 }
 async function renderView() {
@@ -1514,6 +1796,7 @@ async function renderView() {
     else if (state.view === 'inbox') await loadInbox();
     else if (state.view === 'tasks') await loadTasks();
     else if (state.view === 'jielong') await loadJielong();
+    else if (state.view === 'draw') await loadDraw();
     else if (state.view === 'calendar') await loadCalendar();
     else if (state.view === 'files') await loadFiles();
     else await loadStats();

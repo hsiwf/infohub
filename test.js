@@ -200,7 +200,7 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   ok('统计数据', r.status === 200 && typeof r.body.total === 'number' && Array.isArray(r.body.upcoming));
   const ex = await j('/api/export');
   const dump = ex.body;
-  ok('JSON 导出', ex.status === 200 && Array.isArray(dump.messages) && Array.isArray(dump.groups));
+  ok('JSON 导出', ex.status === 200 && Array.isArray(dump.messages) && Array.isArray(dump.groups) && Array.isArray(dump.jielongs) && Array.isArray(dump.draws) && Array.isArray(dump.rosters));
   r = await post('/api/import', { groups: [], messages: [] });
   ok('有数据时导入被拒（防重复）', r.status === 400);
 
@@ -214,14 +214,23 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
       { jielong_id: 'jlimport1', rid: 0, sid: '2023001', name: '张三', values_json: '{"f0":"参加"}', remark: '', outside: 0, time: 1700000001000, seq: 0 },
       { jielong_id: '不存在的接龙', rid: null, sid: '', name: '孤儿记录', values_json: '{}', remark: '', outside: 1, time: 1700000002000, seq: 1 },
     ],
+    draws: [{ id: 'dwimport1', title: '导入签箱测试', roster: '[{"id":"2023001","name":"张三"}]', per_draw: 1, created_at: 1700000000000 }],
+    drawRounds: [{ draw_id: 'dwimport1', picked: '[{"id":"2023001","name":"张三"}]', count: 1, time: 1700000001000 }],
+    rosters: [{ name: '导入名单', roster: '张三\n李四', keep_id: 1, created_at: '', updated_at: '' }],
   });
-  ok('force 导入恢复附件与接龙', r.status === 200 && r.body.attachments === 1 && r.body.jielongs === 1 && r.body.jielongEntries === 1, JSON.stringify(r.body));
+  ok('force 导入恢复附件与接龙', r.status === 200 && r.body.attachments === 1 && r.body.jielongs === 1 && r.body.jielongEntries === 1 && r.body.draws === 1 && r.body.drawRounds === 1 && r.body.rosters === 1, JSON.stringify(r.body));
   r = await j('/api/files?q=' + encodeURIComponent('导入附件测试.txt'));
   ok('导入的附件出现在文件中心', r.status === 200 && r.body.items.length === 1, JSON.stringify(r.body));
   r = await j('/api/jielong/jlimport1');
   ok('导入的接龙可访问（含记录）', r.status === 200 && r.body.title === '导入接龙测试' && r.body.done === 1 && r.body.total === 1 && r.body.entries[0].values.f0 === '参加', JSON.stringify(r.body));
   r = await j('/api/jielong/jlimport1?t=importtoken', { method: 'DELETE' });
   ok('导入的接龙可管理（令牌随备份恢复）', r.status === 200);
+  r = await j('/api/draw/dwimport1');
+  ok('导入的签箱可访问（历史保留）', r.status === 200 && r.body.total === 1 && r.body.remainingCount === 0 && r.body.roundCount === 1, JSON.stringify(r.body));
+  await j('/api/draw/dwimport1', { method: 'DELETE' });
+  r = await j('/api/rosters');
+  ok('导入的名单进入名单库', r.status === 200 && r.body.items.length === 1 && r.body.items[0].name === '导入名单', JSON.stringify(r.body));
+  for (const it of r.body.items) await j('/api/rosters/' + it.id, { method: 'DELETE' });
   const imp = await j('/api/messages?q=' + encodeURIComponent('导入附件测试'));
   for (const it of (imp.body.items || [])) await j('/api/messages/' + it.id, { method: 'DELETE' });
 
@@ -377,6 +386,65 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   ok('删除整个接龙', r.status === 200);
   r = await j('/api/jielong/' + jl.id);
   ok('删除后详情 404', r.status === 404);
+
+  // 13. 抽签（名单轮抽：抽过的人下次不再被抽到，抽空自动开新一轮）
+  r = await post('/api/draw', { title: '自检签箱', rosterRaw: '2023001 张三\n2. 李四\n王五\n赵六', keepId: true, perDraw: 2 });
+  const dw = r.body || {};
+  ok('新建签箱（名单解析出学号）', r.status === 200 && /^[a-z0-9]{7}$/.test(dw.id || ''), JSON.stringify(r.body));
+  if (authRequired) {
+    const g8 = await fetch(BASE + '/api/draw/' + dw.id + '/go', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: 2 }) });
+    ok('访客抽签被拒（401）', g8.status === 401);
+  }
+  r = await j('/api/draw/' + dw.id);
+  ok('签箱详情', r.status === 200 && r.body.total === 4 && r.body.remainingCount === 4 && r.body.roundCount === 0, JSON.stringify(r.body));
+  r = await post(`/api/draw/${dw.id}/go`, { count: 3 });
+  ok('自定义人数抽签（3 人）', r.status === 200 && r.body.count === 3 && r.body.remainingCount === 1 && r.body.picked.length === 3, JSON.stringify(r.body));
+  r = await post(`/api/draw/${dw.id}/go`, {});
+  ok('剩余不足时抽走剩余（1 人）', r.status === 200 && r.body.count === 1 && r.body.remainingCount === 0);
+  r = await post(`/api/draw/${dw.id}/go`, {});
+  ok('抽空后自动开新一轮（默认 2 人）', r.status === 200 && r.body.reset === true && r.body.count === 2 && r.body.remainingCount === 2, JSON.stringify(r.body));
+  r = await post(`/api/draw/${dw.id}/undo`, {});
+  ok('撤销上一轮（全员重新可抽）', r.status === 200 && r.body.remainingCount === 4, JSON.stringify(r.body));
+  r = await post(`/api/draw/${dw.id}/go`, { count: 1 });
+  ok('默认人数兜底（count 缺省）', r.status === 200 && r.body.count === 1, JSON.stringify(r.body));
+  r = await post(`/api/draw/${dw.id}/go`, { count: 1 });
+  r = await j('/api/draw/' + dw.id);
+  ok('抽过的人不再被抽到', r.body.remainingCount === 2 && r.body.roundCount === 2, JSON.stringify({ remaining: r.body.remainingCount, rounds: r.body.roundCount }));
+  r = await post(`/api/draw/${dw.id}/reset`, {});
+  ok('重置签箱', r.status === 200 && r.body.remainingCount === 4);
+  r = await post(`/api/draw/${dw.id}/go`, { count: 4 });
+  ok('一次抽走全部（4 人）', r.status === 200 && r.body.count === 4 && r.body.remainingCount === 0, JSON.stringify(r.body));
+  // 名单改名（张三→张三明，学号不变）：已抽状态应按学号保持，不会再次被抽到
+  r = await j(`/api/draw/${dw.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: '自检签箱改', perDraw: 3, rosterRaw: '2023001 张三明\n2. 李四\n王五\n赵六', keepId: true }) });
+  ok('编辑签箱', r.status === 200 && r.body.title === '自检签箱改' && r.body.perDraw === 3);
+  r = await j('/api/draw/' + dw.id);
+  ok('改名后按学号保持已抽状态', r.body.remainingCount === 0, JSON.stringify(r.body.remaining));
+  r = await j('/api/draw/' + dw.id, { method: 'DELETE' });
+  ok('删除签箱', r.status === 200);
+  r = await j('/api/draw/' + dw.id);
+  ok('删除后详情 404', r.status === 404);
+
+  // 14. 班级名单库（名单存一份，创建接龙 / 签箱时复用）
+  r = await post('/api/rosters', { name: '自检名单', rosterRaw: '2023001 张三\n李四', keepId: true });
+  const rid1 = r.body.id;
+  ok('保存名单到名单库', r.status === 200 && rid1 > 0, JSON.stringify(r.body));
+  if (authRequired) {
+    const g9 = await fetch(BASE + '/api/rosters', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'x', rosterRaw: 'y' }) });
+    ok('访客保存名单被拒（401）', g9.status === 401);
+  }
+  r = await post('/api/rosters', { name: '自检名单', rosterRaw: '2023001 张三\n李四\n王五', keepId: true });
+  ok('同名保存覆盖不重复', r.status === 200 && r.body.updated === true && r.body.id === rid1);
+  r = await j('/api/rosters');
+  ok('名单库列表（含解析人数）', r.status === 200 && r.body.items.length === 1 && r.body.items[0].count === 3 && r.body.items[0].keepId === true, JSON.stringify(r.body));
+  r = await post('/api/jielong', { title: '名单库接龙', rosterRaw: r.body.items[0].roster, keepId: r.body.items[0].keepId });
+  ok('用保存的名单发起接龙', r.status === 200 && /^[a-z0-9]{7}$/.test(r.body.id || ''), JSON.stringify(r.body));
+  await j('/api/jielong/' + r.body.id, { method: 'DELETE' });
+  r = await post('/api/draw', { title: '名单库签箱', rosterRaw: '2023001 张三\n李四\n王五', keepId: true, perDraw: 2 });
+  await j('/api/draw/' + r.body.id, { method: 'DELETE' });
+  r = await j('/api/rosters/' + rid1, { method: 'DELETE' });
+  ok('删除名单', r.status === 200);
+  r = await j('/api/rosters');
+  ok('删除后名单库为空', r.status === 200 && r.body.items.length === 0);
 
   // ---- 清理自检数据 ----
   for (const id of created.messages) await j('/api/messages/' + id, { method: 'DELETE' });
