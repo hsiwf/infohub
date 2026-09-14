@@ -1030,6 +1030,193 @@ route('GET', '/api/jielong/:id/export', (ctx) => {
 });
 
 
+/* ---------- 班级名单库（名单存一份，创建接龙 / 签箱时直接选用） ---------- */
+route('GET', '/api/rosters', () => ({
+  items: db.prepare('SELECT * FROM rosters ORDER BY updated_at DESC, id DESC').all().map((r) => {
+    const keepId = !!r.keep_id;
+    return {
+      id: r.id, name: r.name, roster: r.roster, keepId,
+      count: JL.parseRoster(r.roster, keepId).list.length, updated_at: r.updated_at,
+    };
+  }),
+}));
+
+// 按名称保存（同名覆盖），供前端"保存到名单库"调用
+route('POST', '/api/rosters', (ctx) => {
+  const b = ctx.body || {};
+  const name = sField(b.name, 60);
+  if (!name) throw new HttpError(400, '请填写名单名称');
+  const keepId = b.keepId === true;
+  const rosterRaw = String(b.rosterRaw || '');
+  const list = JL.parseRoster(rosterRaw, keepId).list;
+  if (!list.length) throw new HttpError(400, '名单不能为空');
+  if (list.length > 500) throw new HttpError(400, '名单最多 500 人');
+  const exist = db.prepare('SELECT id FROM rosters WHERE name = ?').get(name);
+  if (exist) {
+    db.prepare('UPDATE rosters SET roster = ?, keep_id = ?, updated_at = ? WHERE id = ?')
+      .run(rosterRaw, keepId ? 1 : 0, nowStr(), exist.id);
+    return { ok: true, id: exist.id, updated: true };
+  }
+  const info = db.prepare('INSERT INTO rosters (name, roster, keep_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run(name, rosterRaw, keepId ? 1 : 0, nowStr(), nowStr());
+  return { ok: true, id: Number(info.lastInsertRowid), updated: false };
+});
+
+route('DELETE', '/api/rosters/:id', (ctx) => {
+  const id = Number(ctx.params.id);
+  if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
+  const info = db.prepare('DELETE FROM rosters WHERE id = ?').run(id);
+  if (!info.changes) throw new HttpError(404, '名单不存在');
+  return { ok: true };
+});
+
+/* ---------- 抽签（按班级名单公平轮抽） ----------
+ * 每个签箱绑定一份名单；抽过的人自动排除，下次不再被抽到；
+ * 箱内抽空后自动开始新一轮；每轮结果留痕，可撤销、可重置。
+ * 纯管理操作：走常规门禁（浏览公开，写入需管理员）。 */
+function drawFromRow(row) {
+  if (!row) return null;
+  const rounds = db.prepare('SELECT * FROM draw_rounds WHERE draw_id = ? ORDER BY time, id').all(row.id)
+    .map((r) => ({ picked: JL.safeJson(r.picked, []), count: Number(r.count) || 0, time: Number(r.time) || 0 }));
+  return {
+    id: row.id,
+    title: row.title,
+    roster: JL.safeJson(row.roster, []),
+    perDraw: Math.max(1, Number(row.per_draw) || 1),
+    createdAt: Number(row.created_at) || 0,
+    rounds,
+  };
+}
+function drawRemaining(d) {
+  // 已抽判定优先按学号（改名后仍保持已抽状态，与接龙的重新匹配语义一致）；无学号按姓名
+  const drawnIds = new Set();
+  const drawnNames = new Set();
+  for (const round of d.rounds) {
+    for (const p of round.picked) {
+      if (p.id) drawnIds.add(String(p.id));
+      else drawnNames.add(p.name);
+    }
+  }
+  return d.roster.filter((r) => (r.id ? !drawnIds.has(String(r.id)) : !drawnNames.has(r.name)));
+}
+function drawView(d) {
+  const remaining = drawRemaining(d);
+  return {
+    id: d.id, title: d.title, perDraw: d.perDraw, createdAt: d.createdAt,
+    roster: d.roster, total: d.roster.length, remainingCount: remaining.length, remaining,
+    rounds: d.rounds, roundCount: d.rounds.length,
+  };
+}
+function getDraw(id) {
+  return drawFromRow(db.prepare('SELECT * FROM draws WHERE id = ?').get(String(id || '').toLowerCase()));
+}
+
+route('GET', '/api/draw', () => ({
+  items: db.prepare('SELECT * FROM draws ORDER BY created_at DESC, id').all().map((row) => {
+    const d = drawFromRow(row);
+    return {
+      id: d.id, title: d.title, perDraw: d.perDraw, createdAt: d.createdAt,
+      total: d.roster.length, remainingCount: drawRemaining(d).length, roundCount: d.rounds.length,
+    };
+  }),
+}));
+
+route('POST', '/api/draw', (ctx) => {
+  const b = ctx.body || {};
+  const title = sField(b.title, 60);
+  if (!title) throw new HttpError(400, '请填写抽签标题');
+  const roster = JL.parseRoster(String(b.rosterRaw || ''), b.keepId === true).list;
+  if (!roster.length) throw new HttpError(400, '请粘贴名单，至少 1 人');
+  if (roster.length > 500) throw new HttpError(400, '名单最多 500 人');
+  const id = JL.genId(7);
+  db.prepare('INSERT INTO draws (id, title, roster, per_draw, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(id, title, JSON.stringify(roster), Math.max(1, Math.min(Number(b.perDraw) || 1, roster.length)), Date.now());
+  return { ok: true, id };
+});
+
+route('GET', '/api/draw/:id', (ctx) => {
+  const d = getDraw(ctx.params.id);
+  if (!d) throw new HttpError(404, '抽签不存在');
+  return drawView(d);
+});
+
+route('POST', '/api/draw/:id/go', (ctx) => {
+  const d = getDraw(ctx.params.id);
+  if (!d) throw new HttpError(404, '抽签不存在');
+  const b = ctx.body || {};
+  let n = Math.max(1, Math.min(Number(b.count) || d.perDraw, 200));
+  let remaining = drawRemaining(d);
+  let reset = false;
+  if (!remaining.length) {
+    // 箱内已抽空：自动清空历史，开始新一轮
+    db.prepare('DELETE FROM draw_rounds WHERE draw_id = ?').run(d.id);
+    d.rounds = [];
+    remaining = d.roster;
+    reset = true;
+  }
+  n = Math.min(n, remaining.length); // 剩余不足时抽走剩余的全部
+  const pool = remaining.slice();
+  for (let i = pool.length - 1; i > 0; i--) { // Fisher-Yates，crypto.randomInt 无偏随机
+    const j = crypto.randomInt(i + 1);
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  const picked = pool.slice(0, n);
+  db.prepare('INSERT INTO draw_rounds (draw_id, picked, count, time) VALUES (?, ?, ?, ?)')
+    .run(d.id, JSON.stringify(picked), n, Date.now());
+  d.rounds.push({ picked, count: n, time: Date.now() });
+  const left = drawRemaining(d).length;
+  return { ok: true, picked, count: n, remainingCount: left, total: d.roster.length, reset };
+});
+
+route('POST', '/api/draw/:id/undo', (ctx) => {
+  const d = getDraw(ctx.params.id);
+  if (!d) throw new HttpError(404, '抽签不存在');
+  const last = db.prepare('SELECT * FROM draw_rounds WHERE draw_id = ? ORDER BY id DESC LIMIT 1').get(d.id);
+  if (!last) throw new HttpError(400, '还没有抽过，没有可撤销的轮次');
+  db.prepare('DELETE FROM draw_rounds WHERE id = ?').run(last.id);
+  const restored = JL.safeJson(last.picked, []);
+  // 从库中重读再算剩余，避免用过期的内存状态
+  const fresh = drawFromRow(db.prepare('SELECT * FROM draws WHERE id = ?').get(d.id));
+  return { ok: true, restored, remainingCount: drawRemaining(fresh).length };
+});
+
+route('POST', '/api/draw/:id/reset', (ctx) => {
+  const d = getDraw(ctx.params.id);
+  if (!d) throw new HttpError(404, '抽签不存在');
+  db.prepare('DELETE FROM draw_rounds WHERE draw_id = ?').run(d.id);
+  return { ok: true, remainingCount: d.roster.length };
+});
+
+// 编辑（标题 / 名单 / 默认每次抽几人）；名单变更后按"学号+姓名"重新判断谁已抽过
+route('PUT', '/api/draw/:id', (ctx) => {
+  const d = getDraw(ctx.params.id);
+  if (!d) throw new HttpError(404, '抽签不存在');
+  const b = ctx.body || {};
+  let roster = d.roster;
+  if (b.rosterRaw !== undefined) {
+    roster = JL.parseRoster(String(b.rosterRaw || ''), b.keepId === true).list;
+    if (!roster.length) throw new HttpError(400, '名单至少 1 人');
+    if (roster.length > 500) throw new HttpError(400, '名单最多 500 人');
+  }
+  const title = b.title !== undefined ? sField(b.title, 60) : d.title;
+  if (!title) throw new HttpError(400, '标题不能为空');
+  const perDraw = b.perDraw !== undefined
+    ? Math.max(1, Math.min(Number(b.perDraw) || 1, roster.length))
+    : Math.min(d.perDraw, roster.length);
+  db.prepare('UPDATE draws SET title = ?, roster = ?, per_draw = ? WHERE id = ?')
+    .run(title, JSON.stringify(roster), perDraw, d.id);
+  d.title = title; d.roster = roster; d.perDraw = perDraw;
+  return drawView(d);
+});
+
+route('DELETE', '/api/draw/:id', (ctx) => {
+  const d = getDraw(ctx.params.id);
+  if (!d) throw new HttpError(404, '抽签不存在');
+  db.prepare('DELETE FROM draw_rounds WHERE draw_id = ?').run(d.id);
+  db.prepare('DELETE FROM draws WHERE id = ?').run(d.id);
+  return { ok: true };
+});
+
 /* ---------- 导入备份 ---------- */
 route('POST', '/api/import', (ctx) => {
   const b = ctx.body || {};
@@ -1041,7 +1228,7 @@ route('POST', '/api/import', (ctx) => {
   if (exist > 0 && ctx.query.get('force') !== '1') {
     throw new HttpError(400, '当前已有数据，为防止重复导入被拒绝。请先用空数据文件夹再导入');
   }
-  let n = 0, nAtt = 0, nGroups = 0, nJl = 0, nJlE = 0;
+  let n = 0, nAtt = 0, nGroups = 0, nJl = 0, nJlE = 0, nDw = 0, nDwR = 0, nRs = 0;
   db.exec('BEGIN'); // 整体导入：任何一步失败就整体回滚，不残留半截数据
   try {
     const insG = db.prepare('INSERT INTO groups (name, platform, color, remark, ext_key, created_at) VALUES (?, ?, ?, ?, ?, ?)');
@@ -1092,14 +1279,14 @@ route('POST', '/api/import', (ctx) => {
         nAtt++;
       }
     }
-    // 恢复接龙与接龙记录（id 为随机字符串主键，原样保留；记录按 jielong_id 直接挂回）
-    if (Array.isArray(b.jielongs)) {
-    // roster / fields 允许存成 JSON 文本或数组对象，统一转成合法 JSON 文本入库
+    // roster / fields / picked 允许存成 JSON 文本或数组对象，统一转成合法 JSON 文本入库
     const asJsonText = (v, fallback) => {
       if (typeof v === 'string') { try { JSON.parse(v); return v; } catch (e) { return fallback; } }
       if (v == null) return fallback;
       try { return JSON.stringify(v); } catch (e) { return fallback; }
     };
+    // 恢复接龙与接龙记录（id 为随机字符串主键，原样保留；记录按 jielong_id 直接挂回）
+    if (Array.isArray(b.jielongs)) {
     const insJ = db.prepare(`INSERT INTO jielongs (id, title, description, deadline, roster, fields, allow_outside, closed, admin_token, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const jlIds = new Set();
@@ -1136,16 +1323,51 @@ route('POST', '/api/import', (ctx) => {
       }
     }
   }
+  // 恢复抽签与轮次（id 原样保留；轮次按 draw_id 直接挂回）
+  if (Array.isArray(b.draws)) {
+    const insDw = db.prepare('INSERT INTO draws (id, title, roster, per_draw, created_at) VALUES (?, ?, ?, ?, ?)');
+    const dwIds = new Set();
+    for (const g of b.draws) {
+      const id = /^[a-z0-9]{3,32}$/.test(String(g.id || '')) ? String(g.id) : JL.genId(7);
+      insDw.run(id,
+        sField(g.title, 60) || '未命名抽签',
+        asJsonText(g.roster, '[]'),
+        Math.max(1, Number(g.per_draw) || 1),
+        Math.max(0, Number(g.created_at) || Date.now()));
+      dwIds.add(id);
+      nDw++;
+    }
+    if (Array.isArray(b.drawRounds)) {
+      const insDR = db.prepare('INSERT INTO draw_rounds (draw_id, picked, count, time) VALUES (?, ?, ?, ?)');
+      for (const e of b.drawRounds) {
+        if (!dwIds.has(String(e.draw_id || ''))) continue; // 对应签箱不在本次备份中，跳过
+        insDR.run(String(e.draw_id),
+          asJsonText(e.picked, '[]'),
+          Math.max(0, Number(e.count) || 0),
+          Math.max(0, Number(e.time) || 0));
+        nDwR++;
+      }
+    }
+  }
+  // 恢复名单库
+  if (Array.isArray(b.rosters)) {
+    const insR = db.prepare('INSERT INTO rosters (name, roster, keep_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)');
+    for (const g of b.rosters) {
+      insR.run(sField(g.name, 60) || '未命名名单', String(g.roster || ''), g.keep_id ? 1 : 0,
+        cleanDT(g.created_at) || nowStr(), cleanDT(g.updated_at) || nowStr());
+      nRs++;
+    }
+  }
     nGroups = Object.keys(gmap).length;
     db.exec('COMMIT');
   } catch (e) {
     db.exec('ROLLBACK');
     throw new HttpError(500, '导入失败已整体回滚（' + e.message + '），数据库未变动');
   }
-  const summary = `${nGroups} 个群、${n} 条信息、${nAtt} 条附件记录、${nJl} 个接龙、${nJlE} 条接龙记录`;
+  const summary = `${nGroups} 个群、${n} 条信息、${nAtt} 条附件记录、${nJl} 个接龙、${nJlE} 条接龙记录、${nDw} 个抽签、${nDwR} 轮抽签历史、${nRs} 份名单`;
   console.log('导入备份：' + summary);
   log('导入备份：' + summary);
-  return { ok: true, groups: nGroups, imported: n, attachments: nAtt, jielongs: nJl, jielongEntries: nJlE };
+  return { ok: true, groups: nGroups, imported: n, attachments: nAtt, jielongs: nJl, jielongEntries: nJlE, draws: nDw, drawRounds: nDwR, rosters: nRs };
 });
 
 /* ---------- 导出 .ics 日历（截止时间进手机系统日历） ---------- */
@@ -1230,6 +1452,10 @@ route('GET', '/api/export', (ctx) => {
     // 接龙：id 是随机字符串主键，导出/导入可原样保留，记录按 jielong_id 直接挂回
     jielongs: db.prepare('SELECT id, title, description, deadline, roster, fields, allow_outside, closed, admin_token, created_at FROM jielongs ORDER BY created_at, id').all(),
     jielongEntries: db.prepare('SELECT jielong_id, rid, sid, name, values_json, remark, outside, time, seq FROM jielong_entries ORDER BY jielong_id, seq, id').all(),
+    // 抽签：同上，签箱 id 原样保留，轮次按 draw_id 直接挂回
+    draws: db.prepare('SELECT id, title, roster, per_draw, created_at FROM draws ORDER BY created_at, id').all(),
+    drawRounds: db.prepare('SELECT draw_id, picked, count, time FROM draw_rounds ORDER BY draw_id, id').all(),
+    rosters: db.prepare('SELECT * FROM rosters ORDER BY id').all(),
   };
   const body = JSON.stringify(dump, null, 2);
   const res = ctx.res;

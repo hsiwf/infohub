@@ -88,10 +88,33 @@ CREATE TABLE IF NOT EXISTS jielong_entries (
   time INTEGER DEFAULT 0,
   seq INTEGER DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS draws (
+  id TEXT PRIMARY KEY,
+  title TEXT DEFAULT '',
+  roster TEXT DEFAULT '[]',
+  per_draw INTEGER DEFAULT 1,
+  created_at INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS draw_rounds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  draw_id TEXT NOT NULL,
+  picked TEXT DEFAULT '[]',
+  count INTEGER DEFAULT 0,
+  time INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS rosters (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT DEFAULT '',
+  roster TEXT DEFAULT '',
+  keep_id INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT '',
+  updated_at TEXT DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS idx_messages_group ON messages(group_id);
 CREATE INDEX IF NOT EXISTS idx_messages_deadline ON messages(deadline);
 CREATE INDEX IF NOT EXISTS idx_att_message ON attachments(message_id);
 CREATE INDEX IF NOT EXISTS idx_jl_entries ON jielong_entries(jielong_id);
+CREATE INDEX IF NOT EXISTS idx_draw_rounds ON draw_rounds(draw_id);
 `);
 
 // 轻量迁移：老库补 ext_key 列（QQ 群号等外部标识，机器人上报自动归群用）

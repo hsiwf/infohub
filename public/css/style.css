@@ -365,3 +365,28 @@ body.readonly .side-foot { display: none !important; }
 .jl-roster-pv{margin-top:8px;font-size:13px;color:var(--muted);line-height:2}
 #qr-modal .qrbox{text-align:center}
 #qr-modal .qrbox img,#qr-modal .qrbox svg{width:220px;max-width:70vw;height:auto;border:8px solid #fff;border-radius:8px;background:#fff}
+
+/* ---------- 抽签 ---------- */
+.dw-result{min-height:74px;display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;background:var(--hover);border-radius:12px;padding:16px 12px;margin:12px 0}
+.dw-result .dw-name{background:var(--primary);color:#fff;border-radius:12px;padding:8px 18px;font-size:19px;font-weight:700;animation:dw-pop .45s cubic-bezier(.2,1.4,.4,1) both}
+.dw-result .dw-name:nth-child(2){animation-delay:.08s}
+.dw-result .dw-name:nth-child(3){animation-delay:.16s}
+.dw-result .dw-name:nth-child(4){animation-delay:.24s}
+.dw-result .dw-name:nth-child(5){animation-delay:.32s}
+.dw-result .dw-empty{color:var(--muted);font-size:13.5px}
+@keyframes dw-pop{0%{transform:scale(.4);opacity:0}70%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
+.dw-go{width:100%;padding:14px;font-size:17px;font-weight:700;border:0;border-radius:12px;background:var(--primary);color:#fff;transition:background .15s}
+.dw-go:hover{background:var(--primary-dark)}
+.dw-go:disabled{opacity:.55}
+.dw-countrow{display:flex;align-items:center;gap:10px;margin:12px 0 0;font-size:14px;color:var(--muted);flex-wrap:wrap}
+.dw-countrow input{width:90px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text);outline:none;font-size:15px;text-align:center}
+.dw-countrow input:focus{border-color:var(--primary)}
+.dw-round{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px dashed var(--line);font-size:13.5px;flex-wrap:wrap}
+.dw-round:last-child{border-bottom:0}
+.dw-round .dw-rtime{color:var(--muted);white-space:nowrap}
+.dw-round .dw-rnames{display:flex;gap:6px;flex-wrap:wrap}
+.dw-round .dw-rname{background:var(--tag-bg);color:var(--primary);border-radius:6px;padding:1px 8px;font-size:12.5px}
+.dw-undo{margin-left:auto}
+.dw-hint-ok{color:#0d9668}
+:root[data-theme="dark"] .dw-hint-ok{color:#4ade80}
+.dw-hint-reset{color:var(--warn)}
