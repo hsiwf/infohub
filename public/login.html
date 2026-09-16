@@ -32,7 +32,7 @@
 </head>
 <body>
   <div class="card">
-    <div class="logo">📥 信息汇总</div>
+    <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#4f6ef2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:24px;height:24px;vertical-align:-5px" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="m2 7 10 7L22 7"/></svg> 信息汇总</div>
     <p class="sub">管理员登录</p>
     <input id="pw" type="password" placeholder="请输入管理员密码" autofocus
            onkeydown="if(event.key==='Enter')go()">
@@ -41,6 +41,10 @@
     <p class="hint">学生/家长无需密码即可浏览<br>此密码仅用于发布、修改内容（管理员）<br>由部署者在 data/config.json 的 password 字段设置</p>
   </div>
 <script>
+// 已登录的管理员访问登录页时直接回主界面
+fetch('/api/me').then((r) => r.json()).then((me) => {
+  if (me && me.authRequired && me.loggedIn) location.replace('/');
+}).catch(() => {});
 async function go() {
   const pw = document.getElementById('pw').value;
   const msg = document.getElementById('msg');

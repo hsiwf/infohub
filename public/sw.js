@@ -1,5 +1,5 @@
 /* 信息汇总 Service Worker：只缓存静态资源（css/js/图标），页面与接口永远走网络，保证数据实时 */
-const CACHE = 'infohub-static-v14';
+const CACHE = 'infohub-static-v20';
 const STATIC_RE = /\.(css|js|svg|png|jpg|jpeg|webp|webmanifest|woff2|ico)$/i;
 
 self.addEventListener('install', () => { self.skipWaiting(); });

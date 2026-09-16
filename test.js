@@ -36,6 +36,11 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   let r = await j('/api/health');
   ok('健康检查 /api/health', r.status === 200 && r.body.ok === true);
 
+  // 附件全量统计基线（库里可能有真实数据，后续断言只看自检带来的增量）
+  const baseFiles = (await j('/api/files')).body;
+  const baseV = baseFiles.totalViews != null ? baseFiles.totalViews : 0;
+  const baseD = baseFiles.totalDownloads != null ? baseFiles.totalDownloads : 0;
+
   // 2. 认证状态（未设密码时应为免登录）
   r = await j('/api/me');
   ok('会话状态 /api/me', r.status === 200 && typeof r.body.authRequired === 'boolean');
@@ -131,6 +136,7 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   await dl2.arrayBuffer();
   const rawRes = await fetch(`${BASE}/api/attachments/${aid}/raw`);
   await rawRes.arrayBuffer();
+  ok('缩略图接口对非预览类型强制下载（防内联脚本）', (rawRes.headers.get('content-disposition') || '').startsWith('attachment'));
   r = await j('/api/files?q=' + encodeURIComponent('自检.txt'));
   const fa0 = r.body.items[0] || {};
   ok('附件下载计数（强制下载 2 次，缩略图不计）', fa0.downloads === 2 && fa0.views === 0, JSON.stringify(fa0));
@@ -163,9 +169,12 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   r = await j('/api/files?q=' + encodeURIComponent('自检图.png'));
   const fa1 = r.body.items[0] || {};
   ok('图片打开计阅读、内嵌渲染不计', fa1.views === 1 && fa1.downloads === 0, JSON.stringify(fa1));
-  // 全量统计不带筛选查（totalViews/totalDownloads 跟随当前筛选，此处应=两个附件之和）
+  const pngRaw = await fetch(`${BASE}/api/attachments/${pid}/raw`);
+  await pngRaw.arrayBuffer();
+  ok('图片缩略图仍内联（/raw 白名单不影响位图）', pngRaw.status === 200 && (pngRaw.headers.get('content-disposition') || '').startsWith('inline'));
+  // 全量统计不带筛选查（totalViews/totalDownloads 跟随当前筛选）：断言自检带来的增量
   r = await j('/api/files');
-  ok('文件中心返回全量统计', r.body.totalViews === 1 && r.body.totalDownloads === 2, JSON.stringify({ v: r.body.totalViews, d: r.body.totalDownloads }));
+  ok('文件中心返回全量统计（增量）', r.body.totalViews === baseV + 1 && r.body.totalDownloads === baseD + 2, JSON.stringify({ v: r.body.totalViews, d: r.body.totalDownloads, baseV, baseD }));
 
   // 7. 智能解析
   r = await post('/api/parse', { text: '王老师：请同学们周五下午5点前把回执交给班主任，务必完成【重要】' });
@@ -287,8 +296,11 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
     await rep({ ...obPayload, sender: { card: '长文', nickname: 'c' }, message: [{ type: 'text', data: { text: '截断测试开头，请同学们查收。' + '长'.repeat(25000) } }] });
     r = await j('/api/inbox?limit=1');
     ok('OneBot 超长正文截断到 20000', (r.body.items[0].content || '').length === 20000, '实际长度 ' + (r.body.items[0] ? (r.body.items[0].content || '').length : '无'));
+    // 同内容不同群：各自独立进待审核，不能跨群误判成重复
+    r = await rep({ ...obPayload, group_id: 987654322 });
+    ok('OneBot 同内容不同群不误判去重', r.status === 200 && r.body.inbox === true, JSON.stringify(r.body));
     r = await j('/api/inbox', { method: 'DELETE' });
-    ok('清空待审核', r.status === 200 && r.body.dismissed === 3, JSON.stringify(r.body));
+    ok('清空待审核', r.status === 200 && r.body.dismissed === 4, JSON.stringify(r.body));
   } else {
     ok('OneBot 群消息上报+自动识别', r.status === 200 && r.body.ok && r.body.id > 0 && r.body.parsed && !!r.body.parsed.deadline, JSON.stringify(r.body));
     if (r.body.id) created.messages.push(r.body.id);
@@ -356,7 +368,7 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   const g5 = await fetch(BASE + `/api/jielong/${jl.id}/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '赵六', values: { f0: '参加' } }) });
   const g5j = await g5.json();
   ok('名单外可提交且无需登录', g5.status === 200 && g5j.entry.rid === null && g5j.done === 2, JSON.stringify(g5j));
-  r = await post(`/api/jielong/${jl.id}/join`, { rid: 1, name: '李四', values: { f0: '参加' } });
+  r = await post(`/api/jielong/${jl.id}/join`, { rid: 1, name: '李四', values: { f0: '参加' }, remark: '=1+1' });
   ok('专属链接按槽位提交', r.status === 200 && r.body.entry.rid === 1 && r.body.entry.name === '李四');
   r = await j('/api/jielong/' + jl.id);
   ok('进度与未接名单', r.body.done === 3 && r.body.total === 4 && r.body.missing.length === 1 && r.body.missing[0].name === '王五', JSON.stringify(r.body.missing));
@@ -371,9 +383,9 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   const csvBuf = await csvRes.arrayBuffer();
   const csvBytes = new Uint8Array(csvBuf);
   const csvText = new TextDecoder('utf-8').decode(csvBuf);
-  ok('CSV 导出（BOM+已接+未接）', csvRes.status === 200
+  ok('CSV 导出（BOM+已接+未接+公式中和）', csvRes.status === 200
     && (csvBytes[0] === 0xEF && csvBytes[1] === 0xBB && csvBytes[2] === 0xBF)
-    && csvText.includes('张三') && csvText.includes('未接龙'), csvText.slice(0, 80));
+    && csvText.includes('张三') && csvText.includes('未接龙') && csvText.includes("'=1+1"), csvText.slice(0, 80));
   r = await j(`/api/jielong/${jl.id}?t=` + encodeURIComponent(jl.adminToken), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rosterRaw: '2023001 张三\n李四\n王五明\n2023004 张三', keepId: true }) });
   ok('编辑名单', r.status === 200 && r.body.roster.length === 4);
   r = await j('/api/jielong/' + jl.id);
@@ -506,6 +518,7 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   const bgRes = await fetch(BASE + '/api/class-badge');
   const bgLen = (await bgRes.arrayBuffer()).byteLength;
   ok('班徽可访问（PNG 原样）', bgRes.status === 200 && bgLen === pngBadge.length, 'len=' + bgLen);
+  ok('班徽响应带 CSP sandbox（SVG 防脚本）', (bgRes.headers.get('content-security-policy') || '').includes('sandbox'));
   if (authRequired) {
     const g12 = await fetch(BASE + '/api/class-badge', { method: 'DELETE' });
     ok('访客删除班徽被拒（401）', g12.status === 401);

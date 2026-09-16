@@ -10,6 +10,8 @@
 
 [功能一览](#-功能一览) · [快速开始](#-快速开始) · [部署](#-部署) · [QQ 机器人](#-qq-机器人接入onebot-11) · [API](#-api-一览) · [FAQ](#-faq)
 
+[![CI](https://github.com/hsiwf/infohub/actions/workflows/ci.yml/badge.svg)](https://github.com/hsiwf/infohub/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/hsiwf/infohub)](https://github.com/hsiwf/infohub/releases/latest)
 ![Node.js](https://img.shields.io/badge/node.js-%E2%89%A5%2022.5-339933?logo=node.js&logoColor=white)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
@@ -20,6 +22,12 @@
 
 **为什么做它？** 班级群消息刷屏、重要通知被淹没、活动报名靠刷屏接龙、生日没人记得——
 InfoHub 把这些搬到一个本地网页：老师发通知、同学点链接报名、生日自动提醒，数据全部存在自己电脑上。
+
+| 信息中心（浅色） | 命令面板 `Ctrl/⌘+K`（深色） |
+| --- | --- |
+| <img src="docs/screenshots/feed-light.png" width="480" alt="信息中心"> | <img src="docs/screenshots/cmdk.png" width="480" alt="命令面板"> |
+| **活动接龙**：谁没接龙一目了然 | **生日祝福**：每一岁都值得庆祝 |
+| <img src="docs/screenshots/jielong.png" width="480" alt="活动接龙"> | <img src="docs/screenshots/birthday.png" width="480" alt="生日祝福"> |
 
 </div>
 
@@ -36,6 +44,7 @@ InfoHub 把这些搬到一个本地网页：老师发通知、同学点链接报
 | 🎂 **生日祝福** | 全班生日倒计时贺卡墙；生日当天专属祝福卡 + 信息页横幅 + 浏览器通知 + 导航弹跳角标；一键复制祝福发班群；支持班徽水印背景 |
 | 📋 **班级名单库** | 名单保存一份，接龙、抽签、生日到处复用；支持"学号 姓名"解析与实时预览 |
 | 🤖 **QQ 机器人** | OneBot 11 接入（NapCat / LLOneBot 等），群消息自动进站；人工审核 / 自动收录两种模式，防闲聊过滤、群白名单、HMAC 签名校验 |
+| ⌨️ **命令面板** | `Ctrl/⌘+K` 唤起：视图跳转、常用操作、信息实时搜索；配套全套键盘快捷键（按 `?` 查看） |
 | 📁 **文件中心** | 图片 / PDF 在线预览，附件阅读 / 下载次数统计 |
 | 📊 **统计接入** | 信息看板、即将截止提醒、分类与群信息量统计、Webhook 接入地址 |
 | 💾 **省心备份** | 每天自动备份数据库（保留 14 份）、JSON 一键导出 / 导入；数据全部存在本机 `data/` 文件夹 |
@@ -319,7 +328,7 @@ infohub/
 
 ## 🤝 参与贡献
 
-欢迎 Issue 和 Pull Request：Fork 本仓库并新建分支；**保持零依赖原则**——不引入 npm 运行时依赖；提交前运行 `node test.js` 确保自检通过。
+欢迎 Issue 和 Pull Request：Fork 本仓库并新建分支；**保持零依赖原则**——不引入 npm 运行时依赖；提交前运行 `node test.js` 确保自检通过。详细流程见 [CONTRIBUTING.md](CONTRIBUTING.md)，更新记录见 [CHANGELOG.md](CHANGELOG.md)，安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。
 
 ## 📄 许可证
 

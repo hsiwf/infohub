@@ -1,0 +1,22 @@
+name: 💡 功能建议
+description: 提出一个让项目更好的想法
+labels: [enhancement]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 在班级使用中遇到了什么问题或需求？
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: 期望的解决方案
+      description: 你期望的效果，有参考产品 / 截图更好。
+  - type: checkboxes
+    id: willingness
+    attributes:
+      label: 意向
+      options:
+        - label: 我愿意提交 Pull Request 实现这个功能

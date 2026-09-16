@@ -12,61 +12,66 @@
 <body>
 <div id="app">
   <aside id="sidebar">
-    <div class="logo">📥<b>信息汇总</b><span class="logo-sub">重要通知不遗漏</span></div>
+    <div class="logo"><svg class="icon logo-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><b>信息汇总</b><span class="logo-sub">重要通知不遗漏</span></div>
     <nav id="mainnav">
-      <button data-view="feed" class="active">📨 信息中心</button>
-      <button data-view="inbox">📥 等待审核</button>
-      <button data-view="tasks">✅ 待办任务</button>
-      <button data-view="jielong">🐉 活动接龙</button>
-      <button data-view="draw">🎲 抽签点名</button>
-      <button data-view="birthday">🎂 生日祝福</button>
-      <button data-view="calendar">📅 日历详情</button>
-      <button data-view="files">📁 文件中心</button>
-      <button data-view="stats">📊 统计接入</button>
+      <button data-view="feed" class="active"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h13a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M16 4v16"/><path d="M7 9h5M7 13h5M7 17h3"/></svg>信息中心</button>
+      <button data-view="inbox"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="15" rx="2"/><path d="M3 10h5l2 3h4l2-3h5"/></svg>等待审核</button>
+      <button data-view="tasks"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>待办任务</button>
+      <button data-view="jielong"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="4" cy="18" r="1.6"/></svg>活动接龙</button>
+      <button data-view="draw"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M9 3v6M15 3v6"/><path d="m9 14 2 2 4-4"/></svg>抽签点名</button>
+      <button data-view="birthday"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3c-4 2.5-2.5 6.5-2.5 6.5S13.5 13 12 17c-.8 2.2-3 3-5.5 3A8.5 8.5 0 0 1 12 3z"/><path d="M7 13.5A8.5 8.5 0 0 1 17 13.5c2 .8 2.5 2.7 2.5 5H4.5c0-3 .8-5 2.5-5z"/></svg>生日祝福</button>
+      <button data-view="calendar"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/><path d="M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h.01"/></svg>日历详情</button>
+      <button data-view="files"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>文件中心</button>
+      <button data-view="stats"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-8M21 20H3"/></svg>统计接入</button>
     </nav>
     <div class="side-sec">
-      <div class="side-title">群列表 <button id="btn-add-group" title="添加群">＋</button></div>
+      <div class="side-title">群列表 <button id="btn-add-group" title="添加群" aria-label="添加群"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></div>
       <div id="grouplist"></div>
     </div>
     <div class="side-foot">数据保存在本机 data/ 文件夹<br>双击群名可编辑</div>
   </aside>
   <div id="right">
     <header id="topbar">
-      <input id="search" type="search" placeholder="🔍 搜索标题、内容、发送人、标签…（按 / 聚焦）">
-      <select id="group-sel"></select>
-      <select id="sortsel">
+      <div class="searchwrap">
+        <input id="search" type="search" placeholder="搜索标题、内容、发送人、标签…" aria-label="搜索信息">
+        <kbd class="search-kbd" title="按 / 聚焦搜索">/</kbd>
+      </div>
+      <select id="group-sel" aria-label="按群筛选"></select>
+      <select id="sortsel" aria-label="排序方式">
         <option value="time">最近收到</option>
         <option value="deadline">按截止时间</option>
       </select>
-      <button id="btn-theme" class="iconbtn" title="深色 / 浅色模式">🌙</button>
-      <button id="btn-bell" class="iconbtn" title="截止提醒：开启浏览器通知">🔔</button>
-      <button id="btn-login" class="iconbtn" title="管理员登录（学生无需登录，可直接浏览）" style="display:none">🔒</button>
-      <button id="btn-add" class="primary">＋ 添加信息</button>
+      <button id="btn-theme" class="iconbtn" title="深色 / 浅色模式" aria-label="切换外观"></button>
+      <button id="btn-bell" class="iconbtn" title="截止提醒：开启浏览器通知" aria-label="截止提醒"></button>
+      <button id="btn-login" class="iconbtn" title="管理员登录（学生无需登录，可直接浏览）" aria-label="管理员登录" style="display:none"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></button>
+      <button id="btn-add" class="primary"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>添加信息</span></button>
     </header>
     <div id="chips"></div>
     <main id="view"><div class="loading">加载中…</div></main>
   </div>
 </div>
 <nav id="tabbar">
-  <button data-view="feed" class="active">📨<span>信息</span></button>
-  <button data-view="inbox">📥<span>待审</span></button>
-  <button data-view="tasks">✅<span>待办</span></button>
-  <button data-view="jielong">🐉<span>接龙</span></button>
-  <button data-view="draw">🎲<span>抽签</span></button>
-  <button data-view="birthday">🎂<span>生日</span></button>
-  <button data-view="calendar">📅<span>日历</span></button>
-  <button data-view="files">📁<span>文件</span></button>
-  <button data-view="stats">📊<span>统计</span></button>
+  <button data-view="feed" class="active"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h13a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M16 4v16"/><path d="M7 9h5M7 13h5M7 17h3"/></svg><span>信息</span></button>
+  <button data-view="tasks"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span>待办</span></button>
+  <button data-view="jielong"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="4" cy="18" r="1.6"/></svg><span>接龙</span></button>
+  <button data-view="draw"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M9 3v6M15 3v6"/><path d="m9 14 2 2 4-4"/></svg><span>抽签</span></button>
+  <button data-view="birthday"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3c-4 2.5-2.5 6.5-2.5 6.5S13.5 13 12 17c-.8 2.2-3 3-5.5 3A8.5 8.5 0 0 1 12 3z"/><path d="M7 13.5A8.5 8.5 0 0 1 17 13.5c2 .8 2.5 2.7 2.5 5H4.5c0-3 .8-5 2.5-5z"/></svg><span>生日</span></button>
+  <button id="tab-more" class="morebtn" aria-label="更多页面"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg><span>更多</span></button>
 </nav>
-<button id="fab" title="添加信息">＋</button>
+<div id="tabsheet" class="more-sheet" hidden>
+  <button data-view="inbox"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="15" rx="2"/><path d="M3 10h5l2 3h4l2-3h5"/></svg><span>等待审核</span></button>
+  <button data-view="calendar"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/><path d="M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h.01"/></svg><span>日历详情</span></button>
+  <button data-view="files"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg><span>文件中心</span></button>
+  <button data-view="stats"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-8M21 20H3"/></svg><span>统计接入</span></button>
+</div>
+<button id="fab" title="添加信息" aria-label="添加信息"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
 <div id="modal-root"></div>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 <script>
 if ('serviceWorker' in navigator) {
   addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 }
 </script>
-<script src="/js/qrcode.min.js"></script>
 <script src="/js/app.js"></script>
 </body>
 </html>

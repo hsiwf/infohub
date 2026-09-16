@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const { URL } = require('url');
 
 const { db, DATA_DIR, UPLOAD_DIR } = require('./db');
@@ -95,17 +96,27 @@ autoBackup();
 setInterval(autoBackup, 30 * 60 * 1000);
 
 /* ---------- 访问密码（可选，存 data/config.json 的 password 字段） ---------- */
-const sessions = new Set();          // 内存会话，重启后需重新登录
-const loginFails = new Map();        // 登录失败限速：ip -> {n, t}
+const SESSION_TTL = 30 * 24 * 60 * 60 * 1000; // 与 Cookie Max-Age 一致（30 天）
+const sessions = new Map();         // 内存会话：token -> 登录时间，重启后需重新登录
+const loginFails = new Map();       // 登录失败限速：ip -> {n, t}
 function hasSession(req) {
   const m = /(?:^|;\s*)infohub_session=([a-f0-9]{32,})/.exec(req.headers.cookie || '');
-  return !!(m && sessions.has(m[1]));
+  const t = m && sessions.get(m[1]);
+  if (!t) return false;
+  if (Date.now() - t > SESSION_TTL) { sessions.delete(m[1]); return false; } // 过期会话惰性清除
+  return true;
+}
+// 常量时间字符串比较：令牌/密码校验不暴露"第几位不匹配"的时序信息
+function safeEqual(a, b) {
+  const ba = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
 }
 function authOk(req) {
   if (!CONFIG.password) return true; // 未设密码 = 不启用访问控制（家庭局域网场景）
   if (hasSession(req)) return true;
   const x = req.headers['x-token'];  // 机器人/脚本用接入令牌也能通行
-  return typeof x === 'string' && x !== '' && x === CONFIG.ingestToken;
+  return typeof x === 'string' && x !== '' && safeEqual(x, CONFIG.ingestToken);
 }
 
 /* ---------- 小工具 ---------- */
@@ -202,10 +213,10 @@ function onebotSigOk(req, raw) {
 function onebotAuthOk(req, query, raw) {
   if (CONFIG.onebot.secret) return onebotSigOk(req, raw);
   const token = CONFIG.onebot.token || CONFIG.ingestToken;
-  const q = query.get('access_token');
+  const q = query.get('access_token') || '';
   const auth = String(req.headers.authorization || '');
   const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-  return (q === token) || (bearer !== '' && bearer === token);
+  return (q !== '' && safeEqual(q, token)) || (bearer !== '' && safeEqual(bearer, token));
 }
 // 按 ext_key（qq:群号）绑定站内群；没绑过但白名单里给了显示名 → 按名字绑定并回写 ext_key；都没有 → 自动建群
 function bindOnebotGroup(qqGid, displayName) {
@@ -223,9 +234,16 @@ function bindOnebotGroup(qqGid, displayName) {
 }
 
 function sendJSON(res, code, obj) {
-  const body = JSON.stringify(obj);
+  let body = JSON.stringify(obj);
   res.wrote = true;
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', Vary: 'Accept-Encoding' };
+  // 大于 1KB 的 JSON 按 Accept-Encoding gzip（列表类响应体积可降 70%+，node:zlib 零依赖）
+  const enc = String((res.req && res.req.headers['accept-encoding']) || '');
+  if (body.length > 1024 && /\bgzip\b/i.test(enc)) {
+    headers['Content-Encoding'] = 'gzip';
+    body = zlib.gzipSync(body);
+  }
+  res.writeHead(code, headers);
   res.end(body);
 }
 class HttpError extends Error {
@@ -285,7 +303,14 @@ function getMessage(id) {
 }
 
 /* ---------- 健康检查 / 配置 ---------- */
-route('GET', '/api/health', () => ({ ok: true, time: nowStr() }));
+const PKG = require('./package.json');
+const STARTED_AT = Date.now();
+route('GET', '/api/health', () => ({
+  ok: true,
+  time: nowStr(),
+  version: PKG.version,
+  uptime: Math.round((Date.now() - STARTED_AT) / 1000),
+}));
 route('POST', '/api/login', (ctx) => {
   if (!CONFIG.password) return { ok: true, authRequired: false };
   const ip = ctx.req.socket.remoteAddress || '?';
@@ -300,7 +325,7 @@ route('POST', '/api/login', (ctx) => {
   }
   loginFails.delete(ip);
   const token = crypto.randomBytes(24).toString('hex');
-  sessions.add(token);
+  sessions.set(token, Date.now());
   ctx.res.setHeader('Set-Cookie', `infohub_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
   log('登录成功，新会话已建立');
   return { ok: true };
@@ -561,13 +586,15 @@ route('GET', '/api/attachments/:id/download', (ctx) => {
     serveAttachment(ctx, a, { inline });
   }
 });
-// 缩略图专用：不计阅读数，允许浏览器缓存，信息流里同一张图反复渲染不会虚增统计
+// 缩略图专用：不计阅读数，允许浏览器缓存，信息流里同一张图反复渲染不会虚增统计。
+// 与 /download 同一类型白名单：非位图/PDF 一律转附件下载，防止 HTML/SVG 借此同源内联渲染
 route('GET', '/api/attachments/:id/raw', (ctx) => {
   const id = Number(ctx.params.id);
   if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
   const a = db.prepare('SELECT * FROM attachments WHERE id = ?').get(id);
   if (!a) throw new HttpError(404, '附件不存在');
-  serveAttachment(ctx, a, { inline: true, cache: true });
+  const previewable = /^(image\/(png|jpeg|gif|webp|bmp)|application\/pdf)$/.test(a.mime || '');
+  serveAttachment(ctx, a, { inline: previewable, cache: previewable });
 });
 
 route('DELETE', '/api/attachments/:id', (ctx) => {
@@ -615,7 +642,7 @@ route('POST', '/api/parse', (ctx) => {
 /* ---------- 外部接入 webhook（机器人 / 手机快捷指令） ---------- */
 route('POST', '/api/ingest', (ctx) => {
   const token = ctx.query.get('token') || ctx.req.headers['x-token'] || '';
-  if (token !== CONFIG.ingestToken) throw new HttpError(401, '令牌无效');
+  if (!token || !safeEqual(token, CONFIG.ingestToken)) throw new HttpError(401, '令牌无效');
   const b = ctx.body || {};
   const text = sField(b.text, 20000);
   if (!text) throw new HttpError(400, 'text 不能为空');
@@ -698,11 +725,13 @@ function handleOnebotReport(ctx) {
 
   // 人工审核模式（默认）：先进「待审核」，管理员在界面上挑着收录
   if ((CONFIG.onebot.mode || 'review') !== 'auto') {
-    const dupMsg = db.prepare(`SELECT id FROM messages WHERE sender_name = ? AND content = ? AND received_at >= ? LIMIT 1`)
-      .get(sender, content, agoStr);
+    // 去重必须带上群归属：两个班群 5 分钟内出现相同内容是常态，不能互相误判成重复上报
+    const bound = isGroup ? (db.prepare('SELECT id FROM groups WHERE ext_key = ?').get('qq:' + gid) || {}).id : null;
+    const dupMsg = db.prepare(`SELECT id FROM messages WHERE sender_name = ? AND content = ? AND received_at >= ? AND group_id IS ? LIMIT 1`)
+      .get(sender, content, agoStr, bound ?? null);
     if (dupMsg) return { ok: true, deduped: true, id: dupMsg.id };
-    const dupInbox = db.prepare(`SELECT id FROM inbox WHERE sender_name = ? AND content = ? AND received_at >= ? LIMIT 1`)
-      .get(sender, content, agoStr);
+    const dupInbox = db.prepare(`SELECT id FROM inbox WHERE sender_name = ? AND content = ? AND received_at >= ? AND qq_gid = ? LIMIT 1`)
+      .get(sender, content, agoStr, isGroup ? String(gid) : '');
     if (dupInbox) return { ok: true, deduped: true, id: dupInbox.id };
     const info = db.prepare(`INSERT INTO inbox (content, sender_name, group_name, qq_gid, received_at, created_at)
         VALUES (?, ?, ?, ?, ?, ?)`)
@@ -830,7 +859,7 @@ function jielongView(a) {
 function jielongAdminOk(ctx, a) {
   if (authOk(ctx.req)) return true;
   const t = String(ctx.query.get('t') || '');
-  return !!(a && a.adminToken && t && t === a.adminToken);
+  return !!(a && a.adminToken && t && safeEqual(t, a.adminToken));
 }
 function saveJielongEntries(a) {
   const del = db.prepare('DELETE FROM jielong_entries WHERE jielong_id = ?');
@@ -1351,6 +1380,8 @@ route('GET', '/api/class-badge', (ctx) => {
   res.writeHead(200, {
     'Content-Type': sniffImage(buf) + '; charset=utf-8',
     'X-Content-Type-Options': 'nosniff',
+    // SVG 中可能内嵌脚本：sandbox 让浏览器以唯一透明源渲染，即使直接打开也不执行任何脚本
+    'Content-Security-Policy': "default-src 'none'; sandbox",
     'Cache-Control': 'no-cache',
   });
   res.end(buf);
@@ -1724,6 +1755,18 @@ server.on('clientError', (err, socket) => {
 // 后台长期运行：意外错误记日志但不退出（SQLite 操作是同步的，状态不会坏）
 process.on('uncaughtException', (e) => { log('未捕获异常（已忽略，继续运行）:', (e && e.stack) || String(e)); });
 process.on('unhandledRejection', (e) => { log('未处理的 Promise 拒绝:', (e && (e.stack || e.message)) || String(e)); });
+
+// 过期会话每小时批量清一次（登录校验里也有惰性清除，这里防内存缓慢增长）
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, t] of sessions) if (now - t > SESSION_TTL) sessions.delete(k);
+}, 60 * 60 * 1000);
+// systemd / Docker 停止时优雅关闭：先停接新连接，3 秒后强制退出兜底
+process.on('SIGTERM', () => {
+  log('收到 SIGTERM，正在关闭服务…');
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 3000).unref();
+});
 
 server.listen(PORT, '0.0.0.0', () => {
   const ips = lanIPs();
