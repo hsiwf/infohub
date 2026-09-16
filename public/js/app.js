@@ -4,6 +4,70 @@
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 
+/* 内联 SVG 图标集（lucide 风格，24x24 描边，零依赖）。
+ * 需要更多图标时在此追加路径即可，key 全部小写。 */
+const ICON_PATHS = {
+  'inbox': '<rect x="3" y="4" width="18" height="15" rx="2"/><path d="M3 10h5l2 3h4l2-3h5"/>',
+  'feed': '<path d="M4 4h13a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M16 4v16"/><path d="M7 9h5M7 13h5M7 17h3"/>',
+  'check': '<path d="M20 6 9 17l-5-5"/>',
+  'check-circle': '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+  'jielong': '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="4" cy="18" r="1.6"/>',
+  'draw': '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M9 3v6M15 3v6"/><path d="m9 14 2 2 4-4"/>',
+  'birthday': '<path d="M4 21h16"/><path d="M6 21v-5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v5"/><path d="M12 14v-4"/><path d="M10.5 7.5C10.5 6.5 12 5 12 5s1.5 1.5 1.5 2.5a1.5 1.5 0 0 1-3 0z"/>',
+  'calendar': '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/><path d="M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h.01"/>',
+  'file': '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+  'chart': '<path d="M4 20V10M10 20V4M16 20v-8M21 20H3"/>',
+  'search': '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+  'moon': '<path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/>',
+  'sun': '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  'clock': '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  'bell': '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
+  'bell-off': '<path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.9 17.9 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><path d="m2 2 20 20"/>',
+  'lock': '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  'lock-open': '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.6-1.5"/>',
+  'logout': '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
+  'plus': '<path d="M12 5v14M5 12h14"/>',
+  'edit': '<path d="M17 3a2.8 2.8 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>',
+  'trash': '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/>',
+  'paperclip': '<path d="m21.4 11.05-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/>',
+  'image': '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>',
+  'doc': '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/>',
+  'sheet': '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>',
+  'pdf': '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h1.5A1.5 1.5 0 0 1 12 14.5v1A1.5 1.5 0 0 1 10.5 17H9v-4zM15 13h2.5M15 17v-4M16.2 15.5H15"/>',
+  'slides': '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20M12 16v4"/>',
+  'archive': '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v11h14V9"/><path d="M10 13h4"/>',
+  'video': '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="m16 10 6-3v10l-6-3z"/>',
+  'audio': '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  'mail': '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="m2 7 10 7L22 7"/>',
+  'refresh': '<path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/>',
+  'link': '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  'settings': '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h.1a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  'users': '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/>',
+  'copy': '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
+  'external': '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/>',
+  'send': '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>',
+  'alert': '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+  'pin': '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>',
+  'external-link': '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/>',
+  'loader': '<path d="M21 12a9 9 0 1 1-6.2-8.6"/>',
+  'star': '<path d="m12 3 3 6.2 6.9 1-5 4.9 1.2 6.9-6.1-3.2L5.9 22 7 15.1 2 10l6.9-1z"/>',
+  'download': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
+  'upload': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/>',
+  'book': '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+  'sparkles': '<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/>',
+  'undo': '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/>',
+  'eye': '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+  'link-off': '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  'dots': '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  'message': '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  'wechat': '<path d="M3 5.5A2.5 2.5 0 0 1 5.5 3h6A2.5 2.5 0 0 1 14 5.5v3a2.5 2.5 0 0 1-2.5 2.5H8l-3.2 3V11h.7A2.5 2.5 0 0 1 3 8.5z"/><path d="M11 10.2c.6-.1 1.3-.2 2-.2 3.3 0 6 1.9 6 4.2 0 1.2-.7 2.3-1.8 3.1l.5 1.9-2.3-1.2c-.7.2-1.5.3-2.4.3-1 0-2-.2-2.8-.5"/>',
+  'globe': '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/>',
+  'qr': '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM21 14v3M17 21h4M14 21h.01"/>',
+};
+function icon(name, cls = '') {
+  return `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name] || ''}</svg>`;
+}
+
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -57,7 +121,15 @@ function friendlyDate(dateStr) {
 function fmtReceived(s) {
   if (!s) return '';
   const [date, time] = String(s).split(' ');
-  return (friendlyDate(date) + (time ? ' ' + time.slice(0, 5) : ''));
+  const now = new Date();
+  // 当天消息用相对时间（刚刚 / N 分钟前），更早的保持日期可读
+  if (date === ymd(now) && time) {
+    const diffMin = (now - new Date(date + 'T' + time)) / 60000;
+    if (diffMin < 1) return '刚刚';
+    if (diffMin < 60) return Math.floor(diffMin) + ' 分钟前';
+    return '今天 ' + time.slice(0, 5);
+  }
+  return friendlyDate(date) + (time ? ' ' + time.slice(0, 5) : '');
 }
 function dlChip(dl) {
   if (!dl) return '';
@@ -72,20 +144,20 @@ function dlChip(dl) {
   const label = cls === 'overdue'
     ? `已逾期 · ${friendlyDate(date)}${time ? ' ' + time.slice(0, 5) : ''}`
     : `截止 ${friendlyDate(date)}${time ? ' ' + time.slice(0, 5) : ''}`;
-  return `<span class="dlchip ${cls}">${esc(label)}</span>`;
+  return `<span class="dlchip ${cls}">${icon(cls === 'overdue' ? 'alert' : 'clock')}${esc(label)}</span>`;
 }
 
 const CATS = {
-  notice: { label: '通知', icon: '📢' },
-  task: { label: '任务', icon: '📝' },
-  activity: { label: '活动', icon: '🎪' },
-  file: { label: '文件', icon: '📎' },
-  other: { label: '其他', icon: '💬' },
+  notice: { label: '通知', icon: icon('feed', 'ic-feed') },
+  task: { label: '任务', icon: icon('pin', 'ic-task') },
+  activity: { label: '活动', icon: icon('sparkles', 'ic-activity') },
+  file: { label: '文件', icon: icon('paperclip', 'ic-file') },
+  other: { label: '其他', icon: icon('dots', 'ic-other') },
 };
 const PLATS = {
-  qq: { label: 'QQ', cls: 'plat-qq', emoji: '🐧' },
-  wechat: { label: '微信', cls: 'plat-wx', emoji: '💬' },
-  other: { label: '其他', cls: 'plat-ot', emoji: '📂' },
+  qq: { label: 'QQ', cls: 'plat-qq', icon: icon('message') },
+  wechat: { label: '微信', cls: 'plat-wx', icon: icon('wechat') },
+  other: { label: '其他', cls: 'plat-ot', icon: icon('globe') },
 };
 
 async function api(path, opts = {}) {
@@ -113,7 +185,14 @@ async function api(path, opts = {}) {
 let toastTimer = null;
 function toast(msg, type) {
   const el = $('#toast');
-  el.textContent = msg;
+  // 图标是内置可信 SVG，文案走 textContent 防注入
+  el.innerHTML = '';
+  const ic = document.createElement('span');
+  ic.className = 't-ic' + (type === 'error' ? ' err' : '');
+  ic.innerHTML = icon(type === 'error' ? 'alert' : 'check');
+  const tx = document.createElement('span');
+  tx.textContent = msg;
+  el.append(ic, tx);
   el.className = 'show' + (type === 'error' ? ' error' : '');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.className = ''; }, 2400);
@@ -154,8 +233,10 @@ async function loadMe() {
 }
 
 /* ========= 弹窗 ========= */
+let lastFocusEl = null;
 function openModal(html) {
-  $('#modal-root').innerHTML = `<div class="backdrop"><div class="modal">${html}</div></div>`;
+  lastFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  $('#modal-root').innerHTML = `<div class="backdrop"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`;
   const bd = $('#modal-root .backdrop');
   // 只有"按下"和"松开"都在遮罩上才关闭——在弹窗里选中文字拖到遮罩上不会误关
   let downOnBackdrop = false;
@@ -163,20 +244,41 @@ function openModal(html) {
   bd.addEventListener('click', (e) => { if (e.target === bd && downOnBackdrop) closeModal(); });
   const cancel = $('#btn-cancel');
   if (cancel) cancel.addEventListener('click', closeModal);
+  // 焦点圈定：Tab 在弹窗内循环，不漏到背景页面
+  const modal = $('#modal-root .modal');
+  modal.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const els = $$('.modal button, .modal input:not([type=hidden]), .modal textarea, .modal select, .modal a[href]')
+      .filter((el) => !el.disabled && el.offsetParent !== null);
+    if (!els.length) return;
+    const first = els[0], last = els[els.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  // 初始焦点落在第一个可交互元素上
+  setTimeout(() => {
+    const target = $$('.modal input:not([type=hidden]):not([type=checkbox]):not([type=color]):not([type=file]), .modal textarea, .modal select, .modal button.primary, .modal button.ghost')
+      .find((el) => !el.disabled && el.offsetParent !== null);
+    if (target) target.focus();
+  }, 40);
 }
-function closeModal() { $('#modal-root').innerHTML = ''; }
+function closeModal() {
+  $('#modal-root').innerHTML = '';
+  if (lastFocusEl && document.body.contains(lastFocusEl)) { try { lastFocusEl.focus(); } catch (e) { /* 忽略 */ } }
+  lastFocusEl = null;
+}
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 
 /* ========= 侧栏 / 顶栏 ========= */
-function platEmoji(p) { return (PLATS[p] || PLATS.other).emoji; }
+function platIcon(p) { return (PLATS[p] || PLATS.other).icon; }
 
 function renderSidebar() {
   $('#grouplist').innerHTML =
-    `<div class="gitem ${state.group ? '' : 'active'}" data-gid="">🗂 全部群</div>` +
+    `<div class="gitem ${state.group ? '' : 'active'}" data-gid="">${icon('inbox')} 全部群</div>` +
     state.groups.map((g) => `
       <div class="gitem ${String(state.group) === String(g.id) ? 'active' : ''}" data-gid="${g.id}">
         <span class="dot" style="background:${esc(g.color)}"></span>
-        ${platEmoji(g.platform)} ${esc(g.name)}
+        ${platIcon(g.platform)} ${esc(g.name)}
         <span class="cnt">${g.count}</span>
       </div>`).join('');
   $('#group-sel').innerHTML = `<option value="">全部群</option>` +
@@ -190,12 +292,12 @@ async function loadGroups() {
 }
 
 function renderChips() {
-  const chips = [['', '全部'], ['notice', '📢 通知'], ['task', '📝 任务'], ['activity', '🎪 活动'], ['file', '📎 文件'], ['other', '💬 其他']];
+  const chips = [['', '全部'], ['notice', '通知'], ['task', '任务'], ['activity', '活动'], ['file', '文件'], ['other', '其他']];
   // 手机上没有侧栏：群筛选激活时在这里显示可关闭的小标签
   const g = state.groups.find((x) => String(x.id) === String(state.group));
-  const groupChip = g ? `<button class="chipbtn active" data-clear-group="1" title="清除群筛选">👥 ${esc(g.name)} ✕</button>` : '';
+  const groupChip = g ? `<button class="chipbtn active" data-clear-group="1" title="清除群筛选">${icon('users')} ${esc(g.name)} ✕</button>` : '';
   $('#chips').innerHTML = groupChip + chips.map(([k, l]) =>
-    `<button class="chipbtn ${state.category === k ? 'active' : ''}" data-cat="${k}">${l}</button>`).join('') +
+    `<button class="chipbtn ${state.category === k ? 'active' : ''}" data-cat="${k}">${k ? (CATS[k] || CATS.other).icon : icon('feed')}<span>${l}</span></button>`).join('') +
     `<label class="showdone"><input type="checkbox" id="showdone" ${state.showDone ? 'checked' : ''}> 显示已完成</label>`;
   $('#chips').style.display = state.view === 'feed' ? 'flex' : 'none';
   // 让选中的分类滚进视野（手机上点后面的标签时不会弹回最左）
@@ -206,6 +308,19 @@ function renderChips() {
 }
 
 /* ========= 信息流 ========= */
+// 骨架屏：数据到达前的占位卡片（只用于首屏，追加加载不显示）
+function skeletonFeed(n = 4) {
+  let s = '';
+  for (let i = 0; i < n; i++) {
+    s += `<div class="card skel" aria-hidden="true">
+      <div class="skline w30"></div>
+      <div class="skline w70 tall"></div>
+      <div class="skline w95"></div>
+      <div class="skline w45"></div>
+    </div>`;
+  }
+  return s;
+}
 function cardHTML(it) {
   const cat = CATS[it.category] || CATS.other;
   const plat = it.group_platform ? (PLATS[it.group_platform] || PLATS.other) : null;
@@ -215,17 +330,18 @@ function cardHTML(it) {
   const short = body.length > 150 ? body.slice(0, 150) + '…' : body;
   const atts = (it.attachments || []).map((a) => {
     // 图片附件直接显示缩略图（/raw 不计阅读数），点击看大图才算一次阅读
-    if (/^image\//.test(a.mime || '')) {
+    // 类型范围与服务端 /raw 白名单一致（SVG 等会被服务端转附件下载，不能当缩略图）
+    if (/^image\/(png|jpeg|gif|webp|bmp)/.test(a.mime || '')) {
       return `<a class="att-thumb" href="/api/attachments/${a.id}/download" target="_blank" title="${esc(a.orig_name)}"><img loading="lazy" src="/api/attachments/${a.id}/raw" alt="${esc(a.orig_name)}"></a>`;
     }
-    return `<a class="att" href="/api/attachments/${a.id}/download" target="_blank">📄 ${esc(a.orig_name)} <span class="att-size">${fmtSize(a.size)}</span></a>`;
+    return `<a class="att" href="/api/attachments/${a.id}/download" target="_blank">${icon('paperclip')} ${esc(a.orig_name)} <span class="att-size">${fmtSize(a.size)}</span></a>`;
   }).join('');
   return `<article class="card cat-${it.category}${done ? ' done' : ''}${it.pinned ? ' pinned' : ''}" data-id="${it.id}">
     <div class="card-top">
       <span class="badge cat-${it.category}">${cat.icon} ${cat.label}</span>
-      ${it.pinned ? '<span class="pintag">📍</span>' : ''}
-      ${it.group_name ? `<span class="chip ${plat ? plat.cls : ''}">${plat ? plat.label : ''}·${esc(it.group_name)}</span>` : ''}
-      ${it.sender_name ? `<span class="sender">👤 ${esc(it.sender_name)}</span>` : ''}
+      ${it.pinned ? '<span class="pintag">' + icon('pin') + '</span>' : ''}
+      ${it.group_name ? `<span class="chip ${plat ? plat.cls : ''}">${plat ? plat.icon : ''}${plat ? plat.label : ''}·${esc(it.group_name)}</span>` : ''}
+      ${it.sender_name ? `<span class="sender">${icon('users')} ${esc(it.sender_name)}</span>` : ''}
       <span class="spacer"></span>
       <span class="time">${esc(fmtReceived(it.received_at))}</span>
     </div>
@@ -235,17 +351,17 @@ function cardHTML(it) {
     ${tags.length ? `<div class="tags">${tags.map((t) => `<span class="tag">#${esc(t)}</span>`).join('')}</div>` : ''}
     ${atts ? `<div class="atts">${atts}</div>` : ''}
     ${canEdit() ? `<div class="card-actions">
-      <button data-act="toggle" class="ghost">${done ? '↩ 取消完成' : '✓ 完成'}</button>
-      <button data-act="pin" class="ghost">${it.pinned ? '📍 取消置顶' : '📍 置顶'}</button>
-      <button data-act="edit" class="ghost">✏️ 编辑</button>
-      <button data-act="del" class="ghost danger">🗑 删除</button>
+      <button data-act="toggle" class="ghost">${done ? icon('undo') + ' 取消完成' : icon('check') + ' 完成'}</button>
+      <button data-act="pin" class="ghost">${icon('pin')} ${it.pinned ? '取消置顶' : '置顶'}</button>
+      <button data-act="edit" class="ghost">${icon('edit')} 编辑</button>
+      <button data-act="del" class="ghost danger">${icon('trash')} 删除</button>
     </div>` : ''}
   </article>`;
 }
 
 async function loadFeed(append = false) {
   const view = $('#view');
-  if (!append) view.innerHTML = '<div class="loading">加载中…</div>';
+  if (!append) view.innerHTML = skeletonFeed();
   // 主列表只放未完成；已完成的单独放底部“已完成”区（offset 只数未完成卡片）
   const offset = append ? $$('#view .card:not(.done)').length : 0;
   const params = new URLSearchParams();
@@ -274,7 +390,7 @@ async function loadFeed(append = false) {
       const d = await api('/api/messages?' + dp);
       d.items.forEach((it) => { state.cache[it.id] = it; });
       if (d.items.length) {
-        doneSection = `<div id="done-sec"><div class="feeddivider">✅ 已完成（${d.total}${d.total > d.items.length ? '，显示最近 ' + d.items.length + ' 条' : ''}）</div>${d.items.map(cardHTML).join('')}</div>`;
+        doneSection = `<div id="done-sec"><div class="feeddivider">${icon('check')} 已完成（${d.total}${d.total > d.items.length ? '，显示最近 ' + d.items.length + ' 条' : ''}）</div>${d.items.map(cardHTML).join('')}</div>`;
       }
     } catch (e) { /* 已完成区加载失败不影响主列表 */ }
   }
@@ -283,18 +399,18 @@ async function loadFeed(append = false) {
   if (state.total === 0) {
     const filtered = !!(state.q || state.category || state.group);
     view.innerHTML = filtered
-      ? `<div class="empty"><div class="big">🔍</div>当前筛选条件下没有信息<br>
+      ? `<div class="empty"><div class="big">${icon('search')}</div>当前筛选条件下没有信息<br>
          <button id="btn-clear-filter" class="ghost" style="margin-top:12px">✕ 清除筛选，查看全部信息</button></div>`
       : canEdit()
-        ? `<div class="empty"><div class="big">📭</div>还没有记录<br>点右上角「＋ 添加信息」，把老师发的通知粘贴进来试试</div>`
-        : `<div class="empty"><div class="big">📭</div>还没有记录<br>老师发布通知后会出现在这里</div>`;
+        ? `<div class="empty"><div class="big">${icon('inbox')}</div>还没有记录<br>点右上角「＋ 添加信息」，把老师发的通知粘贴进来试试</div>`
+        : `<div class="empty"><div class="big">${icon('inbox')}</div>还没有记录<br>老师发布通知后会出现在这里</div>`;
     if (doneSection) view.insertAdjacentHTML('beforeend', doneSection);
     addBdBanner();
     return;
   }
   // 提醒功能一次性引导（仅在通知权限未决定时出现）
   if (!append && 'Notification' in window && Notification.permission === 'default' && !localStorage.getItem('infohub-notif-dismissed')) {
-    view.insertAdjacentHTML('afterbegin', `<div class="notifbar">🔔 建议开启截止提醒：逾期和 24 小时内截止的任务会自动弹窗通知
+    view.insertAdjacentHTML('afterbegin', `<div class="notifbar">${icon('bell')} 建议开启截止提醒：逾期和 24 小时内截止的任务会自动弹窗通知
       <span class="spacer"></span><button id="notif-on" class="mini">开启</button><button id="notif-no" class="mini">暂不</button></div>`);
     const on = $('#notif-on');
     const off = $('#notif-no');
@@ -330,11 +446,11 @@ async function loadFeed(append = false) {
 function addBdBanner() {
   if (!bdTodayCache || !bdTodayCache.length) return;
   const view = $('#view');
-  view.insertAdjacentHTML('afterbegin', `<div class="bd-feedbanner">🎂 今天是 ${bdTodayCache.map((m) => '<b>' + esc(m.name) + '</b>').join('、')} 的生日，让我们送上祝福！<a data-bd-goto>去看看 →</a></div>`);
+  view.insertAdjacentHTML('afterbegin', `<div class="bd-feedbanner">${icon('birthday')} 今天是 ${bdTodayCache.map((m) => '<b>' + esc(m.name) + '</b>').join('、')} 的生日，让我们送上祝福！<a data-bd-goto>去看看 →</a></div>`);
   const goto = $('[data-bd-goto]');
   if (goto) goto.addEventListener('click', () => {
     state.view = 'birthday';
-    $$('#mainnav button, #tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === 'birthday'));
+    syncNavActive();
     renderView().catch((e) => toast(e.message, 'error'));
   });
 }
@@ -345,14 +461,14 @@ function inboxRow(it) {
     <div class="imain">
       <div class="itext">${hl(it.content, state.q)}</div>
       <div class="imeta">
-        ${it.group_name ? `<span class="chip plat-qq">🐧 ${esc(it.group_name)}</span>` : ''}
-        ${it.sender_name ? `<span>👤 ${esc(it.sender_name)}</span>` : ''}
-        <span>⏰ ${esc(fmtReceived(it.received_at))}</span>
+        ${it.group_name ? `<span class="chip plat-qq">${icon('message')} ${esc(it.group_name)}</span>` : ''}
+        ${it.sender_name ? `<span>${icon('users')} ${esc(it.sender_name)}</span>` : ''}
+        <span>${icon('clock')} ${esc(fmtReceived(it.received_at))}</span>
       </div>
     </div>
     <span class="spacer"></span>
     <div class="ibtns">
-      <button class="ghost" data-iact="accept" data-iid="${it.id}">✓ 收录</button>
+      <button class="ghost" data-iact="accept" data-iid="${it.id}">${icon('check')} 收录</button>
       <button class="ghost danger" data-iact="dismiss" data-iid="${it.id}">忽略</button>
     </div>
   </div>`;
@@ -365,16 +481,16 @@ async function loadInbox() {
   const items = !state.q ? data.items : data.items.filter((it) =>
     ((it.content || '') + (it.sender_name || '') + (it.group_name || '')).toLowerCase().includes(state.q.toLowerCase()));
   if (!data.items.length) {
-    view.innerHTML = `<div class="empty"><div class="big">🎉</div>没有待审核的消息<br>QQ 机器人的消息会先进到这里，收录后才会出现在信息流</div>`;
+    view.innerHTML = `<div class="empty"><div class="big">${icon('check')}</div>没有待审核的消息<br>QQ 机器人的消息会先进到这里，收录后才会出现在信息流</div>`;
     return;
   }
   view.innerHTML = `
     <div class="inboxhead">
-      <h3>📥 待审核（${items.length}${items.length !== data.total ? '/' + data.total : ''}）</h3>
+      <h3>${icon('inbox')} 待审核（${items.length}${items.length !== data.total ? '/' + data.total : ''}）</h3>
       <span class="hint">收录后自动识别分类和截止时间；与已有信息重复的可以直接忽略</span>
       <span class="spacer"></span>
-      <button class="ghost" id="btn-inbox-accept-all">✓ 全部收录</button>
-      <button class="ghost danger" id="btn-inbox-clear">🗑 全部忽略</button>
+      <button class="ghost" id="btn-inbox-accept-all">${icon('check')} 全部收录</button>
+      <button class="ghost danger" id="btn-inbox-clear">${icon('trash')} 全部忽略</button>
     </div>
     ${items.map(inboxRow).join('') || '<p class="empty-mini">没有匹配的消息</p>'}`;
   $('#btn-inbox-accept-all').addEventListener('click', async () => {
@@ -413,14 +529,14 @@ function taskRow(it) {
   const plat = it.group_platform ? (PLATS[it.group_platform] || PLATS.other) : null;
   const attN = (it.attachments || []).length;
   return `<div class="trow" data-id="${it.id}">
-    ${canEdit() ? '<button class="tcheck" data-act="toggle" title="标记完成">✓</button>' : ''}
+    ${canEdit() ? '<button class="tcheck" data-act="toggle" title="标记完成">' + icon('check') + '</button>' : ''}
     <div class="tmain">
       <div class="ttitle"${canEdit() ? ' data-act="edit"' : ''}>${hl(it.title || (it.content || '').slice(0, 30), state.q)}</div>
       <div class="tmeta">
-        ${it.group_name ? `<span class="chip ${plat ? plat.cls : ''}">${plat ? plat.label : ''}·${esc(it.group_name)}</span>` : ''}
-        ${it.sender_name ? `<span>👤 ${esc(it.sender_name)}</span>` : ''}
+        ${it.group_name ? `<span class="chip ${plat ? plat.cls : ''}">${plat ? plat.icon : ''}${plat ? plat.label : ''}·${esc(it.group_name)}</span>` : ''}
+        ${it.sender_name ? `<span>${icon('users')} ${esc(it.sender_name)}</span>` : ''}
         ${dlChip(it.deadline)}
-        ${attN ? `<span>📎 ${attN} 个附件</span>` : ''}
+        ${attN ? `<span>${icon('paperclip')} ${attN} 个附件</span>` : ''}
       </div>
     </div>
   </div>`;
@@ -447,7 +563,7 @@ async function loadTasks() {
   const items = odRes.items.concat(upRes.items, tdRes.items.filter((it) => !it.deadline));
   items.forEach((it) => { state.cache[it.id] = it; });
   if (!items.length) {
-    view.innerHTML = `<div class="empty"><div class="big">🎉</div>没有待办任务，太棒了！<br>任务类信息或带截止时间的信息会出现在这里</div>`;
+    view.innerHTML = `<div class="empty"><div class="big">${icon('check')}</div>没有待办任务，太棒了！<br>任务类信息或带截止时间的信息会出现在这里</div>`;
     return;
   }
   const now = new Date();
@@ -466,18 +582,18 @@ async function loadTasks() {
   const sec = (key, title, list) => list.length
     ? `<div class="tasksec sec-${key}"><h3>${title}（${list.length}）</h3>${list.map(taskRow).join('')}</div>` : '';
   const overdueTitle = overdueTotal > buckets.overdue.length
-    ? `⏰ 已逾期（共 ${overdueTotal} 条，显示最近 ${buckets.overdue.length} 条）`
-    : `⏰ 已逾期（${buckets.overdue.length}）`;
+    ? `${icon('alert')} 已逾期（共 ${overdueTotal} 条，显示最近 ${buckets.overdue.length} 条）`
+    : `${icon('alert')} 已逾期（${buckets.overdue.length}）`;
   view.innerHTML =
     `<div class="taskhead"><span class="hint">按截止时间排列，点圆圈打勾完成，点标题可编辑</span>
       <span style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="ghost" id="btn-ics">📅 导出到手机日历（.ics）</button>
-        <button class="ghost" id="btn-print">🖨 打印清单</button>
+        <button class="ghost" id="btn-ics">${icon('calendar')} 导出到手机日历（.ics）</button>
+        <button class="ghost" id="btn-print">${icon('doc')} 打印清单</button>
       </span></div>` +
     sec('overdue', overdueTitle, buckets.overdue) +
-    sec('today', '🔥 今天要完成', buckets.today) +
-    sec('week', '📅 未来 7 天', buckets.week) +
-    sec('later', '🗓 以后 / 无截止', buckets.later);
+    sec('today', `${icon('clock')} 今天要完成`, buckets.today) +
+    sec('week', `${icon('calendar')} 未来 7 天`, buckets.week) +
+    sec('later', `${icon('clock')} 以后 / 无截止`, buckets.later);
   $('#btn-ics').addEventListener('click', () => window.open('/api/calendar.ics'));
   $('#btn-print').addEventListener('click', () => window.print());
 }
@@ -525,7 +641,7 @@ function renderCalendar() {
       <button class="ghost" id="cal-next">下月 →</button>
       <button class="ghost" id="cal-today">回到本月</button>
       <span class="spacer"></span>
-      <button class="ghost" id="btn-ics-cal">📅 导出到手机日历</button>
+      <button class="ghost" id="btn-ics-cal">${icon('calendar')} 导出到手机日历</button>
     </div>
     <div class="calgrid calweekrow">
       ${['周一', '周二', '周三', '周四', '周五', '周六', '周日'].map((d) => `<div class="calwlabel">${d}</div>`).join('')}
@@ -553,8 +669,7 @@ function showDayPanel(ds) {
   const panel = $('#cal-panel');
   if (!panel) return;
   if (!list.length) { panel.innerHTML = ''; return; }
-  const [date] = ds.split(' ');
-  panel.innerHTML = `<div class="panel"><h3>🗓 ${esc(friendlyDate(ds))} 截止（${list.length}）</h3>
+  panel.innerHTML = `<div class="panel"><h3>${icon('calendar')} ${esc(friendlyDate(ds))} 截止（${list.length}）</h3>
     ${list.map((it) => `
       <div class="uprow" data-day-id="${it.id}">
         <span class="badge cat-${it.category}">${(CATS[it.category] || CATS.other).label}</span>
@@ -573,15 +688,15 @@ function showDayPanel(ds) {
 /* ========= 文件中心 ========= */
 function extIcon(name) {
   const e = (String(name).split('.').pop() || '').toLowerCase();
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(e)) return ['🖼️', '图片'];
-  if (['doc', 'docx'].includes(e)) return ['📄', 'Word'];
-  if (['xls', 'xlsx', 'csv'].includes(e)) return ['📊', 'Excel'];
-  if (e === 'pdf') return ['📕', 'PDF'];
-  if (['ppt', 'pptx'].includes(e)) return ['📽️', 'PPT'];
-  if (['zip', 'rar', '7z'].includes(e)) return ['🗜️', '压缩包'];
-  if (['mp4', 'mov', 'avi', 'mkv'].includes(e)) return ['🎬', '视频'];
-  if (['mp3', 'wav', 'm4a'].includes(e)) return ['🎵', '音频'];
-  return ['📁', '文件'];
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(e)) return [icon('image'), '图片'];
+  if (['doc', 'docx'].includes(e)) return [icon('doc'), 'Word'];
+  if (['xls', 'xlsx', 'csv'].includes(e)) return [icon('sheet'), 'Excel'];
+  if (e === 'pdf') return [icon('pdf'), 'PDF'];
+  if (['ppt', 'pptx'].includes(e)) return [icon('slides'), 'PPT'];
+  if (['zip', 'rar', '7z'].includes(e)) return [icon('archive'), '压缩包'];
+  if (['mp4', 'mov', 'avi', 'mkv'].includes(e)) return [icon('video'), '视频'];
+  if (['mp3', 'wav', 'm4a'].includes(e)) return [icon('audio'), '音频'];
+  return [icon('file'), '文件'];
 }
 async function loadFiles() {
   const view = $('#view');
@@ -591,27 +706,27 @@ async function loadFiles() {
   if (state.group) params.set('group_id', state.group);
   const data = await api('/api/files?' + params);
   if (!data.items.length) {
-    view.innerHTML = `<div class="empty"><div class="big">📂</div>还没有文件<br>在添加/编辑信息时可以上传附件</div>`;
+    view.innerHTML = `<div class="empty"><div class="big">${icon('file')}</div>还没有文件<br>在添加/编辑信息时可以上传附件</div>`;
     return;
   }
   // 「累计」用服务端的全量统计（跟随当前筛选）；老接口无此字段时退回当前页求和
   const totViews = data.totalViews != null ? data.totalViews : data.items.reduce((s, a) => s + (a.views || 0), 0);
   const totDls = data.totalDownloads != null ? data.totalDownloads : data.items.reduce((s, a) => s + (a.downloads || 0), 0);
   view.innerHTML = `
-    <div class="inboxhead"><h3>📁 文件（${data.items.length}）</h3>
-      <span class="hint">📖 累计阅读 ${totViews} 次 · ⬇️ 累计下载 ${totDls} 次</span></div>
+    <div class="inboxhead"><h3>${icon('file')} 文件（${data.items.length}）</h3>
+      <span class="hint">${icon('eye')} 累计阅读 ${totViews} 次 · ${icon('download')} 累计下载 ${totDls} 次</span></div>
     ` + data.items.map((a) => {
-    const [icon, typeName] = extIcon(a.orig_name);
+    const [fileIcon, typeName] = extIcon(a.orig_name);
     const plat = a.group_platform ? (PLATS[a.group_platform] || PLATS.other) : null;
     return `<div class="frow">
-      <div class="ficon">${icon}</div>
+      <div class="ficon">${fileIcon}</div>
       <div class="fmain">
         <div class="fname">${hl(a.orig_name, state.q)} <span class="att-size">${fmtSize(a.size)}</span></div>
         <div class="fmeta">
           <span>${typeName}</span>
-          <span title="打开预览次数">📖 ${a.views || 0}</span>
-          <span title="下载次数">⬇️ ${a.downloads || 0}</span>
-          ${a.group_name ? `<span class="chip ${plat ? plat.cls : ''}">${plat ? plat.label : ''}·${esc(a.group_name)}</span>` : ''}
+          <span title="打开预览次数">${icon('eye')} ${a.views || 0}</span>
+          <span title="下载次数">${icon('download')} ${a.downloads || 0}</span>
+          ${a.group_name ? `<span class="chip ${plat ? plat.cls : ''}">${plat ? plat.icon : ''}${plat ? plat.label : ''}·${esc(a.group_name)}</span>` : ''}
           <span class="fmsg" data-msg="${a.message_id}">来自：${hl(a.message_title || '(无标题)', state.q)}</span>
           <span>${esc(fmtReceived(a.created_at))}</span>
         </div>
@@ -652,13 +767,13 @@ async function loadStats() {
   }] } }, null, 2) : '';
   view.innerHTML = `
     <div class="statgrid">
-      ${statCard('📨 信息总数', st.total)}
-      ${statCard('🆕 近 7 天新增', st.week)}
-      ${statCard('📝 待完成任务', st.openTasks)}
-      ${statCard('⏰ 已逾期', st.overdue, st.overdue ? 'danger' : '')}
+      ${statCard(`${icon('feed')} 信息总数`, st.total)}
+      ${statCard(`${icon('sparkles')} 近 7 天新增`, st.week)}
+      ${statCard(`${icon('pin')} 待完成任务`, st.openTasks)}
+      ${statCard(`${icon('alert')} 已逾期`, st.overdue, st.overdue ? 'danger' : '')}
     </div>
     <div class="panel">
-      <h3>⏰ 即将截止（7 天内）</h3>
+      <h3>${icon('alert')} 即将截止（7 天内）</h3>
       ${st.upcoming.length ? st.upcoming.map((it) => `
         <div class="uprow" data-id="${it.id}">
           <span class="badge cat-${it.category}">${(CATS[it.category] || CATS.other).label}</span>
@@ -667,7 +782,7 @@ async function loadStats() {
         </div>`).join('') : '<p class="empty-mini">7 天内没有要截止的事</p>'}
     </div>
     <div class="panel">
-      <h3>📂 分类统计</h3>
+      <h3>${icon('chart')} 分类统计</h3>
       ${st.byCategory.length ? st.byCategory.map((c) => `
         <div class="barrow">
           <span class="barname">${(CATS[c.category] || CATS.other).icon} ${(CATS[c.category] || CATS.other).label}</span>
@@ -676,36 +791,36 @@ async function loadStats() {
         </div>`).join('') : '<p class="empty-mini">暂无数据</p>'}
     </div>
     <div class="panel">
-      <h3>👥 各群信息量</h3>
+      <h3>${icon('users')} 各群信息量</h3>
       ${st.byGroup.length ? st.byGroup.map((g) => `
         <div class="barrow">
-          <span class="barname">${platEmoji(g.platform)} ${esc(g.name)}</span>
+          <span class="barname">${platIcon(g.platform)} ${esc(g.name)}</span>
           <div class="bar"><i style="width:${Math.round(g.count / maxG * 100)}%;background:${esc(g.color)}"></i></div>
           <span class="barnum">${g.count}</span>
         </div>`).join('') : '<p class="empty-mini">还没有添加群</p>'}
     </div>
     ${cfg ? `<div class="panel">
-      <h3>📥 自动接入（进阶）</h3>
+      <h3>${icon('inbox')} 自动接入（进阶）</h3>
       <p class="hint">把这个接口地址给自动化程序（手机快捷指令等）使用，新消息会自动进入信息流，
       并自动识别分类和截止时间。</p>
       <div class="codebox">${esc(ingestUrl)}</div>
-      <button class="ghost" id="btn-copy-ingest">📋 复制接口地址</button>
+      <button class="ghost" id="btn-copy-ingest">${icon('copy')} 复制接口地址</button>
       <p class="hint">请求体示例：<code>{"text":"消息原文","group":"班级通知群","sender":"王老师","platform":"wechat"}</code></p>
     </div>` : ''}
     ${cfg ? `<div class="panel">
-      <h3>🐧 QQ 自动接入（OneBot 机器人）</h3>
+      <h3>${icon('message')} QQ 自动接入（OneBot 机器人）</h3>
       ${obMode === 'auto'
         ? `<p class="hint">当前为 <b>自动收录</b> 模式：消息通过防闲聊过滤后直接进入信息流。想改成先人工挑一遍，在 data/config.json 里把 onebot.mode 改为 <code>"review"</code>。</p>`
-        : `<p class="hint">当前为 <b>人工审核</b> 模式（默认）：群消息先进侧栏的「📥 待审核」，由你挑哪些收录进信息流，收录时自动识别分类和截止时间。想全自动收录，在 data/config.json 里把 onebot.mode 改为 <code>"auto"</code>。</p>`}
+        : `<p class="hint">当前为 <b>人工审核</b> 模式（默认）：群消息先进侧栏的「${icon('inbox')} 待审核」，由你挑哪些收录进信息流，收录时自动识别分类和截止时间。想全自动收录，在 data/config.json 里把 onebot.mode 改为 <code>"auto"</code>。</p>`}
       <p class="hint">在电脑上用 <b>NapCat / LLOneBot / Lagrange / go-cqhttp</b> 等 OneBot 11 框架登录一个 QQ 小号并拉进班级群，
       在它的网络配置里添加 <b>HTTP POST 上报</b>，地址和令牌填下面两项。群文件上传也会记录（纯图片/表情消息不收录，避免刷屏）。</p>
       <div class="codebox">${esc(onebotUrl)}</div>
-      <button class="ghost" id="btn-copy-onebot">📋 复制上报地址</button>
+      <button class="ghost" id="btn-copy-onebot">${icon('copy')} 复制上报地址</button>
       <p class="hint">令牌 access_token：<code>${esc(ob.token)}</code>${ob.secretOn ? '（已在 config 里启用签名校验，框架 secret 填同一段密钥）' : '（与接入令牌相同；可在 data/config.json 的 onebot.token 单独设置，或设 onebot.secret 启用签名校验）'}</p>
       <p class="hint">NapCat / LLOneBot 配置示例（其他框架按各自文档填同样两项）：</p>
       <div class="codebox">${esc(napcatExample)}</div>
-      <button class="ghost" id="btn-copy-onebot-json">📋 复制配置示例</button>
-      <p class="hint">🛡 防闲聊过滤：${fparts.length
+      <button class="ghost" id="btn-copy-onebot-json">${icon('copy')} 复制配置示例</button>
+      <p class="hint">${icon('lock')} 防闲聊过滤：${fparts.length
         ? `${esc(fparts.join('；'))}。在 data/config.json 的 onebot.filter 里调整${obMode === 'review' ? '（关键词、仅管理员、智能过滤仅在 auto 模式参与）' : ''}。`
         : '当前未启用，群里所有文字消息都会收录。可在 data/config.json 的 onebot.filter 里开启：最短长度、水词屏蔽、关键词白名单、仅群主/管理员、智能过滤（像通知/任务的才收录）。'}</p>
       ${obKeys.length
@@ -713,32 +828,32 @@ async function loadStats() {
         : '<p class="hint">未设白名单：机器人所在<b>所有群</b>的消息都会收录。只想收录部分群，在 data/config.json 的 onebot.groups 里配置（如 <code>"groups": {"123456789": "班级通知群"}</code>），保存后重启生效。</p>'}
     </div>` : ''}
     <div class="panel">
-      <h3>👥 群管理</h3>
+      <h3>${icon('users')} 群管理</h3>
       ${st.byGroup.map((g) => `
         <div class="gmrow">
           <span class="dot" style="background:${esc(g.color)}"></span>
-          <span class="gmname">${platEmoji(g.platform)} ${esc(g.name)}</span>
+          <span class="gmname">${platIcon(g.platform)} ${esc(g.name)}</span>
           <span class="spacer"></span><b class="gmnum">${g.count}</b>
           ${editable ? `<button class="mini" data-editgroup="${g.id}">编辑</button>` : ''}
         </div>`).join('') || `<p class="empty-mini">${editable ? '还没有群，点下面按钮添加' : '还没有群'}</p>`}
-      ${editable ? '<button class="ghost" id="btn-add-group2" style="margin-top:10px">➕ 添加群</button>' : ''}
+      ${editable ? '<button class="ghost" id="btn-add-group2" style="margin-top:10px">' + icon('plus') + ' 添加群</button>' : ''}
       ${editable ? '<p class="hint">手机上在这里就能加群、改群名、删群，不用连电脑。</p>' : ''}
     </div>
     <div class="panel">
-      <h3>🔔 截止提醒</h3>
+      <h3>${icon('bell')} 截止提醒</h3>
       <p class="hint">点顶栏铃铛开启浏览器通知：只要信息页开着，<b>已逾期</b>或 <b>24 小时内截止</b>的任务会弹窗提醒
       （同一条每天只提醒一次，每 5 分钟检查一次）。手机上把本页"添加到主屏幕"后同样有效。</p>
-      <button class="ghost" id="btn-bell-2">🔔 开启 / 检查提醒</button>
+      <button class="ghost" id="btn-bell-2">${icon('bell')} 开启 / 检查提醒</button>
     </div>
     <div class="panel">
-      <h3>💾 数据备份</h3>
+      <h3>${icon('archive')} 数据备份</h3>
       <p class="hint">所有数据都在本机 data/ 文件夹——<b>复制整个文件夹即完整备份</b>（含附件）。
       每次启动和跨天时会自动备份到 data/backups/（保留最近 14 份）；也可以导出 JSON。</p>
-      ${editable ? `<button class="ghost" id="btn-export">⬇️ 导出 JSON 备份</button>
-      <label class="importwrap">⬆️ 导入 JSON 备份<input id="import-file" type="file" accept=".json,application/json"></label>` : ''}
+      ${editable ? `<button class="ghost" id="btn-export">${icon('download')} 导出 JSON 备份</button>
+      <label class="importwrap">${icon('upload')} 导入 JSON 备份<input id="import-file" type="file" accept=".json,application/json"></label>` : ''}
       ${me.authRequired ? (me.loggedIn
-        ? '<button class="ghost" id="btn-logout" style="margin-left:10px">🚪 退出登录</button>'
-        : '<a class="ghost" href="/login" style="margin-left:10px;text-decoration:none;display:inline-block">🔐 管理员登录</a>') : ''}
+        ? '<button class="ghost" id="btn-logout" style="margin-left:10px">' + icon('logout') + ' 退出登录</button>'
+        : '<a class="ghost" href="/login" style="margin-left:10px;text-decoration:none;display:inline-block">' + icon('lock') + ' 管理员登录</a>') : ''}
       <p class="hint">导入建议只在空数据时使用（已有数据时服务器会拒绝，防止重复）。JSON 备份会恢复附件记录与接龙数据，但不含附件文件本身——完整备份请复制整个 data/ 文件夹。</p>
     </div>`;
   const copyBtn = $('#btn-copy-ingest');
@@ -796,7 +911,7 @@ async function loadStats() {
 /* ========= 添加 / 编辑信息 ========= */
 function renderPendingFiles() {
   $('#f-filelist').innerHTML = state.pendingFiles.map((f, i) =>
-    `<span class="att-edit">📄 ${esc(f.name)} <button type="button" class="mini danger" data-rm="${i}">✕</button></span>`).join('');
+    `<span class="att-edit">${icon('paperclip')} ${esc(f.name)} <button type="button" class="mini danger" data-rm="${i}">✕</button></span>`).join('');
   $$('#f-filelist [data-rm]').forEach((b) => b.addEventListener('click', () => {
     state.pendingFiles.splice(Number(b.dataset.rm), 1);
     renderPendingFiles();
@@ -811,14 +926,14 @@ function openMessageModal(item) {
     .concat(state.groups.map((g) => `<option value="${g.id}" ${item && item.group_id === g.id ? 'selected' : ''}>${esc(g.name)}</option>`))
     .join('');
   const catOpts = Object.entries(CATS).map(([k, v]) =>
-    `<option value="${k}" ${item && item.category === k ? 'selected' : ''}>${v.icon} ${v.label}</option>`).join('');
+    `<option value="${k}" ${item && item.category === k ? 'selected' : ''}>${v.label}</option>`).join('');
   openModal(`
-    <h2>${item ? '✏️ 编辑信息' : '📥 添加信息'}</h2>
+    <h2>${item ? `${icon('edit')} 编辑信息` : `${icon('inbox')} 添加信息`}</h2>
     <div class="form">
       <div class="labrow"><label>消息原文（粘贴老师发的通知/任务）</label>
-        <button id="btn-smart" type="button" class="mini">🪄 智能识别</button></div>
+        <button id="btn-smart" type="button" class="mini">${icon('sparkles')} 智能识别</button></div>
       <textarea id="f-content" placeholder="把老师发的通知、任务原文粘贴到这里，再点「智能识别」自动填标题、分类和截止时间…">${item ? esc(item.content || '') : ''}</textarea>
-      <label class="splitline"><input type="checkbox" id="f-split"> ✂️ 按空行拆分为多条（一次粘贴多条通知时勾选，每条自动识别截止时间）</label>
+      <label class="splitline"><input type="checkbox" id="f-split"> ${icon('sheet')} 按空行拆分为多条（一次粘贴多条通知时勾选，每条自动识别截止时间）</label>
       <div id="f-dup" class="dupwarn" style="display:none"></div>
       <div class="grid2">
         <div><label>标题</label><input id="f-title" value="${item ? esc(item.title || '') : ''}" placeholder="留空则取原文第一行"></div>
@@ -831,14 +946,14 @@ function openMessageModal(item) {
       <div class="grid2">
         <div><label>标签（逗号分隔）</label><input id="f-tags" value="${item ? esc(item.tags || '') : ''}" placeholder="如：作业,打卡"></div>
         <div class="checkline">
-          <label><input type="checkbox" id="f-priority" ${item && item.priority ? 'checked' : ''}> ⭐ 重要</label>
-          <label><input type="checkbox" id="f-done" ${item && item.status === 'done' ? 'checked' : ''}> ✅ 已完成</label>
+          <label><input type="checkbox" id="f-priority" ${item && item.priority ? 'checked' : ''}> ${icon('star')} 重要</label>
+          <label><input type="checkbox" id="f-done" ${item && item.status === 'done' ? 'checked' : ''}> ${icon('check')} 已完成</label>
         </div>
       </div>
       <label>附件（可多选）</label>
       <input id="f-files" type="file" multiple>
       ${state.existingAtts.length ? `<label>已有附件</label><div class="filelist">${state.existingAtts.map((a) =>
-        `<span class="att-edit">📄 ${esc(a.orig_name)} <button type="button" class="mini danger" data-delatt="${a.id}">✕</button></span>`).join('')}</div>` : ''}
+        `<span class="att-edit">${icon('paperclip')} ${esc(a.orig_name)} <button type="button" class="mini danger" data-delatt="${a.id}">✕</button></span>`).join('')}</div>` : ''}
       <div id="f-filelist" class="filelist"></div>
     </div>
     <div class="modal-foot">
@@ -857,7 +972,7 @@ function openMessageModal(item) {
       if (parsed.sender && !$('#f-sender').value) $('#f-sender').value = parsed.sender;
       if (parsed.priority) $('#f-priority').checked = true;
       if (parsed.tags && parsed.tags.length) $('#f-tags').value = parsed.tags.join(',');
-      toast(`已识别：${CATS[parsed.category].label}${parsed.deadline ? ' · 截止 ' + parsed.deadline : ''}${parsed.priority ? ' · ⭐重要' : ''}`);
+      toast(`已识别：${CATS[parsed.category].label}${parsed.deadline ? ' · 截止 ' + parsed.deadline : ''}${parsed.priority ? ' · 重要' : ''}`);
     } catch (e) { toast(e.message, 'error'); }
   });
 
@@ -976,7 +1091,7 @@ function openMessageModal(item) {
         const { items } = await api('/api/similar', { method: 'POST', body: { text, excludeId: state.editingId } });
         if (!items.length) { box.style.display = 'none'; return; }
         box.style.display = 'block';
-        box.innerHTML = `⚠️ 可能已录入过相似信息（避免重复记录，可点击查看）：<br>` +
+        box.innerHTML = `${icon('alert')} 可能已录入过相似信息（避免重复记录，可点击查看）：<br>` +
           items.map((it) => `<a href="javascript:void(0)" data-dup="${it.id}">· ${esc(it.title || '(无标题)')}（${esc(fmtReceived(it.received_at))}）</a>`).join('<br>');
         box.querySelectorAll('[data-dup]').forEach((a) => a.addEventListener('click', async () => {
           const it = await api('/api/messages/' + a.dataset.dup);
@@ -990,20 +1105,20 @@ function openMessageModal(item) {
 /* ========= 添加 / 编辑群 ========= */
 function openGroupModal(group) {
   openModal(`
-    <h2>${group ? '✏️ 编辑群' : '➕ 添加群'}</h2>
+    <h2>${group ? `${icon('edit')} 编辑群` : `${icon('plus')} 添加群`}</h2>
     <div class="form">
       <label>群名称</label>
       <input id="g-name" value="${group ? esc(group.name) : ''}" placeholder="如：班级通知群">
       <div class="grid2">
         <div><label>平台</label>
           <select id="g-platform">
-            <option value="wechat" ${group && group.platform === 'wechat' ? 'selected' : ''}>💬 微信</option>
-            <option value="qq" ${group && group.platform === 'qq' ? 'selected' : ''}>🐧 QQ</option>
-            <option value="other" ${group && group.platform === 'other' ? 'selected' : ''}>📂 其他</option>
+            <option value="wechat" ${group && group.platform === 'wechat' ? 'selected' : ''}>微信</option>
+            <option value="qq" ${group && group.platform === 'qq' ? 'selected' : ''}>QQ</option>
+            <option value="other" ${group && group.platform === 'other' ? 'selected' : ''}>其他</option>
           </select></div>
         <div><label>标记颜色</label><input id="g-color" type="color" value="${group ? esc(group.color) : '#4f6ef2'}"></div>
       </div>
-      ${group ? '<button id="g-del" class="ghost danger" style="margin-top:14px">🗑 删除该群（群里的信息会保留）</button>' : ''}
+      ${group ? `<button id="g-del" class="ghost danger" style="margin-top:14px">${icon('trash')} 删除该群（群里的信息会保留）</button>` : ''}
     </div>
     <div class="modal-foot">
       <button class="ghost" id="btn-cancel">取消</button>
@@ -1087,7 +1202,6 @@ function jlTokenOf(id) {
   return it ? it.token : '';
 }
 function jlSlotLabel(r) { return r.id ? r.id + ' ' + r.name : r.name; }
-function jlIdentity(e) { return e.id ? e.name + '（' + e.id + '）' : e.name; }
 function jlFmtTime(ts) {
   if (!ts) return '';
   const d = new Date(ts);
@@ -1164,18 +1278,29 @@ async function jlCopy(text, okMsg) {
   } catch (e) { /* 降级 */ }
   fallback();
 }
-function jlQr(text, box) {
-  if (typeof qrcode !== 'function') { box.innerHTML = '<p class="empty-mini">二维码组件未加载</p>'; return; }
+// 二维码组件懒加载：首页不加载 qrcode.min.js，首次扫码时按需注入
+function loadQrLib() {
+  return new Promise((resolve, reject) => {
+    if (typeof qrcode === 'function') { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = '/js/qrcode.min.js';
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('二维码组件加载失败'));
+    document.head.appendChild(s);
+  });
+}
+async function jlQr(text, box) {
   try {
+    await loadQrLib();
     if (qrcode.stringToBytesFuncs && qrcode.stringToBytesFuncs['UTF-8']) qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
     const qr = qrcode(0, 'M');
     qr.addData(String(text));
     qr.make();
     box.innerHTML = qr.createSvgTag(4, 0);
-  } catch (e) { box.innerHTML = '<p class="empty-mini">二维码生成失败</p>'; }
+  } catch (e) { box.innerHTML = '<p class="empty-mini">' + esc(e.message || '二维码生成失败') + '</p>'; }
 }
 function openJlQrModal(url) {
-  openModal(`<h2>📱 扫码接龙</h2><div class="qrbox">${''}</div>
+  openModal(`<h2>${icon('qr')} 扫码接龙</h2><div class="qrbox">${''}</div>
     <p class="hint" style="text-align:center">手机扫码打开接龙页，或复制链接发到班群</p>
     <div class="modal-foot"><button class="ghost" id="btn-cancel">关闭</button></div>`);
   jlQr(url, $('#modal-root .qrbox'));
@@ -1192,7 +1317,7 @@ function jlProgressHtml(a) {
     const mCnt = (a.missing || []).length;
     return `<div class="jl-prognum"><b>${a.done}</b><span class="sep">/</span><span>${a.total}</span><span class="unit">人已接龙</span></div>
       <div class="jl-bar"><i style="width:${pct}%"></i></div>
-      <div class="jl-progsub">${mCnt ? '还有 ' + mCnt + ' 人未接龙' : '全部已接龙 🎉'}${a.count > a.done ? '，另有 ' + (a.count - a.done) + ' 人名单外接龙' : ''}</div>`;
+      <div class="jl-progsub">${mCnt ? '还有 ' + mCnt + ' 人未接龙' : '全部已接龙'}${a.count > a.done ? '，另有 ' + (a.count - a.done) + ' 人名单外接龙' : ''}</div>`;
   }
   return `<div class="jl-prognum"><b>${a.count}</b><span class="unit">人已接龙</span></div>
     <div class="jl-bar"><i style="width:${a.count ? 100 : 0}%"></i></div>
@@ -1216,22 +1341,22 @@ async function loadJielong() {
     return `<div class="panel">
       <div class="jl-head"><h2>${esc(a.title)}</h2>${jlStatusBadge(a)}</div>
       ${a.description ? `<p class="jl-desc">${esc(a.description.length > 80 ? a.description.slice(0, 80) + '…' : a.description)}</p>` : ''}
-      <div class="jl-meta">${a.deadline ? '⏰ 截止 ' + esc(a.deadline) : ''}
-        <span>${a.hasRoster ? `✅ ${a.done}/${a.total} 已接` : `👥 ${a.count} 人已接`}</span>
-        ${!a.closedNow && !a.closed && a.deadline ? '<span>发起于 ' + jlFmtTime(a.createdAt) + '</span>' : '<span>发起于 ' + jlFmtTime(a.createdAt) + '</span>'}</div>
+      <div class="jl-meta">${a.deadline ? `${icon('clock')} 截止 ${esc(a.deadline)}` : ''}
+        <span>${a.hasRoster ? `${icon('check')} ${a.done}/${a.total} 已接` : `${icon('users')} ${a.count} 人已接`}</span>
+        <span>发起于 ${jlFmtTime(a.createdAt)}</span></div>
       <div class="jl-actions">
-        <button class="ghost" data-jl-open="${a.id}">🔓 打开接龙页</button>
-        <button class="ghost" data-jl-copy="${a.id}">📋 复制学生链接</button>
-        ${hasToken ? `<button class="ghost" data-jl-manage="${a.id}">⚙️ 管理</button>` : ''}
+        <button class="ghost" data-jl-open="${a.id}">${icon('external')} 打开接龙页</button>
+        <button class="ghost" data-jl-copy="${a.id}">${icon('copy')} 复制学生链接</button>
+        ${hasToken ? `<button class="ghost" data-jl-manage="${a.id}">${icon('settings')} 管理</button>` : ''}
       </div>
     </div>`;
   }).join('');
 
   view.innerHTML =
-    `<div class="jl-head"><h2>🐉 活动接龙</h2></div>
+    `<div class="jl-head"><h2>${icon('jielong')} 活动接龙</h2></div>
     <p class="hint">接龙链接发到班群，同学点开即填即交；自动比对名单，谁没接龙一目了然。</p>
-    ${canEdit() ? '<div class="jl-actions"><button class="primary" id="btn-jl-create">＋ 发起接龙</button></div>' : ''}
-    ${items || '<div class="empty"><div class="big">🐉</div>还没有接龙' +
+    ${canEdit() ? `<div class="jl-actions"><button class="primary" id="btn-jl-create">${icon('plus')} 发起接龙</button></div>` : ''}
+    ${items || `<div class="empty"><div class="big">${icon('jielong')}</div>还没有接龙` +
       (canEdit() ? '<br>点上面「发起接龙」，把班群里的接龙搬到这里' : '<br>发起后接龙会出现在这里') + '</div>'}`;
   const createBtn = $('#btn-jl-create');
   if (createBtn) createBtn.addEventListener('click', openJielongCreateModal);
@@ -1260,7 +1385,6 @@ async function loadJielongDetail() {
   const tArg = token ? '?t=' + encodeURIComponent(token) : '';
   const stuLink = location.origin + '/j/' + a.id;
 
-  const outsideCount = a.entries.filter((e) => e.outside).length;
   const withId = (a.roster || []).some((r) => r.id) || a.entries.some((e) => e.id);
   const jlFullText = () => {
     const lines = ['【' + a.title + '】'];
@@ -1281,11 +1405,11 @@ async function loadJielongDetail() {
 
   view.innerHTML = `
     <button class="ghost jl-back" id="jl-back">← 返回接龙列表</button>
-    ${state.jlBanner ? `<div class="jl-banner">✅ 接龙创建成功！把「学生链接」发到班群即可；本页可随时查看进度、复制提醒文案。<b>管理入口保存在本浏览器</b>，换设备请收藏带令牌的管理链接。</div>` : ''}
+    ${state.jlBanner ? `<div class="jl-banner">${icon('check')} 接龙创建成功！把「学生链接」发到班群即可；本页可随时查看进度、复制提醒文案。<b>管理入口保存在本浏览器</b>，换设备请收藏带令牌的管理链接。</div>` : ''}
     <div class="panel">
       <div class="jl-head"><h2>${esc(a.title)}</h2>${jlStatusBadge({ ...a, manuallyClosed: a.closed })}</div>
       ${a.description ? `<p class="jl-desc">${esc(a.description)}</p>` : ''}
-      <div class="jl-meta">${a.deadline ? '⏰ 截止 ' + esc(a.deadline) : '不限截止时间'}<span>发起于 ${jlFmtTime(a.createdAt)}</span>
+      <div class="jl-meta">${a.deadline ? `${icon('clock')} 截止 ${esc(a.deadline)}` : '不限截止时间'}<span>发起于 ${jlFmtTime(a.createdAt)}</span>
         ${a.closedNow ? '<span class="jl-badge warn">已截止，不能再提交</span>' : ''}</div>
       <div class="jl-prog">${jlProgressHtml(a)}</div>
     </div>
@@ -1293,23 +1417,23 @@ async function loadJielongDetail() {
       <div class="jl-linkrow"><input readonly value="${esc(stuLink)}"><button class="ghost" id="jl-copy-stu">复制学生链接</button>
         <button class="ghost" id="jl-show-qr">二维码</button></div>
       <div class="jl-actions">
-        <button class="ghost" id="jl-copy-miss">📋 复制未接名单</button>
-        <button class="ghost" id="jl-copy-full">📄 复制接龙全文</button>
-        <a class="ghost" id="jl-export" href="/api/jielong/${a.id}/export${tArg}" download>⬇️ 导出 CSV</a>
-        <button class="ghost" id="jl-per">🔗 专属链接</button>
-        ${canEdit() && token ? '<button class="ghost" id="jl-copy-admin">🤝 复制管理链接</button>' : ''}
-        <button class="ghost" id="jl-edit">✏️ 编辑</button>
-        <button class="ghost" id="jl-close">${a.closed ? '▶️ 重新开启' : '⏹ 停止接龙'}</button>
-        <button class="ghost danger" id="jl-del">🗑 删除接龙</button>
+        <button class="ghost" id="jl-copy-miss">${icon('copy')} 复制未接名单</button>
+        <button class="ghost" id="jl-copy-full">${icon('doc')} 复制接龙全文</button>
+        <a class="ghost" id="jl-export" href="/api/jielong/${a.id}/export${tArg}" download>${icon('download')} 导出 CSV</a>
+        <button class="ghost" id="jl-per">${icon('link')} 专属链接</button>
+        ${canEdit() && token ? `<button class="ghost" id="jl-copy-admin">${icon('users')} 复制管理链接</button>` : ''}
+        <button class="ghost" id="jl-edit">${icon('edit')} 编辑</button>
+        <button class="ghost" id="jl-close">${a.closed ? `${icon('refresh')} 重新开启` : `${icon('clock')} 停止接龙`}</button>
+        <button class="ghost danger" id="jl-del">${icon('trash')} 删除接龙</button>
       </div>
       <div id="jl-per-box" style="display:none">
-        <p class="jl-sec">🔗 专属链接（打开后姓名锁定，防代填；适合私发个人）</p>
+        <p class="jl-sec">${icon('link')} 专属链接（打开后姓名锁定，防代填；适合私发个人）</p>
         <textarea id="jl-per-list" class="form-like" rows="6" readonly style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text);font-size:12.5px;resize:vertical"></textarea>
         <div class="jl-actions"><button class="ghost" id="jl-per-copy">复制全部</button></div>
       </div>
     </div>` : ''}
     <div class="panel">
-      <h3>👻 已接龙（${a.entries.length} 人）</h3>
+      <h3>${icon('users')} 已接龙（${a.entries.length} 人）</h3>
       ${a.entries.length ? `<div class="jl-tblwrap"><table class="jl-table">
         <thead><tr><th>#</th>${withId ? '<th>学号</th>' : ''}<th>姓名</th>
         ${a.fields.map((f) => `<th>${esc(f.label)}</th>`).join('')}<th>备注</th><th>时间</th>${canManage ? '<th></th>' : ''}</tr></thead>
@@ -1324,10 +1448,10 @@ async function loadJielongDetail() {
       </table></div>` : '<p class="empty-mini">还没有人接龙，快把学生链接发到班群吧</p>'}
     </div>
     ${a.hasRoster ? `<div class="panel">
-      <h3>⏳ 未接龙（${(a.missing || []).length} 人）</h3>
+      <h3>${icon('clock')} 未接龙（${(a.missing || []).length} 人）</h3>
       ${(a.missing || []).length
         ? `<div>${a.missing.map((m) => `<span class="jl-chip" data-jl-per="${m.i}" title="点击复制该同学的专属链接">${esc(jlSlotLabel(m))}</span>`).join('')}</div>`
-        : '<p class="empty-mini">🎉 全部完成！</p>'}
+        : '<p class="empty-mini">全部完成！</p>'}
     </div>` : ''}`;
 
   state.jlBanner = false;
@@ -1357,7 +1481,7 @@ async function loadJielongDetail() {
   $('#jl-copy-miss').addEventListener('click', () => {
     const missing = a.missing || [];
     if (!a.hasRoster) { toast('本次接龙未设置名单'); return; }
-    if (!missing.length) { toast('全部都已接龙 🎉'); return; }
+    if (!missing.length) { toast('全部都已接龙'); return; }
     jlCopy('【' + a.title + '】还没有接龙的同学（' + missing.length + '人）：\n' +
       missing.map(jlSlotLabel).join('、') + '\n请点击链接完成接龙：' + stuLink, '已复制，可粘贴到班群提醒大家');
   });
@@ -1456,7 +1580,7 @@ function openJielongCreateModal() {
   };
 
   openModal(`
-    <h2>🐉 发起接龙</h2>
+    <h2>${icon('jielong')} 发起接龙</h2>
     <div class="form">
       <label>接龙标题</label>
       <input id="jl-title" maxlength="60" placeholder="例如：9月12日春游报名">
@@ -1465,7 +1589,7 @@ function openJielongCreateModal() {
       <label>从名单库选择（可选）</label>
       <div class="labrow">
         <select id="jl-roster-lib" style="flex:1;min-width:0"><option value="">— 手动粘贴名单 —</option></select>
-        <button type="button" class="mini danger" id="jl-roster-lib-del" style="display:none;white-space:nowrap">🗑 删除</button>
+        <button type="button" class="mini danger" id="jl-roster-lib-del" style="display:none;white-space:nowrap">${icon('trash')} 删除</button>
       </div>
       <label>班级名单（选填，用于自动统计谁没接龙；支持直接粘贴 Excel / QQ 名单）</label>
       <textarea id="jl-roster" rows="5" placeholder="每行一个，支持“学号 姓名”&#10;例如：&#10;2023001 张三&#10;2. 李四&#10;王五"></textarea>
@@ -1477,7 +1601,7 @@ function openJielongCreateModal() {
       <input id="jl-deadline" type="datetime-local">
       <label>接龙内容（同学需要填写的项目，可增减）</label>
       <div id="jl-fields"></div>
-      <button class="ghost" id="jl-addfield" type="button">＋ 添加填写项</button>
+      <button class="ghost" id="jl-addfield" type="button">${icon('plus')} 添加填写项</button>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer;margin-top:12px"><input type="checkbox" id="jl-outside" checked style="width:auto"> 允许名单外的同学接龙（会标记“名单外”）</label>
     </div>
     <div class="modal-foot">
@@ -1521,7 +1645,7 @@ function openJielongCreateModal() {
       state.jl = { id: r.id, token: r.adminToken };
       state.jlBanner = true;
       if (state.view !== 'jielong') state.view = 'jielong';
-      $$('#mainnav button, #tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === 'jielong'));
+      syncNavActive();
       renderView().catch(() => {});
       toast('接龙创建成功 ✓');
     } catch (e) { toast(e.message, 'error'); }
@@ -1531,7 +1655,7 @@ function openJielongCreateModal() {
 function openJielongEditModal(a, token) {
   const tArg = token ? '?t=' + encodeURIComponent(token) : '';
   openModal(`
-    <h2>✏️ 编辑接龙</h2>
+    <h2>${icon('edit')} 编辑接龙</h2>
     <div class="form">
       <label>标题</label><input id="jl-e-title" maxlength="60" value="${esc(a.title)}">
       <label>说明</label><textarea id="jl-e-desc" rows="2" maxlength="1000">${esc(a.description || '')}</textarea>
@@ -1574,15 +1698,15 @@ async function loadDraw() {
       <div class="jl-head"><h2>${esc(d.title)}</h2>${d.remainingCount ? `<span class="jl-badge on">箱内剩 ${d.remainingCount}/${d.total}</span>` : '<span class="jl-badge off">本轮已抽完</span>'}</div>
       <div class="jl-meta"><span>每次抽 ${d.perDraw} 人</span><span>已抽 ${d.roundCount} 轮</span><span>名单 ${d.total} 人</span></div>
       <div class="jl-actions">
-        <button class="primary" data-dw-open="${d.id}">🎲 进入抽签</button>
-        ${canEdit() ? `<button class="ghost danger" data-dw-del="${d.id}">🗑 删除</button>` : ''}
+        <button class="primary" data-dw-open="${d.id}">${icon('draw')} 进入抽签</button>
+        ${canEdit() ? `<button class="ghost danger" data-dw-del="${d.id}">${icon('trash')} 删除</button>` : ''}
       </div>
     </div>`).join('');
   view.innerHTML = `
-    <div class="jl-head"><h2>🎲 抽签点名</h2></div>
+    <div class="jl-head"><h2>${icon('draw')} 抽签点名</h2></div>
     <p class="hint">按班级名单建签箱：抽过的人自动排除，下次不会被抽到；箱内抽空后自动开始新一轮，保证大家轮流参加。</p>
-    ${canEdit() ? '<div class="jl-actions"><button class="primary" id="btn-dw-create">＋ 新建签箱</button></div>' : ''}
-    ${items || `<div class="empty"><div class="big">🎲</div>还没有签箱<br>${canEdit() ? '点上面「新建签箱」，粘贴班级名单就能开始抽签' : '发起后签箱会出现在这里'}</div>`}`;
+    ${canEdit() ? `<div class="jl-actions"><button class="primary" id="btn-dw-create">${icon('plus')} 新建签箱</button></div>` : ''}
+    ${items || `<div class="empty"><div class="big">${icon('draw')}</div>还没有签箱<br>${canEdit() ? '点上面「新建签箱」，粘贴班级名单就能开始抽签' : '发起后签箱会出现在这里'}</div>`}`;
   const createBtn = $('#btn-dw-create');
   if (createBtn) createBtn.addEventListener('click', openDrawCreateModal);
   $$('[data-dw-open]').forEach((b) => b.addEventListener('click', () => {
@@ -1624,25 +1748,25 @@ function renderDrawDetail(d) {
     <div class="panel">
       <div class="dw-countrow">本次抽 <input id="dw-count" type="number" min="1" max="${nextMax}" value="${nextN}"> 人
         <span class="hint" style="margin:0">${done ? '箱内已抽空，下次抽签自动开始新一轮' : `还剩 ${d.remainingCount} 人未被抽到`}</span></div>
-      <div class="dw-result" id="dw-result">${last ? last.picked.map((p) => `<span class="dw-name">${esc(p.name)}</span>`).join('') : '<span class="dw-empty">点下面按钮开始抽签 🎲</span>'}</div>
+      <div class="dw-result" id="dw-result">${last ? last.picked.map((p) => `<span class="dw-name">${esc(p.name)}</span>`).join('') : `<span class="dw-empty">点下面按钮开始抽签</span>`}</div>
       ${canEdit() ? `
-      <button class="dw-go" id="dw-go">🎲 开始抽签${done ? '（新一轮）' : ''}</button>
+      <button class="dw-go" id="dw-go">${icon('draw')} 开始抽签${done ? '（新一轮）' : ''}</button>
       <div class="jl-actions">
-        <button class="ghost" id="dw-undo" ${d.roundCount ? '' : 'disabled'}>↩️ 撤销上一轮</button>
-        <button class="ghost" id="dw-reset" ${d.roundCount ? '' : 'disabled'}>♻️ 重置箱子</button>
+        <button class="ghost" id="dw-undo" ${d.roundCount ? '' : 'disabled'}>${icon('undo')} 撤销上一轮</button>
+        <button class="ghost" id="dw-reset" ${d.roundCount ? '' : 'disabled'}>${icon('refresh')} 重置箱子</button>
         <span class="hint" style="margin:0">重置后所有人重新可被抽到</span>
       </div>` : ''}
     </div>
     <div class="panel">
-      <h3>📜 抽签记录（${d.roundCount} 轮）</h3>
+      <h3>${icon('clock')} 抽签记录（${d.roundCount} 轮）</h3>
       ${d.roundCount ? d.rounds.slice().reverse().map((r, i) => `
         <div class="dw-round"><span class="dw-rtime">第 ${d.roundCount - i} 轮 · ${jlFmtTime(r.time)}</span>
           <span class="dw-rnames">${r.picked.map((p) => `<span class="dw-rname">${esc(p.name)}</span>`).join('')}</span>
         </div>`).join('') : '<p class="empty-mini">还没有抽过</p>'}
     </div>
     ${canEdit() ? `<div class="jl-actions">
-      <button class="ghost" id="dw-edit">✏️ 编辑签箱</button>
-      <button class="ghost danger" id="dw-del">🗑 删除签箱</button>
+      <button class="ghost" id="dw-edit">${icon('edit')} 编辑签箱</button>
+      <button class="ghost danger" id="dw-del">${icon('trash')} 删除签箱</button>
     </div>` : ''}`;
   $('#dw-back').addEventListener('click', () => { state.draw = null; renderView().catch(() => {}); });
   if (!canEdit()) return;
@@ -1650,14 +1774,15 @@ function renderDrawDetail(d) {
   $('#dw-go').addEventListener('click', async () => {
     const n = Math.max(1, Number($('#dw-count').value) || d.perDraw);
     const btn = $('#dw-go');
-    btn.disabled = true; btn.textContent = '抽签中…';
+    const orig = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = icon('loader') + ' 抽签中…';
     try {
       const r = await api(`/api/draw/${d.id}/go`, { method: 'POST', body: { count: n } });
       await loadDrawDetail();
       toast(`抽中 ${r.count} 人${r.reset ? '，已自动开始新一轮' : ''}`);
     } catch (e) {
       toast(e.message, 'error');
-      btn.disabled = false; btn.textContent = '🎲 开始抽签';
+      btn.disabled = false; btn.innerHTML = orig;
     }
   });
   $('#dw-undo').addEventListener('click', async () => {
@@ -1698,14 +1823,14 @@ function openDrawCreateModal() {
       (parsed.list.length > 50 ? `<span class="jl-chip plain">…共 ${parsed.list.length} 人</span>` : '');
   };
   openModal(`
-    <h2>🎲 新建签箱</h2>
+    <h2>${icon('draw')} 新建签箱</h2>
     <div class="form">
       <label>抽签标题</label>
       <input id="dw-title" maxlength="60" placeholder="例如：运动会志愿者抽签">
       <label>从名单库选择（可选）</label>
       <div class="labrow">
         <select id="dw-roster-lib" style="flex:1;min-width:0"><option value="">— 手动粘贴名单 —</option></select>
-        <button type="button" class="mini danger" id="dw-roster-lib-del" style="display:none;white-space:nowrap">🗑 删除</button>
+        <button type="button" class="mini danger" id="dw-roster-lib-del" style="display:none;white-space:nowrap">${icon('trash')} 删除</button>
       </div>
       <label>班级名单（支持直接粘贴 Excel / QQ 名单）</label>
       <textarea id="dw-roster" rows="5" placeholder="每行一个，支持“学号 姓名”&#10;例如：&#10;2023001 张三&#10;2. 李四&#10;王五"></textarea>
@@ -1744,7 +1869,7 @@ function openDrawCreateModal() {
       closeModal();
       state.draw = r.id;
       if (state.view !== 'draw') state.view = 'draw';
-      $$('#mainnav button, #tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === 'draw'));
+      syncNavActive();
       renderView().catch(() => {});
       toast('签箱创建成功 ✓');
     } catch (e) { toast(e.message, 'error'); }
@@ -1760,7 +1885,7 @@ function openDrawEditModal(d) {
     pv.innerHTML = `<div>识别到 <b>${parsed.list.length}</b> 人${$('#dw-e-withid').checked ? '（含学号）' : ''}</div>`;
   };
   openModal(`
-    <h2>✏️ 编辑签箱</h2>
+    <h2>${icon('edit')} 编辑签箱</h2>
     <div class="form">
       <label>标题</label><input id="dw-e-title" maxlength="60" value="${esc(d.title)}">
       <label>名单（保存后按“学号+姓名”匹配已抽记录；不在新名单中的已抽记录自动失效）</label>
@@ -1820,7 +1945,7 @@ function bdWish(m) {
 }
 const bdChip = (m) => {
   if (m.pending) return '<span class="bd-chip pending">生日待填</span>';
-  if (m.isToday) return '<span class="bd-chip today">今天生日 🎂</span>';
+  if (m.isToday) return '<span class="bd-chip today">今天生日</span>';
   if (m.daysUntil === 1) return '<span class="bd-chip soon">明天生日</span>';
   if (m.daysUntil <= 7) return `<span class="bd-chip soon">还有 ${m.daysUntil} 天</span>`;
   return `<span class="bd-chip later">${m.month} 月 ${m.day} 日 · 还有 ${m.daysUntil} 天</span>`;
@@ -1863,7 +1988,6 @@ async function loadBirthdays() {
   const wishes = {};
   const wishOf = (m) => { if (!wishes[m.id]) wishes[m.id] = bdWish(m); return wishes[m.id]; };
   const bdAvaColor = (m) => ['linear-gradient(135deg,#f783ac,#f9c74f)', 'linear-gradient(135deg,#a78bfa,#60a5fa)', 'linear-gradient(135deg,#4ade80,#38bdf8)', 'linear-gradient(135deg,#fb923c,#f472b6)'][(m.name || '?').charCodeAt(0) % 4];
-  const bdTint = (m) => ['linear-gradient(135deg,#ffe9f1,#fff6e3)', 'linear-gradient(135deg,#e3f1ff,#e9fff3)', 'linear-gradient(135deg,#fff6d9,#ffe9f1)', 'linear-gradient(135deg,#eef0ff,#e3fbff)', 'linear-gradient(135deg,#f3e9ff,#ffe9f1)', 'linear-gradient(135deg,#e6fff1,#fff6d9)'][(m.name || '?').charCodeAt(0) % 6];
   const bdWeek = (d) => '周' + '日一二三四五六'[new Date(d + 'T00:00:00').getDay()];
 
   const todayCards = data.today.map((m) => `
@@ -1882,25 +2006,25 @@ async function loadBirthdays() {
       <div class="bd-cake">🎂</div>
       <div class="bd-todaylabel">今 天 过 生 日</div>
       <div class="bd-name">${esc(m.name)}</div>
-      ${m.turningAge != null ? `<div class="bd-role"><span class="jl-badge on">将满 ${m.turningAge} 岁的生日 🎉</span></div>` : ''}
+      ${m.turningAge != null ? `<div class="bd-role"><span class="jl-badge on">将满 ${m.turningAge} 岁的生日</span></div>` : ''}
       <div class="bd-wish">「${esc(wishOf(m))}」</div>
       <div class="bd-from">—— 全班同学 ——</div>
-      <div class="bd-actions"><button class="ghost" data-bd-copy="${m.id}">📋 复制祝福发到班群</button></div>
+      <div class="bd-actions"><button class="ghost" data-bd-copy="${m.id}">${icon('copy')} 复制祝福发到班群</button></div>
     </div>`).join('');
   const nearest = data.items.find((x) => !x.pending && !x.isToday && x.daysUntil != null);
   const todayWrap = data.today.length
     ? `<div class="bd-todaygrid">${todayCards}</div>`
-    : `<div class="bd-calm">🎈 今天没有寿星${nearest ? `，最近的是 <b>${esc(nearest.name)}</b>（${nearest.month} 月 ${nearest.day} 日，还有 ${nearest.daysUntil} 天）` : ''}，每一天都值得被温柔对待</div>`;
+    : `<div class="bd-calm">${icon('birthday')} 今天没有寿星${nearest ? `，最近的是 <b>${esc(nearest.name)}</b>（${nearest.month} 月 ${nearest.day} 日，还有 ${nearest.daysUntil} 天）` : ''}，每一天都值得被温柔对待</div>`;
 
   const upCards = data.items.filter((m) => !m.isToday).map((m, i) => `
-    <div class="bd-card${m.pending ? ' pending' : (!m.pending && m.daysUntil <= 7 ? ' soon' : '')}${canEdit() ? ' has-acts' : ''}" style="background:${m.pending ? 'var(--hover)' : (m.daysUntil <= 7 ? 'linear-gradient(135deg,#fff3d6,#ffe0ea)' : bdTint(m))};animation-delay:${Math.min(i * 45, 600)}ms">
-      <div class="bd-ava" style="background:${m.pending ? 'var(--hover)' : bdAvaColor(m)}">${m.pending ? '❓' : esc((m.name || '?')[0])}</div>
+    <div class="bd-card${m.pending ? ' pending' : (m.daysUntil <= 7 ? ' soon' : '')}${canEdit() ? ' has-acts' : ''}" style="animation-delay:${Math.min(i * 45, 600)}ms">
+      <div class="bd-ava" style="background:${m.pending ? 'var(--hover)' : bdAvaColor(m)}">${m.pending ? '?' : esc((m.name || '?')[0])}</div>
       <div class="bd-uinfo">
         <div class="bd-uname">${esc(m.name)}</div>
-        <div class="bd-usub">${m.pending ? '生日待填' : `🎂 ${m.month} 月 ${m.day} 日${m.turningAge != null ? ' · 将满 ' + m.turningAge + ' 岁' : ''}`}</div>
+        <div class="bd-usub">${m.pending ? '生日待填' : `${icon('birthday')} ${m.month} 月 ${m.day} 日${m.turningAge != null ? ' · 将满 ' + m.turningAge + ' 岁' : ''}`}</div>
       </div>
       <div class="bd-dayspill">${m.pending ? '<span style="font-size:12px">待填</span>' : `<b>${m.daysUntil}</b><span>天后</span>`}</div>
-      ${canEdit() ? `<div class="bd-acts"><button class="mini" data-bd-edit="${m.id}">✏️</button><button class="mini danger" data-bd-del="${m.id}">🗑</button></div>` : ''}
+      ${canEdit() ? `<div class="bd-acts"><button class="mini" data-bd-edit="${m.id}" title="编辑">${icon('edit')}</button><button class="mini danger" data-bd-del="${m.id}" title="删除">${icon('trash')}</button></div>` : ''}
     </div>`).join('');
 
   // 名单库导入控件
@@ -1914,7 +2038,7 @@ async function loadBirthdays() {
         <select id="bd-import-lib" style="max-width:260px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text)">
           ${lib.map((r) => `<option value="${r.id}">${esc(r.name)}（${r.count} 人）</option>`).join('')}
         </select>
-        <button class="ghost" id="bd-import">📥 导入名单</button>
+        <button class="ghost" id="bd-import">${icon('download')} 导入名单</button>
         <span class="hint" style="margin:0">导入后逐个补填生日即可</span>
       </div>`;
     }
@@ -1922,22 +2046,22 @@ async function loadBirthdays() {
   // 班徽背景管理
   const badgeHtml = canEdit() ? `
     <div class="jl-actions" style="margin-top:6px">
-      <label class="ghost" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px">🖼 上传班徽背景<input id="bd-badge-file" type="file" accept="image/*" style="display:none"></label>
+      <label class="ghost" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px">${icon('image')} 上传班徽背景<input id="bd-badge-file" type="file" accept="image/*" style="display:none"></label>
       ${data.hasBadge ? '<button class="ghost" id="bd-badge-del">移除班徽</button>' : ''}
       <span class="hint" style="margin:0">上传后作为生日祝福墙的水印背景（半透明，不挡文字）</span>
     </div>` : '';
 
   view.innerHTML = `
     <div class="bd-page">
-    <div class="jl-head"><h2>🎂 生日祝福</h2></div>
-    <p class="hint">每一岁都值得庆祝，每一个人都值得被记得 🎈 生日当天这里会变成祝福墙，信息页和浏览器通知也会提醒。</p>
+    <div class="jl-head"><h2>${icon('birthday')} 生日祝福</h2></div>
+    <p class="hint">每一岁都值得庆祝，每一个人都值得被记得。生日当天这里会变成祝福墙，信息页和浏览器通知也会提醒。</p>
     ${todayWrap}
     <div class="panel">
-      <div class="jl-head" style="margin:0 0 4px"><h3 style="margin:0">🎈 生日倒计时（${data.items.filter((x) => !x.isToday).length} 人）</h3></div>
-      ${upCards ? `<div class="bd-grid">${upCards}</div>` : `<div class="empty"><div class="big">🎈</div>还没有成员<br>${canEdit() ? '先在名单库保存班级名单，再从下面一键导入' : '等老师添加成员后，这里就会热闹起来'}</div>`}
+      <div class="jl-head" style="margin:0 0 4px"><h3 style="margin:0">${icon('birthday')} 生日倒计时（${data.items.filter((x) => !x.isToday).length} 人）</h3></div>
+      ${upCards ? `<div class="bd-grid">${upCards}</div>` : `<div class="empty"><div class="big">${icon('birthday')}</div>还没有成员<br>${canEdit() ? '先在名单库保存班级名单，再从下面一键导入' : '等老师添加成员后，这里就会热闹起来'}</div>`}
       ${libHtml}
       ${badgeHtml}
-      ${canEdit() ? '<div class="jl-actions"><button class="primary" id="btn-bd-add">＋ 添加成员</button></div>' : ''}
+      ${canEdit() ? `<div class="jl-actions"><button class="primary" id="btn-bd-add">${icon('plus')} 添加成员</button></div>` : ''}
     </div>
     </div>`;
   setNavBadge('birthday', data.todayCount, { bday: true });
@@ -1990,7 +2114,7 @@ async function loadBirthdays() {
 
 function openBdayModal(m) {
   openModal(`
-    <h2>${m ? '✏️ 编辑成员' : '🎂 添加成员'}</h2>
+    <h2>${m ? `${icon('edit')} 编辑成员` : `${icon('birthday')} 添加成员`}</h2>
     <div class="form">
       <label>姓名</label>
       <input id="bd-name" maxlength="60" value="${m ? esc(m.name) : ''}" placeholder="班级里的每一位成员">
@@ -2027,6 +2151,139 @@ function openBdayModal(m) {
   });
 }
 
+/* ========= 命令面板（Ctrl/⌘+K，参考 Linear 的 cmdk 交互） ========= */
+const CMDK_VIEWS = [
+  ['feed', '信息中心', 'feed'], ['inbox', '等待审核', 'inbox'], ['tasks', '待办任务', 'check'],
+  ['jielong', '活动接龙', 'jielong'], ['draw', '抽签点名', 'draw'], ['birthday', '生日祝福', 'birthday'],
+  ['calendar', '日历详情', 'calendar'], ['files', '文件中心', 'file'], ['stats', '统计接入', 'chart'],
+];
+let cmdkItems = [], cmdkIndex = 0, cmdkSearchTimer = null, cmdkSeq = 0;
+
+function cmdkOpen() {
+  closeModal(); // 已有弹窗（含面板）先关，避免叠层
+  lastFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  $('#modal-root').innerHTML = `
+    <div class="backdrop cmdk-backdrop"><div class="cmdk" role="dialog" aria-modal="true" aria-label="命令面板">
+      <div class="cmdk-head">${icon('search')}<input id="cmdk-q" type="text" placeholder="搜索信息，或输入命令…" autocomplete="off" aria-label="搜索或输入命令"><kbd class="kbd">Esc</kbd></div>
+      <div class="cmdk-list" id="cmdk-list" role="listbox" aria-label="命令与结果"></div>
+    </div></div>`;
+  const bd = $('#modal-root .backdrop');
+  let down = false;
+  bd.addEventListener('mousedown', (e) => { down = e.target === bd; });
+  bd.addEventListener('click', (e) => { if (e.target === bd && down) closeModal(); });
+  const q = $('#cmdk-q');
+  q.addEventListener('input', () => { clearTimeout(cmdkSearchTimer); cmdkSearchTimer = setTimeout(cmdkRender, 180); });
+  q.addEventListener('keydown', cmdkKeys);
+  cmdkIndex = 0;
+  cmdkRender();
+  setTimeout(() => q.focus(), 30);
+}
+
+function cmdkCommands() {
+  const cmds = CMDK_VIEWS.map(([v, label, ic]) => ({
+    iconHtml: icon(ic), label: '转到：' + label, hint: '视图',
+    run: () => { state.view = v; renderView().catch((e) => toast(e.message, 'error')); },
+  }));
+  if (canEdit()) {
+    cmds.push(
+      { iconHtml: icon('plus'), label: '添加信息', hint: '操作', run: () => openMessageModal(null) },
+      { iconHtml: icon('jielong'), label: '发起接龙', hint: '操作', run: () => { state.view = 'jielong'; renderView().catch(() => {}); setTimeout(openJielongCreateModal, 80); } },
+      { iconHtml: icon('draw'), label: '新建签箱', hint: '操作', run: () => { state.view = 'draw'; renderView().catch(() => {}); setTimeout(openDrawCreateModal, 80); } },
+      { iconHtml: icon('birthday'), label: '添加生日成员', hint: '操作', run: () => { state.view = 'birthday'; renderView().catch(() => {}); setTimeout(() => openBdayModal(null), 80); } },
+      { iconHtml: icon('download'), label: '导出 JSON 备份', hint: '操作', run: () => window.open('/api/export') },
+      { iconHtml: icon('calendar'), label: '导出日历（.ics）', hint: '操作', run: () => window.open('/api/calendar.ics') },
+    );
+  }
+  cmds.push(
+    { iconHtml: icon('clock'), label: '切换外观（浅色 / 深色 / 自动）', hint: '操作', run: () => $('#btn-theme').click() },
+    { iconHtml: icon('search'), label: '聚焦搜索框', hint: '操作', run: () => $('#search').focus() },
+  );
+  return cmds;
+}
+
+function cmdkRender() {
+  const q = ($('#cmdk-q')?.value || '').trim();
+  const ql = q.toLowerCase();
+  const cmds = cmdkCommands().filter((c) => !q || c.label.toLowerCase().includes(ql));
+  cmdkItems = cmds.map((c) => ({ ...c, type: 'cmd' }));
+  // 输入 ≥ 2 个字符时异步搜信息（序号防竞态：慢的旧请求不覆盖新结果）
+  if (q.length >= 2) {
+    const seq = ++cmdkSeq;
+    api('/api/messages?q=' + encodeURIComponent(q) + '&limit=8').then((d) => {
+      if (seq !== cmdkSeq || !$('#cmdk-list')) return;
+      const items = d.items.map((it) => ({
+        type: 'msg', it,
+        iconHtml: (CATS[it.category] || CATS.other).icon,
+        label: it.title || (it.content || '').slice(0, 40) || '(无标题)',
+        hint: fmtReceived(it.received_at),
+      }));
+      cmdkItems = cmds.concat(items);
+      cmdkPaint();
+    }).catch(() => { /* 搜索失败时仅显示命令 */ });
+  }
+  cmdkPaint();
+}
+
+function cmdkPaint() {
+  const list = $('#cmdk-list');
+  if (!list) return;
+  if (!cmdkItems.length) {
+    list.innerHTML = '<p class="empty-mini" style="padding:14px;text-align:center">没有匹配的命令或信息</p>';
+    return;
+  }
+  if (cmdkIndex >= cmdkItems.length) cmdkIndex = cmdkItems.length - 1;
+  if (cmdkIndex < 0) cmdkIndex = 0;
+  list.innerHTML = cmdkItems.map((it, i) => `
+    <div class="cmdk-item ${i === cmdkIndex ? 'sel' : ''}" role="option" aria-selected="${i === cmdkIndex}" data-i="${i}">
+      <span class="cmdk-ic">${it.iconHtml}</span>
+      <span class="cmdk-label">${esc(it.label)}</span>
+      <span class="spacer"></span>
+      <span class="cmdk-hint">${esc(it.hint)}</span>
+    </div>`).join('');
+  $$('.cmdk-item', list).forEach((el) => {
+    el.addEventListener('click', () => cmdkRun(+el.dataset.i));
+    el.addEventListener('mousemove', () => {
+      const i = +el.dataset.i;
+      if (cmdkIndex !== i) { cmdkIndex = i; $$('.cmdk-item', list).forEach((x) => { x.classList.toggle('sel', +x.dataset.i === i); x.setAttribute('aria-selected', String(+x.dataset.i === i)); }); }
+    });
+  });
+  const sel = $('.cmdk-item.sel', list);
+  if (sel && sel.scrollIntoView) { try { sel.scrollIntoView({ block: 'nearest' }); } catch (e) { /* 忽略 */ } }
+}
+
+function cmdkKeys(e) {
+  const n = cmdkItems.length;
+  if (e.key === 'Tab') { e.preventDefault(); return; } // 面板只有一个交互元素，Tab 留在输入框里
+  if (e.key === 'ArrowDown' && n) { e.preventDefault(); cmdkIndex = (cmdkIndex + 1) % n; cmdkPaint(); }
+  else if (e.key === 'ArrowUp' && n) { e.preventDefault(); cmdkIndex = (cmdkIndex - 1 + n) % n; cmdkPaint(); }
+  else if (e.key === 'Enter') { e.preventDefault(); cmdkRun(cmdkIndex); }
+}
+
+function cmdkRun(i) {
+  const it = cmdkItems[i];
+  if (!it) return;
+  closeModal();
+  if (it.type === 'msg') {
+    if (canEdit()) api('/api/messages/' + it.it.id).then(openMessageModal).catch((e) => toast(e.message, 'error'));
+    else toast('访客只读，登录后可编辑信息');
+  } else it.run();
+}
+
+/* 快捷键帮助（按 ? 打开） */
+function openHelpModal() {
+  openModal(`
+    <h2>${icon('book')} 键盘快捷键</h2>
+    <div class="help-grid">
+      <kbd class="kbd">/</kbd><span>聚焦搜索框</span>
+      <kbd class="kbd">Ctrl / ⌘ + K</kbd><span>打开命令面板（跳转、操作、搜信息）</span>
+      <kbd class="kbd">N</kbd><span>添加信息（管理员）</span>
+      <kbd class="kbd">1 – 9</kbd><span>切换视图（信息 / 待审 / 待办 / 接龙 / 抽签 / 生日 / 日历 / 文件 / 统计）</span>
+      <kbd class="kbd">Esc</kbd><span>关闭弹窗或面板</span>
+      <kbd class="kbd">Ctrl / ⌘ + Enter</kbd><span>保存正在编辑的信息</span>
+    </div>
+    <div class="modal-foot"><button class="primary" id="btn-cancel">知道了</button></div>`);
+}
+
 /* ========= 视图切换 ========= */
 // 顶栏控件只在适用的页面显示：排序只在信息流有用；统计页不响应群筛选
 function syncTopbar() {
@@ -2036,7 +2293,7 @@ function syncTopbar() {
 async function renderView() {
   jlStopTimer();
   saveFilters();
-  $$('#mainnav button, #tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === state.view));
+  syncNavActive();
   syncTopbar();
   renderChips();
   const view = $('#view');
@@ -2053,8 +2310,8 @@ async function renderView() {
     window.scrollTo(0, 0);
   } catch (e) {
     // 加载失败给出重试入口，而不是卡在"加载中"
-    view.innerHTML = `<div class="empty"><div class="big">😵</div>加载失败：${esc(e.message || '网络错误')}<br>
-      <button class="ghost" id="btn-retry" style="margin-top:12px">🔄 重试</button></div>`;
+    view.innerHTML = `<div class="empty"><div class="big">${icon('alert')}</div>加载失败：${esc(e.message || '网络错误')}<br>
+      <button class="ghost" id="btn-retry" style="margin-top:12px">${icon('refresh')} 重试</button></div>`;
     const btn = $('#btn-retry');
     if (btn) btn.addEventListener('click', () => renderView().catch(() => {}));
   }
@@ -2069,11 +2326,34 @@ async function refresh() {
 }
 
 /* ========= 事件绑定 ========= */
+// 所有导航按钮（侧栏 + 底栏 + 更多面板）统一同步活动态；
+// 「更多」按钮在当前视图属于低频视图时也点亮
+const NAV_SEL = '#mainnav button, #tabbar button, #tabsheet button';
+const MORE_VIEWS = ['inbox', 'calendar', 'files', 'stats'];
+function syncNavActive() {
+  $$(NAV_SEL).forEach((b) => {
+    b.classList.toggle('active', b.dataset.view === state.view);
+    if (b.dataset.view) {
+      if (b.dataset.view === state.view) b.setAttribute('aria-current', 'page');
+      else b.removeAttribute('aria-current');
+    }
+  });
+  const moreBtn = $('#tab-more');
+  if (moreBtn) moreBtn.classList.toggle('active', MORE_VIEWS.includes(state.view));
+  const sheet = $('#tabsheet');
+  if (sheet) sheet.hidden = true;
+}
 function bindEvents() {
-  $$('#mainnav button, #tabbar button').forEach((b) => b.addEventListener('click', () => {
+  $$(NAV_SEL).forEach((b) => b.addEventListener('click', () => {
+    if (!b.dataset.view) return; // 「更多」按钮没有 data-view，只负责开合面板（有自己的监听）
     state.view = b.dataset.view;
     renderView().catch((e) => toast(e.message, 'error'));
   }));
+  const moreBtn = $('#tab-more');
+  if (moreBtn) moreBtn.addEventListener('click', () => {
+    const sheet = $('#tabsheet');
+    if (sheet) sheet.hidden = !sheet.hidden;
+  });
 
   $('#chips').addEventListener('click', (e) => {
     // 点群筛选小标签 → 清除群筛选
@@ -2142,13 +2422,35 @@ function bindEvents() {
   const loginBtn = $('#btn-login');
   if (loginBtn) loginBtn.addEventListener('click', () => { location.href = '/login'; });
 
-  // 按 / 快速聚焦搜索框
+  // 全局键盘快捷键：/ 搜索、Ctrl+K 命令面板、n 新建、1-9 切视图、? 帮助
   document.addEventListener('keydown', (e) => {
-    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
     const tag = (document.activeElement && document.activeElement.tagName) || '';
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
-    e.preventDefault();
-    $('#search').focus();
+    const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(tag);
+    const modalOpen = !!$('#modal-root').children.length;
+
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      cmdkOpen();
+      return;
+    }
+    if (typing || modalOpen || e.ctrlKey || e.metaKey || e.altKey) return;
+
+    if (e.key === '/') {
+      e.preventDefault();
+      $('#search').focus();
+    } else if (e.key === '?') {
+      e.preventDefault();
+      openHelpModal();
+    } else if ((e.key === 'n' || e.key === 'N') && canEdit()) {
+      e.preventDefault();
+      openMessageModal(null);
+    } else if (/^[1-9]$/.test(e.key)) {
+      const v = CMDK_VIEWS[Number(e.key) - 1];
+      if (v && v[0] !== state.view) {
+        state.view = v[0];
+        renderView().catch((e2) => toast(e2.message, 'error'));
+      }
+    }
   });
 
   $('#view').addEventListener('click', async (e) => {
@@ -2239,9 +2541,13 @@ function applyTheme(mode) {
   localStorage.setItem('infohub-theme', mode);
   const btn = $('#btn-theme');
   if (btn) {
-    btn.textContent = mode === 'auto' ? '🌗' : t === 'dark' ? '🌙' : '☀️';
+    const ic = mode === 'auto' ? icon('clock') : t === 'dark' ? icon('moon') : icon('sun');
+    btn.innerHTML = ic;
     btn.title = '外观：' + (mode === 'auto' ? '自动（19:00–次日 7:00 深色，当前' + (t === 'dark' ? '深色' : '浅色') + '）' : mode === 'dark' ? '深色' : '浅色') + '，点击切换';
   }
+  // 手机状态栏 / 浏览器标签框颜色跟随主题
+  const mt = document.querySelector('meta[name="theme-color"]');
+  if (mt) mt.content = t === 'dark' ? '#141922' : '#4f6ef2';
 }
 function onBellClick() {
   localStorage.setItem('infohub-notif-dismissed', '1');
@@ -2266,7 +2572,10 @@ function onBellClick() {
 }
 function setupBellState() {
   const btn = $('#btn-bell');
-  if (btn) btn.textContent = ('Notification' in window && Notification.permission === 'granted') ? '🔔' : '🔕';
+  if (!btn) return;
+  const dot = $('#bell-badge'); // updateBadge 挂的角标在按钮里，换图标时先摘下再还回
+  btn.innerHTML = ('Notification' in window && Notification.permission === 'granted') ? icon('bell') : icon('bell-off');
+  if (dot) btn.appendChild(dot);
 }
 const BASE_TITLE = document.title; // 页面原始标题
 async function updateBadge() {
@@ -2336,10 +2645,12 @@ function initExtras() {
   setInterval(() => {
     if ((localStorage.getItem('infohub-theme') || 'auto') === 'auto') applyTheme('auto');
   }, 10 * 60 * 1000);
-  // 弹窗里有没保存的内容时，关闭/刷新页面先提醒
+  // 弹窗里有没保存的内容时，关闭/刷新页面先提醒（覆盖信息、接龙、签箱、生日等所有表单弹窗）
   window.addEventListener('beforeunload', (e) => {
-    const c = $('#f-content');
-    if (c && c.value.trim().length > 3) { e.preventDefault(); e.returnValue = ''; }
+    const modal = $('.modal');
+    const dirtyFields = modal && $$('.modal input[type=text], .modal input[type=number], .modal input[type=datetime-local], .modal input[type=password], .modal textarea', modal)
+      .some((el) => el.value.trim());
+    if (state.pendingFiles.length > 0 || dirtyFields) { e.preventDefault(); e.returnValue = ''; }
   });
   $('#btn-bell').addEventListener('click', onBellClick);
   setupBellState();

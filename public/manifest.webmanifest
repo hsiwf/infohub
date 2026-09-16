@@ -8,5 +8,8 @@
   "theme_color": "#4f6ef2",
   "icons": [
     { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ],
+  "shortcuts": [
+    { "name": "快速记录", "short_name": "记录", "url": "/quick", "description": "粘贴通知原文，自动识别分类与截止时间" }
   ]
 }

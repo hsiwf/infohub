@@ -1,0 +1,47 @@
+name: 🐛 Bug 反馈
+description: 报告一个可以复现的问题
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么？
+      description: 请描述操作步骤、预期行为和实际行为。
+    validations:
+      required: true
+  - type: dropdown
+    id: module
+    attributes:
+      label: 涉及模块
+      options:
+        - 信息中心 / 待办 / 日历
+        - 活动接龙
+        - 抽签点名
+        - 生日祝福
+        - QQ 机器人（OneBot）
+        - 文件 / 附件
+        - 备份 / 导入导出
+        - 部署 / 启动
+        - 其他
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统
+      placeholder: 如 Windows 11 / Ubuntu 24.04 / 群晖 DSM
+    validations:
+      required: true
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js 版本
+      description: 运行 node -v 的输出（需 ≥ 22.5）
+      placeholder: 如 v22.14.0
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志或截图
+      description: data/logs/server.log 的相关片段或界面截图

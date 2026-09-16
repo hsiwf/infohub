@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 使用 Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: 语法检查
+        run: |
+          node --check server.js
+          node --check db.js
+          node --check test.js
+          node --check lib/smartparse.js
+          node --check lib/jielong.js
+          node --check lib/multipart.js
+          node --check public/js/app.js
+
+      - name: 启动服务
+        run: |
+          node server.js &
+          sleep 3
+
+      - name: 端到端自检
+        run: node test.js
