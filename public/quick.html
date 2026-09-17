@@ -80,7 +80,7 @@ async function loadGroups(){
   }catch(e){}
 }
 
-let parseTimer=null;
+let parseTimer=null,parseSeq=0;
 $('#q-text').addEventListener('keydown',(e)=>{
   if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();$('#q-save').click();}
 });
@@ -90,8 +90,10 @@ $('#q-text').addEventListener('input',()=>{
     const v=$('#q-text').value.trim();
     const box=$('#q-parsed');
     if(!v){box.style.display='none';return;}
+    const seq=++parseSeq;
     try{
       const r=await fetch('/api/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:v})}).then(r=>r.json());
+      if(seq!==parseSeq)return;
       const p=r.parsed;
       box.style.display='block';
       box.innerHTML=`识别为：<b>${CATL[p.category]||p.category}</b>${p.deadline?' · 截止 '+esc(p.deadline):''}${p.priority?' · 重要':''}${p.title?'<br>标题：'+esc(p.title):''}`;

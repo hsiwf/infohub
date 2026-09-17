@@ -1,6 +1,6 @@
 # 贡献指南
 
-感谢关注信息汇总（InfoHub）！欢迎通过 Issue 反馈问题、通过 Pull Request 贡献代码。
+欢迎通过 Issue 反馈问题，或提交 Pull Request。
 
 ## 提交 Issue
 
@@ -37,4 +37,4 @@ node server.js     # http://localhost:5757，首次启动自动创建 data/
 INFOHUB_DEBUG=1 node server.js   # 打印 API 请求日志
 ```
 
-目录结构与模块说明见 [README](README.md#-自检与开发)。
+目录结构与模块说明见 [README](README.md#自检与开发)。
