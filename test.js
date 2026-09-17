@@ -217,11 +217,12 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   r = await post('/api/import?force=1', {
     groups: [],
     messages: [{ id: 9900, title: '导入附件测试', content: '导入附件测试内容' }],
-    attachments: [{ message_id: 9900, orig_name: '导入附件测试.txt', stored_name: '202601/0123456789abcdef.txt', size: 3, mime: 'text/plain', created_at: '2030-01-01 09:00' }],
+    attachments: [{ message_id: 9900, orig_name: '导入附件测试.txt', stored_name: '202601/0123456789abcdef.txt', size: 3, mime: 'text/plain', views: 3, downloads: 5, created_at: '2030-01-01 09:00' }],
     jielongs: [{ id: 'jlimport1', title: '导入接龙测试', description: '', deadline: '2030-01-01 10:00', roster: '[{"id":"2023001","name":"张三"}]', fields: '[]', allow_outside: 1, closed: 0, admin_token: 'importtoken', created_at: 1700000000000 }],
     jielongEntries: [
       { jielong_id: 'jlimport1', rid: 0, sid: '2023001', name: '张三', values_json: '{"f0":"参加"}', remark: '', outside: 0, time: 1700000001000, seq: 0 },
       { jielong_id: '不存在的接龙', rid: null, sid: '', name: '孤儿记录', values_json: '{}', remark: '', outside: 1, time: 1700000002000, seq: 1 },
+      { jielong_id: 'jlimport1', rid: null, sid: '', name: '超长记录', values_json: '{"f0":"' + '长'.repeat(6000) + '"}', remark: '', outside: 0, time: 1700000003000, seq: 2 },
     ],
     draws: [{ id: 'dwimport1', title: '导入签箱测试', roster: '[{"id":"2023001","name":"张三"}]', per_draw: 1, created_at: 1700000000000 }],
     drawRounds: [{ draw_id: 'dwimport1', picked: '[{"id":"2023001","name":"张三"}]', count: 1, time: 1700000001000 }],
@@ -230,7 +231,8 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   });
   ok('force 导入恢复附件与接龙', r.status === 200 && r.body.attachments === 1 && r.body.jielongs === 1 && r.body.jielongEntries === 1 && r.body.draws === 1 && r.body.drawRounds === 1 && r.body.rosters === 1 && r.body.birthdays === 1, JSON.stringify(r.body));
   r = await j('/api/files?q=' + encodeURIComponent('导入附件测试.txt'));
-  ok('导入的附件出现在文件中心', r.status === 200 && r.body.items.length === 1, JSON.stringify(r.body));
+  const impAtt = (r.body.items || [])[0] || {};
+  ok('导入的附件出现在文件中心（阅读/下载计数保留）', r.status === 200 && r.body.items.length === 1 && impAtt.views === 3 && impAtt.downloads === 5, JSON.stringify(r.body));
   r = await j('/api/jielong/jlimport1');
   ok('导入的接龙可访问（含记录）', r.status === 200 && r.body.title === '导入接龙测试' && r.body.done === 1 && r.body.total === 1 && r.body.entries[0].values.f0 === '参加', JSON.stringify(r.body));
   r = await j('/api/jielong/jlimport1?t=importtoken', { method: 'DELETE' });
@@ -328,6 +330,10 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
     const s = await fetch(BASE + p2);
     ok('静态资源 ' + p2, s.status === 200);
   }
+  const pageHome = await fetch(BASE + '/');
+  ok('页面带 X-Frame-Options / Referrer-Policy', pageHome.headers.get('x-frame-options') === 'DENY' && pageHome.headers.get('referrer-policy') === 'same-origin');
+  const badseg = await fetch(BASE + '/api/messages/xx%zz');
+  ok('畸形路由参数返回 400（非 500）', badseg.status === 400);
   const lh = await fetch(BASE + '/login');
   ok('登录页可访问', lh.status === 200);
   r = await fetch(BASE + '/j/dut9dtk');

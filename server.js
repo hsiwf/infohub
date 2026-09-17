@@ -275,7 +275,10 @@ function matchRoute(method, pathname) {
     const params = {};
     for (let i = 0; i < segs.length; i++) {
       const p = r.parts[i];
-      if (p.startsWith(':')) params[p.slice(1)] = decodeURIComponent(segs[i]);
+      if (p.startsWith(':')) {
+        try { params[p.slice(1)] = decodeURIComponent(segs[i]); }
+        catch (e) { throw new HttpError(400, '链接格式错误'); } // 解码失败属客户端错误，返回 400 而非 500
+      }
       else if (p !== segs[i]) continue outer;
     }
     return { r, params };
@@ -295,11 +298,26 @@ function attachItems(rows) {
 }
 const MSG_SELECT = `SELECT m.*, g.name AS group_name, g.color AS group_color, g.platform AS group_platform
   FROM messages m LEFT JOIN groups g ON g.id = m.group_id`;
+// 截止时间比较口径：纯日期自动补到当天 23:59，空值返回 NULL（列表筛选 / 统计 / 日历导出共用）
+const DEADLINE_EXPR = `(CASE WHEN m.deadline IS NULL OR m.deadline = '' THEN NULL WHEN length(m.deadline) = 10 THEN m.deadline || ' 23:59' ELSE m.deadline END)`;
+// 浏览器内联预览白名单：仅位图与 PDF；html/svg 等可执行内容一律强制下载（防同源脚本）
+const PREVIEWABLE_RE = /^(image\/(png|jpeg|gif|webp|bmp)|application\/pdf)$/;
 function getMessage(id) {
   const row = db.prepare(`${MSG_SELECT} WHERE m.id = ?`).get(id);
   if (!row) throw new HttpError(404, '信息不存在');
   attachItems([row]);
   return row;
+}
+// 智能解析 + 入库：webhook 接入、机器人自动收录、待审核收录三条路径共用同一口径
+function insertParsedMessage(content, { groupId = null, sender = '', received } = {}) {
+  const parsed = smartParse(content);
+  const info = db.prepare(`INSERT INTO messages
+      (title, content, category, status, group_id, sender_name, received_at, deadline, priority, tags, created_at, updated_at)
+      VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(parsed.title || content.slice(0, 40), content, parsed.category, groupId,
+      sender || parsed.sender || '', received || nowStr(), parsed.deadline || '',
+      parsed.priority ? 1 : 0, (parsed.tags || []).join(','), nowStr(), nowStr());
+  return { id: Number(info.lastInsertRowid), parsed };
 }
 
 /* ---------- 健康检查 / 配置 ---------- */
@@ -413,10 +431,9 @@ route('GET', '/api/messages', (ctx) => {
   if (st === 'open' || st === 'done') { where.push('m.status = ?'); args.push(st); }
   // 截止时间范围筛选（due=after 未逾期 / due=overdue 已逾期）：
   // 大数据量下待办/日历只取相关区间，避免一年前的旧逾期把近期事项挤出分页
-  const DLX = `(CASE WHEN m.deadline IS NULL OR m.deadline = '' THEN NULL WHEN length(m.deadline) = 10 THEN m.deadline || ' 23:59' ELSE m.deadline END)`;
   const due = q.get('due');
-  if (due === 'after') { where.push(DLX + ' >= ?'); args.push(nowStr()); }
-  else if (due === 'overdue') { where.push(DLX + ' < ?'); args.push(nowStr()); }
+  if (due === 'after') { where.push(DEADLINE_EXPR + ' >= ?'); args.push(nowStr()); }
+  else if (due === 'overdue') { where.push(DEADLINE_EXPR + ' < ?'); args.push(nowStr()); }
   const sort = q.get('sort') === 'deadline' ? 'deadline' : q.get('sort') === 'deadline_desc' ? 'deadline_desc' : 'time';
   const orderBy = sort === 'deadline'
     ? 'ORDER BY (CASE WHEN m.deadline IS NULL OR m.deadline = \'\' THEN 1 ELSE 0 END) ASC, m.deadline ASC, m.pinned DESC'
@@ -571,8 +588,8 @@ route('GET', '/api/attachments/:id/download', (ctx) => {
   if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
   const a = db.prepare('SELECT * FROM attachments WHERE id = ?').get(id);
   if (!a) throw new HttpError(404, '附件不存在');
-  // 仅图片和 PDF 允许浏览器内联预览；其余（含 html/svg 等可执行内容）一律强制下载，避免同源脚本风险
-  const previewable = /^(image\/(png|jpeg|gif|webp|bmp)|application\/pdf)$/.test(a.mime || '');
+  // 仅图片和 PDF 允许浏览器内联预览（白名单见 PREVIEWABLE_RE）；其余一律强制下载，避免同源脚本风险
+  const previewable = PREVIEWABLE_RE.test(a.mime || '');
   const forceDl = ctx.query.get('dl') === '1';
   const inline = previewable && !forceDl;
   // 计数规则：
@@ -593,7 +610,7 @@ route('GET', '/api/attachments/:id/raw', (ctx) => {
   if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
   const a = db.prepare('SELECT * FROM attachments WHERE id = ?').get(id);
   if (!a) throw new HttpError(404, '附件不存在');
-  const previewable = /^(image\/(png|jpeg|gif|webp|bmp)|application\/pdf)$/.test(a.mime || '');
+  const previewable = PREVIEWABLE_RE.test(a.mime || '');
   serveAttachment(ctx, a, { inline: previewable, cache: previewable });
 });
 
@@ -646,7 +663,6 @@ route('POST', '/api/ingest', (ctx) => {
   const b = ctx.body || {};
   const text = sField(b.text, 20000);
   if (!text) throw new HttpError(400, 'text 不能为空');
-  const parsed = smartParse(text);
 
   let gid = null;
   const groupName = sField(b.group || b.group_name, 60);
@@ -659,14 +675,12 @@ route('POST', '/api/ingest', (ctx) => {
       gid = Number(info.lastInsertRowid);
     } else gid = g.id;
   }
-  const received = cleanDT(b.received_at) || nowStr();
-  const info = db.prepare(`INSERT INTO messages
-      (title, content, category, status, group_id, sender_name, received_at, deadline, priority, tags, created_at, updated_at)
-      VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(parsed.title || text.slice(0, 40), text, parsed.category, gid,
-      sField(b.sender, 60) || parsed.sender || '', received, parsed.deadline || '',
-      parsed.priority ? 1 : 0, (parsed.tags || []).join(','), nowStr(), nowStr());
-  return { ok: true, id: Number(info.lastInsertRowid), parsed };
+  const { id, parsed } = insertParsedMessage(text, {
+    groupId: gid,
+    sender: sField(b.sender, 60),
+    received: cleanDT(b.received_at) || nowStr(),
+  });
+  return { ok: true, id, parsed };
 });
 
 /* ---------- OneBot 11 HTTP POST 上报入口（QQ 群消息自动进站） ---------- */
@@ -755,13 +769,8 @@ function handleOnebotReport(ctx) {
     if (dup) return { ok: true, deduped: true, id: dup.id };
   }
 
-  const parsed = smartParse(content);
-  const info = db.prepare(`INSERT INTO messages
-      (title, content, category, status, group_id, sender_name, received_at, deadline, priority, tags, created_at, updated_at)
-      VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(parsed.title || content.slice(0, 40), content, parsed.category, gidInternal, sender,
-      received, parsed.deadline || '', parsed.priority ? 1 : 0, (parsed.tags || []).join(','), nowStr(), nowStr());
-  return { ok: true, id: Number(info.lastInsertRowid), parsed };
+  const { id, parsed } = insertParsedMessage(content, { groupId: gidInternal, sender, received });
+  return { ok: true, id, parsed };
 }
 route('POST', '/api/onebot/report', handleOnebotReport);
 route('POST', '/api/onebot', handleOnebotReport);
@@ -771,14 +780,13 @@ function acceptInboxItem(id) {
   const item = db.prepare('SELECT * FROM inbox WHERE id = ?').get(id);
   if (!item) throw new HttpError(404, '待审核消息不存在');
   const gid = item.qq_gid ? bindOnebotGroup(item.qq_gid, item.group_name || `QQ群 ${item.qq_gid}`) : null;
-  const parsed = smartParse(item.content);
-  const info = db.prepare(`INSERT INTO messages
-      (title, content, category, status, group_id, sender_name, received_at, deadline, priority, tags, created_at, updated_at)
-      VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(parsed.title || item.content.slice(0, 40), item.content, parsed.category, gid, item.sender_name,
-      item.received_at || nowStr(), parsed.deadline || '', parsed.priority ? 1 : 0, (parsed.tags || []).join(','), nowStr(), nowStr());
+  const { id: mid } = insertParsedMessage(item.content, {
+    groupId: gid,
+    sender: item.sender_name,
+    received: item.received_at || nowStr(),
+  });
   db.prepare('DELETE FROM inbox WHERE id = ?').run(id);
-  return Number(info.lastInsertRowid);
+  return mid;
 }
 route('GET', '/api/inbox', (ctx) => {
   const limit = Math.min(Number(ctx.query.get('limit')) || 300, 500);
@@ -1407,8 +1415,9 @@ route('POST', '/api/import', (ctx) => {
   if (!Array.isArray(b.groups) || !Array.isArray(b.messages)) {
     throw new HttpError(400, '备份文件格式不对（缺少 groups / messages）');
   }
-  const exist = db.prepare('SELECT COUNT(*) AS c FROM messages').get().c
-    + db.prepare('SELECT COUNT(*) AS c FROM groups').get().c;
+  // 非空库一律拒绝（force=1 除外）：检查全部业务表，防止只有名单/生日等数据时被误判为空库而重复导入
+  const exist = ['messages', 'groups', 'attachments', 'inbox', 'jielongs', 'jielong_entries', 'draws', 'draw_rounds', 'rosters', 'birthdays']
+    .reduce((sum, t) => sum + db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get().c, 0);
   if (exist > 0 && ctx.query.get('force') !== '1') {
     throw new HttpError(400, '当前已有数据，为防止重复导入被拒绝。请先用空数据文件夹再导入');
   }
@@ -1449,17 +1458,18 @@ route('POST', '/api/import', (ctx) => {
       if (m.id != null) mmap[String(m.id)] = Number(info.lastInsertRowid);
       n++;
     }
-    // 恢复附件记录（附件文件本身不在 JSON 里，需随 data/ 目录整体迁移）
+    // 恢复附件记录（附件文件本身不在 JSON 里，需随 data/ 目录整体迁移；阅读/下载计数随记录一并保留）
     if (Array.isArray(b.attachments)) {
-      const insA = db.prepare(`INSERT INTO attachments (message_id, orig_name, stored_name, size, mime, created_at)
-          VALUES (?, ?, ?, ?, ?, ?)`);
+      const insA = db.prepare(`INSERT INTO attachments (message_id, orig_name, stored_name, size, mime, views, downloads, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
       for (const a of b.attachments) {
         const mid = mmap[String(a.message_id)];
         if (!mid) continue; // 对应信息不在本次备份中，跳过
         const stored = sField(a.stored_name, 200).replace(/\\/g, '/');
         if (!stored || stored.includes('..') || stored.startsWith('/')) continue;
         insA.run(mid, sField(a.orig_name, 200), stored, Math.max(0, Number(a.size) || 0),
-          sField(a.mime, 100), cleanDT(a.created_at) || nowStr());
+          sField(a.mime, 100), Math.max(0, Number(a.views) || 0), Math.max(0, Number(a.downloads) || 0),
+          cleanDT(a.created_at) || nowStr());
         nAtt++;
       }
     }
@@ -1494,11 +1504,14 @@ route('POST', '/api/import', (ctx) => {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       for (const e of b.jielongEntries) {
         if (!jlIds.has(String(e.jielong_id || ''))) continue; // 对应接龙不在本次备份中，跳过
+        // 填写内容非法或超限（合法上限约 2.6KB）整条跳过：硬截断会产生非法 JSON，读取时静默丢内容
+        const valsJson = e.values_json == null ? '{}' : asJsonText(e.values_json, null);
+        if (valsJson == null || valsJson.length > 5000) continue;
         insJE.run(String(e.jielong_id),
           Number.isInteger(e.rid) ? e.rid : null,
           sField(e.sid, 40),
           sField(e.name, 60),
-          asJsonText(e.values_json, '{}').slice(0, 5000),
+          valsJson,
           sField(e.remark, 300),
           e.outside ? 1 : 0,
           Math.max(0, Number(e.time) || 0),
@@ -1568,10 +1581,9 @@ route('POST', '/api/import', (ctx) => {
 const CAT_LABEL = { notice: '通知', task: '任务', activity: '活动', file: '文件', other: '其他' };
 route('GET', '/api/calendar.ics', (ctx) => {
   // 只导出未逾期事项：大数据量下按截止升序的前 500 条早已是陈年旧账
-  const DLX = `(CASE WHEN m.deadline IS NULL OR m.deadline = '' THEN NULL WHEN length(m.deadline) = 10 THEN m.deadline || ' 23:59' ELSE m.deadline END)`;
   const rows = db.prepare(`SELECT m.id, m.title, m.content, m.category, m.deadline
       FROM messages m
-      WHERE m.status = 'open' AND m.deadline IS NOT NULL AND m.deadline <> '' AND ${DLX} >= ?
+      WHERE m.status = 'open' AND m.deadline IS NOT NULL AND m.deadline <> '' AND ${DEADLINE_EXPR} >= ?
       ORDER BY m.deadline LIMIT 500`).all(nowStr());
   const icsEsc = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
   const stamp = nowStr().replace(/[-: ]/g, '') + '00';
@@ -1617,17 +1629,16 @@ route('POST', '/api/similar', (ctx) => {
 /* ---------- 统计 ---------- */
 route('GET', '/api/stats', () => {
   const NOW = `strftime('%Y-%m-%d %H:%M','now','localtime')`;
-  const DL = `(CASE WHEN length(deadline) = 10 THEN deadline || ' 23:59' ELSE deadline END)`;
   const total = db.prepare('SELECT COUNT(*) AS c FROM messages').get().c;
   const week = db.prepare(`SELECT COUNT(*) AS c FROM messages
       WHERE received_at >= strftime('%Y-%m-%d %H:%M','now','localtime','-6 days')`).get().c;
   const openTasks = db.prepare(`SELECT COUNT(*) AS c FROM messages WHERE status = 'open' AND category = 'task'`).get().c;
-  const overdue = db.prepare(`SELECT COUNT(*) AS c FROM messages
-      WHERE status = 'open' AND deadline IS NOT NULL AND deadline <> '' AND ${DL} < ${NOW}`).get().c;
+  // DEADLINE_EXPR 对空截止返回 NULL，比较自然为假，无需再排除空值
+  const overdue = db.prepare(`SELECT COUNT(*) AS c FROM messages m
+      WHERE m.status = 'open' AND ${DEADLINE_EXPR} < ${NOW}`).get().c;
   const upcoming = db.prepare(`${MSG_SELECT}
-      WHERE m.status = 'open' AND m.deadline IS NOT NULL AND m.deadline <> ''
-      AND ${DL.replace(/deadline/g, 'm.deadline')} >= ${NOW}
-      AND ${DL.replace(/deadline/g, 'm.deadline')} <= strftime('%Y-%m-%d %H:%M','now','localtime','+7 days')
+      WHERE m.status = 'open' AND ${DEADLINE_EXPR} >= ${NOW}
+      AND ${DEADLINE_EXPR} <= strftime('%Y-%m-%d %H:%M','now','localtime','+7 days')
       ORDER BY m.deadline LIMIT 8`).all();
   const byGroup = db.prepare(`SELECT g.id, g.name, g.platform, g.color, COUNT(m.id) AS count
       FROM groups g LEFT JOIN messages m ON m.group_id = g.id
@@ -1678,7 +1689,13 @@ function serveStatic(req, res, pathname) {
     else { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Not Found'); return; }
   }
   const ext = path.extname(fp).toLowerCase();
-  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+  // 基础安全头（OWASP Secure Headers）：页面禁止被第三方嵌入（防点击劫持），引用地址不外泄到外站
+  res.writeHead(200, {
+    'Content-Type': MIME[ext] || 'application/octet-stream',
+    'Cache-Control': 'no-cache',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'same-origin',
+  });
   if (req.method === 'HEAD') { res.end(); return; }
   fs.createReadStream(fp).pipe(res);
 }
@@ -1756,10 +1773,11 @@ server.on('clientError', (err, socket) => {
 process.on('uncaughtException', (e) => { log('未捕获异常（已忽略，继续运行）:', (e && e.stack) || String(e)); });
 process.on('unhandledRejection', (e) => { log('未处理的 Promise 拒绝:', (e && (e.stack || e.message)) || String(e)); });
 
-// 过期会话每小时批量清一次（登录校验里也有惰性清除，这里防内存缓慢增长）
+// 过期会话 / 失败限速记录每小时批量清一次（登录校验里也有惰性清除，这里防内存缓慢增长）
 setInterval(() => {
   const now = Date.now();
   for (const [k, t] of sessions) if (now - t > SESSION_TTL) sessions.delete(k);
+  for (const [ip, rec] of loginFails) if (now - rec.t > 10 * 60 * 1000) loginFails.delete(ip); // 10 分钟无新失败即清
 }, 60 * 60 * 1000);
 // systemd / Docker 停止时优雅关闭：先停接新连接，3 秒后强制退出兜底
 process.on('SIGTERM', () => {

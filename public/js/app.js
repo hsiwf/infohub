@@ -10,7 +10,6 @@ const ICON_PATHS = {
   'inbox': '<rect x="3" y="4" width="18" height="15" rx="2"/><path d="M3 10h5l2 3h4l2-3h5"/>',
   'feed': '<path d="M4 4h13a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M16 4v16"/><path d="M7 9h5M7 13h5M7 17h3"/>',
   'check': '<path d="M20 6 9 17l-5-5"/>',
-  'check-circle': '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
   'jielong': '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="4" cy="18" r="1.6"/>',
   'draw': '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M9 3v6M15 3v6"/><path d="m9 14 2 2 4-4"/>',
   'birthday': '<path d="M4 21h16"/><path d="M6 21v-5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v5"/><path d="M12 14v-4"/><path d="M10.5 7.5C10.5 6.5 12 5 12 5s1.5 1.5 1.5 2.5a1.5 1.5 0 0 1-3 0z"/>',
@@ -24,7 +23,6 @@ const ICON_PATHS = {
   'bell': '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
   'bell-off': '<path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.9 17.9 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><path d="m2 2 20 20"/>',
   'lock': '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
-  'lock-open': '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.6-1.5"/>',
   'logout': '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
   'plus': '<path d="M12 5v14M5 12h14"/>',
   'edit': '<path d="M17 3a2.8 2.8 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>',
@@ -38,17 +36,14 @@ const ICON_PATHS = {
   'archive': '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v11h14V9"/><path d="M10 13h4"/>',
   'video': '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="m16 10 6-3v10l-6-3z"/>',
   'audio': '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
-  'mail': '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="m2 7 10 7L22 7"/>',
   'refresh': '<path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/>',
   'link': '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
   'settings': '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h.1a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   'users': '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/>',
   'copy': '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
   'external': '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/>',
-  'send': '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>',
   'alert': '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
   'pin': '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>',
-  'external-link': '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/>',
   'loader': '<path d="M21 12a9 9 0 1 1-6.2-8.6"/>',
   'star': '<path d="m12 3 3 6.2 6.9 1-5 4.9 1.2 6.9-6.1-3.2L5.9 22 7 15.1 2 10l6.9-1z"/>',
   'download': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
@@ -57,7 +52,6 @@ const ICON_PATHS = {
   'sparkles': '<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/>',
   'undo': '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/>',
   'eye': '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
-  'link-off': '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
   'dots': '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   'message': '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   'wechat': '<path d="M3 5.5A2.5 2.5 0 0 1 5.5 3h6A2.5 2.5 0 0 1 14 5.5v3a2.5 2.5 0 0 1-2.5 2.5H8l-3.2 3V11h.7A2.5 2.5 0 0 1 3 8.5z"/><path d="M11 10.2c.6-.1 1.3-.2 2-.2 3.3 0 6 1.9 6 4.2 0 1.2-.7 2.3-1.8 3.1l.5 1.9-2.3-1.2c-.7.2-1.5.3-2.4.3-1 0-2-.2-2.8-.5"/>',
@@ -208,7 +202,6 @@ const state = {
   showDone: false,
   total: 0,
   groups: [],
-  cache: {},
   editingId: null,
   pendingFiles: [],
   existingAtts: [],
@@ -374,7 +367,6 @@ async function loadFeed(append = false) {
   params.set('offset', String(offset));
   const data = await api('/api/messages?' + params);
   state.total = data.total;
-  data.items.forEach((it) => { state.cache[it.id] = it; });
   const more = $('#btn-more');
   if (more) more.closest('.morewrap').remove();
 
@@ -388,7 +380,6 @@ async function loadFeed(append = false) {
     dp.delete('offset');
     try {
       const d = await api('/api/messages?' + dp);
-      d.items.forEach((it) => { state.cache[it.id] = it; });
       if (d.items.length) {
         doneSection = `<div id="done-sec"><div class="feeddivider">${icon('check')} 已完成（${d.total}${d.total > d.items.length ? '，显示最近 ' + d.items.length + ' 条' : ''}）</div>${d.items.map(cardHTML).join('')}</div>`;
       }
@@ -561,7 +552,6 @@ async function loadTasks() {
   ]);
   const overdueTotal = odRes.total || 0;
   const items = odRes.items.concat(upRes.items, tdRes.items.filter((it) => !it.deadline));
-  items.forEach((it) => { state.cache[it.id] = it; });
   if (!items.length) {
     view.innerHTML = `<div class="empty"><div class="big">${icon('check')}</div>没有待办任务，太棒了！<br>任务类信息或带截止时间的信息会出现在这里</div>`;
     return;
@@ -610,7 +600,6 @@ async function loadCalendar() {
   for (const it of data.items) {
     if (!it.deadline) continue;
     (state.calByDay[it.deadline.slice(0, 10)] ||= []).push(it);
-    state.cache[it.id] = it;
   }
   renderCalendar();
 }
@@ -744,8 +733,7 @@ function statCard(lab, num, cls = '') {
 async function loadStats() {
   const view = $('#view');
   view.innerHTML = '<div class="loading">加载中…</div>';
-  const [st, me] = await Promise.all([api('/api/stats'), api('/api/me').catch(() => ({ authRequired: false, loggedIn: true }))]);
-  state.me = me;
+  const st = await api('/api/stats'); // 会话状态由启动时的 loadMe 提供，这里不重复请求
   const editable = canEdit();
   const cfg = editable ? await api('/api/config').catch(() => null) : null;
   const maxG = Math.max(1, ...st.byGroup.map((g) => g.count));
@@ -851,7 +839,7 @@ async function loadStats() {
       每次启动和跨天时会自动备份到 data/backups/（保留最近 14 份）；也可以导出 JSON。</p>
       ${editable ? `<button class="ghost" id="btn-export">${icon('download')} 导出 JSON 备份</button>
       <label class="importwrap">${icon('upload')} 导入 JSON 备份<input id="import-file" type="file" accept=".json,application/json"></label>` : ''}
-      ${me.authRequired ? (me.loggedIn
+      ${state.me.authRequired ? (state.me.loggedIn
         ? '<button class="ghost" id="btn-logout" style="margin-left:10px">' + icon('logout') + ' 退出登录</button>'
         : '<a class="ghost" href="/login" style="margin-left:10px;text-decoration:none;display:inline-block">' + icon('lock') + ' 管理员登录</a>') : ''}
       <p class="hint">导入建议只在空数据时使用（已有数据时服务器会拒绝，防止重复）。JSON 备份会恢复附件记录与接龙数据，但不含附件文件本身——完整备份请复制整个 data/ 文件夹。</p>
@@ -1079,7 +1067,7 @@ function openMessageModal(item) {
   });
 
   // 重复录入检测：原文输入停顿后查相似信息
-  let dupTimer = null;
+  let dupTimer = null, dupSeq = 0;
   $('#f-content').addEventListener('input', () => {
     clearTimeout(dupTimer);
     dupTimer = setTimeout(async () => {
@@ -1087,8 +1075,10 @@ function openMessageModal(item) {
       if (!box) return;
       const text = $('#f-content').value.trim();
       if (text.length < 8) { box.style.display = 'none'; return; }
+      const seq = ++dupSeq; // 序号防竞态：慢的旧响应不覆盖新结果（与命令面板同一模式）
       try {
         const { items } = await api('/api/similar', { method: 'POST', body: { text, excludeId: state.editingId } });
+        if (seq !== dupSeq) return;
         if (!items.length) { box.style.display = 'none'; return; }
         box.style.display = 'block';
         box.innerHTML = `${icon('alert')} 可能已录入过相似信息（避免重复记录，可点击查看）：<br>` +
@@ -1307,7 +1297,7 @@ function openJlQrModal(url) {
 }
 
 const jlStatusBadge = (a) => {
-  if (a.manuallyClosed || a.closed) return '<span class="jl-badge off">已停止</span>';
+  if (a.closed) return '<span class="jl-badge off">已停止</span>';
   if (a.closedNow) return '<span class="jl-badge off">已截止</span>';
   return '<span class="jl-badge on">进行中</span>';
 };
@@ -1407,7 +1397,7 @@ async function loadJielongDetail() {
     <button class="ghost jl-back" id="jl-back">← 返回接龙列表</button>
     ${state.jlBanner ? `<div class="jl-banner">${icon('check')} 接龙创建成功！把「学生链接」发到班群即可；本页可随时查看进度、复制提醒文案。<b>管理入口保存在本浏览器</b>，换设备请收藏带令牌的管理链接。</div>` : ''}
     <div class="panel">
-      <div class="jl-head"><h2>${esc(a.title)}</h2>${jlStatusBadge({ ...a, manuallyClosed: a.closed })}</div>
+      <div class="jl-head"><h2>${esc(a.title)}</h2>${jlStatusBadge(a)}</div>
       ${a.description ? `<p class="jl-desc">${esc(a.description)}</p>` : ''}
       <div class="jl-meta">${a.deadline ? `${icon('clock')} 截止 ${esc(a.deadline)}` : '不限截止时间'}<span>发起于 ${jlFmtTime(a.createdAt)}</span>
         ${a.closedNow ? '<span class="jl-badge warn">已截止，不能再提交</span>' : ''}</div>
@@ -1464,13 +1454,15 @@ async function loadJielongDetail() {
     const el = document.activeElement;
     if (el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return;
     try {
-      const fresh = await api('/api/jielong/' + state.jl.id);
-      const cur = view.innerHTML;
-      state.jlQuiet = true;
+      await api('/api/jielong/' + state.jl.id); // 先探活，接口挂了就静默跳过本轮
+    } catch (e) { /* 静默 */ return; }
+    const y = window.scrollY; // 在替换 DOM 前捕获，替换后内容高度变化可能重置滚动
+    const cur = view.innerHTML;
+    state.jlQuiet = true;
+    try {
       await loadJielongDetail();
-      state.jlQuiet = false;
-      if (view.innerHTML !== cur) { /* 有更新，保持滚动位置 */ const y = window.scrollY; window.scrollTo(0, y); }
-    } catch (e) { /* 静默 */ }
+    } catch (e) { /* 静默 */ } finally { state.jlQuiet = false; }
+    if (view.innerHTML !== cur) window.scrollTo(0, y);
   }, 5000);
   if (!state.jlQuiet) window.scrollTo(0, 0);
 

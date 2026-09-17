@@ -69,7 +69,6 @@ mark{background:#ffe58f;color:inherit;border-radius:3px;padding:0 1px}
 .calcell{background:var(--card);border-radius:var(--radius-sm);min-height:86px;padding:6px;box-shadow:var(--shadow);overflow:hidden;cursor:pointer}
 .calcell.blank{background:transparent;box-shadow:none;cursor:default}
 .calcell:not(.blank):hover{background:var(--hover)}
-.calcell{transition:background .15s}
 .calcell.today{outline:2px solid var(--primary);outline-offset:-2px}
 .calday{font-size:12px;color:var(--muted);margin-bottom:3px;display:flex;align-items:center;gap:4px}
 .calcell.today .calday{color:var(--primary);font-weight:700}
@@ -175,9 +174,8 @@ input,select,textarea{font-family:inherit;font-size:14px;color:var(--text)}
 }
 
 /* ---------- 信息卡片 ---------- */
-.card{background:var(--card);border-radius:var(--radius-md);box-shadow:var(--shadow);padding:14px 16px;margin:12px 0;border-left:4px solid transparent;transition:box-shadow .2s,transform .2s}
+.card{background:var(--card);border-radius:var(--radius-md);box-shadow:var(--shadow);padding:14px 16px;margin:12px 0;border-left:4px solid transparent}
 @media (hover:hover){
-  .card:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(16,24,40,.1)}
   :root[data-theme="dark"] .card:hover{box-shadow:0 4px 14px rgba(0,0,0,.45)}
 }
 .card.cat-notice{border-left-color:#3b82f6}
@@ -254,7 +252,6 @@ input,select,textarea{font-family:inherit;font-size:14px;color:var(--text)}
 
 /* ---------- 文件中心 ---------- */
 .frow{display:flex;align-items:center;gap:12px;background:var(--card);border-radius:var(--radius-sm);box-shadow:var(--shadow);padding:12px 14px;margin:8px 0}
-.ficon{font-size:24px;flex:0 0 auto}
 .fmain{flex:1;min-width:0}
 .fname{font-weight:600;word-break:break-all}
 .fmeta{font-size:12px;color:var(--muted);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -373,14 +370,6 @@ body.readonly .side-foot { display: none !important; }
 .jl-bar{height:10px;background:var(--hover);border-radius:99px;overflow:hidden}
 .jl-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--primary),#3ddc84);border-radius:99px;transition:width .4s}
 .jl-progsub{font-size:13px;color:var(--muted);margin:8px 0 2px}
-.jl-stats{display:flex;gap:10px;margin:14px 0;flex-wrap:wrap}
-.jl-stat{flex:1;min-width:96px;background:var(--hover);border-radius:var(--radius-sm);padding:10px 12px;text-align:center}
-.jl-stat b{display:block;font-size:22px}
-.jl-stat span{font-size:12px;color:var(--muted)}
-.jl-stat.ok b{color:#0d9668}
-.jl-stat.warn b{color:#ea6a12}
-:root[data-theme="dark"] .jl-stat.ok b{color:#4ade80}
-:root[data-theme="dark"] .jl-stat.warn b{color:#fdba74}
 .jl-badge{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600}
 .jl-badge.on{background:#e6f8f1;color:#0d9668}
 .jl-badge.off{background:var(--cat-other-bg);color:var(--cat-other-fg)}
@@ -395,7 +384,6 @@ body.readonly .side-foot { display: none !important; }
 .jl-table th,.jl-table td{padding:8px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 .jl-table th{color:var(--muted);font-weight:500;font-size:12.5px;white-space:nowrap}
 .jl-table td.dim{color:var(--muted);font-size:12.5px;white-space:nowrap}
-.jl-table td.empty{color:var(--muted);text-align:center;padding:22px}
 .jl-banner{background:#e6f8f1;border:1px solid #bfe8cf;color:#0d9668;border-radius:var(--radius-sm);padding:10px 14px;font-size:14px;margin:10px 0;line-height:1.7}
 :root[data-theme="dark"] .jl-banner{background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.35);color:#4ade80}
 .jl-linkrow{display:flex;gap:8px;margin:6px 0;align-items:center}
@@ -433,10 +421,6 @@ body.readonly .side-foot { display: none !important; }
 .dw-round .dw-rtime{color:var(--muted);white-space:nowrap}
 .dw-round .dw-rnames{display:flex;gap:6px;flex-wrap:wrap}
 .dw-round .dw-rname{background:var(--tag-bg);color:var(--primary);border-radius:6px;padding:1px 8px;font-size:12.5px}
-.dw-undo{margin-left:auto}
-.dw-hint-ok{color:#0d9668}
-:root[data-theme="dark"] .dw-hint-ok{color:#4ade80}
-.dw-hint-reset{color:var(--warn)}
 
 /* ---------- 班级生日 ---------- */
 /* 页面级背景只留极淡的暖色洗染，氛围集中在当天的 hero 卡上 */
@@ -533,12 +517,10 @@ body.readonly .side-foot { display: none !important; }
 .frow:hover .ficon{transform:scale(1.08)}
 .statcard{border-top:3px solid var(--primary);background:linear-gradient(180deg,rgba(79,110,242,.06),var(--card) 55%)}
 .statcard.danger{border-top-color:var(--danger);background:linear-gradient(180deg,rgba(239,68,68,.07),var(--card) 55%)}
-.statcard .num{font-variant-numeric:tabular-nums;letter-spacing:-.5px}
-.calcell{transition:transform .15s,box-shadow .15s}
+.calcell{transition:background .15s,transform .15s,box-shadow .15s}
 @media(hover:hover){.calcell:not(.blank):hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(16,24,40,.10)}}
 .calcell.today{box-shadow:0 0 0 4px rgba(79,110,242,.12),var(--shadow)}
 .calwlabel{font-weight:600;color:var(--primary);letter-spacing:1px}
-.tcheck{transition:border-color .15s,background .15s}
 .tcheck:hover{border-color:var(--primary);background:var(--hover)}
 .tcheck .icon{width:13px;height:13px;stroke-width:2.6;display:none}
 .tcheck:hover .icon,.tcheck:focus-visible .icon{display:block}
