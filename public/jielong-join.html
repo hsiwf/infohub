@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>接龙 · 信息汇总</title>
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <style>
   :root{
     --pri:#4f6ef2; --pri-d:#3d5bd9; --bg:#f4f6fb; --card:#fff;
@@ -147,6 +148,7 @@ const ACT_ID=((location.pathname.match(/\/j\/([a-z0-9]+)/i)||[])[1]||'').toLower
 let act=null;
 let my=null;          // 我上次提交的身份 {rid,name}
 let pickedRid=null;   // 从下拉中选中的名单槽位
+let prefilledFromMy=false; // 表单里预填了上次提交的内容（共享设备上换人输入时要清掉）
 let showEntries=false;
 let showMiss=false;
 let lockedRid=null;   // 专属链接锁定的身份
@@ -314,12 +316,26 @@ function renderForm(){
     });
     $('#remark').value=myEntry.remark||'';
   }
+  prefilledFromMy=!!myEntry;
   updateMatchHint();
 }
 
 /* ---------- 姓名匹配 ---------- */
 const nameInput=$('#name'),sugg=$('#sugg');
-nameInput.addEventListener('input',()=>{pickedRid=null;updateSugg();updateMatchHint();});
+nameInput.addEventListener('input',()=>{
+  // 共享设备防误填：预填的是上一位提交者的答案，姓名一改就不是同一人了，清空预填内容
+  if(prefilledFromMy){
+    const q=nameInput.value.trim();
+    const myLabel=(my&&my.rid!=null&&act.roster[my.rid])?slotLabel(act.roster[my.rid]):null;
+    const stillMe=my&&my.name&&(q===my.name||(myLabel&&q===myLabel));
+    if(!stillMe){
+      act.fields.forEach(f=>{const el=document.querySelector('[data-fkey="'+f.key+'"]');if(el)el.value='';});
+      $('#remark').value='';
+      prefilledFromMy=false;
+    }
+  }
+  pickedRid=null;updateSugg();updateMatchHint();
+});
 nameInput.addEventListener('blur',()=>setTimeout(()=>{sugg.style.display='none';},150));
 function updateSugg(){
   const q=nameInput.value.trim();
@@ -364,6 +380,10 @@ $('#submitBtn').addEventListener('click',async()=>{
   if(act.roster.length&&pickedRid==null&&findHits(name).length===0&&!act.allowOutside){
     toast('「'+name+'」不在名单中，无法提交');return;
   }
+  if(act.roster.length&&pickedRid==null&&findHits(name).length>1){
+    // 重名且未明确选择：服务端会拒绝，这里提前拦下，避免覆盖到同名的另一个人
+    toast('名单中有重名，请从下拉列表选择带学号的一项');nameInput.focus();return;
+  }
   const values={};
   document.querySelectorAll('[data-fkey]').forEach(el=>{values[el.dataset.fkey]=el.value.trim();});
   const btn=$('#submitBtn');
@@ -397,6 +417,13 @@ async function refresh(){
   let a2;
   try{a2=await api('/api/jielong/'+ACT_ID);}catch(_){return;}
   act=a2;
+  // 名单可能被管理员编辑过：已选槽位的姓名与输入框对不上时重置匹配，防止提交记到别人头上
+  if(lockedRid==null&&pickedRid!=null&&act.roster[pickedRid]){
+    const r0=act.roster[pickedRid],q=nameInput.value.trim();
+    if(q&&q!==slotLabel(r0)&&!q.includes(r0.name)&&!(r0.id&&q.includes(r0.id))){
+      pickedRid=null;updateMatchHint();
+    }
+  }
   renderHead();
   renderStatus();
   renderProgress();

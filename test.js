@@ -50,6 +50,12 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
     // 2.5 管理密码开启时：访客只读（可浏览、写入被拒），然后用密码自动登录继续自检
     const g1 = await fetch(BASE + '/api/messages?limit=1');
     ok('只读门禁：访客可浏览', g1.status === 200);
+    // 回归：/api/export/ 尾斜杠曾绕过门禁泄露全量备份，路由对斜杠不敏感，门禁必须同判
+    const g2s = await fetch(BASE + '/api/export/');
+    ok('尾斜杠不能绕过导出门禁（401）', g2s.status === 401);
+    // 名单含学生学号姓名（敏感），访客同样不可读
+    const g2r = await fetch(BASE + '/api/rosters');
+    ok('名单库门禁：访客不可读（401）', g2r.status === 401);
     const g2 = await fetch(BASE + '/api/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'x' }) });
     ok('只读门禁：访客写入被拒（401）', g2.status === 401);
     try {
@@ -176,6 +182,27 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   r = await j('/api/files');
   ok('文件中心返回全量统计（增量）', r.body.totalViews === baseV + 1 && r.body.totalDownloads === baseD + 2, JSON.stringify({ v: r.body.totalViews, d: r.body.totalDownloads, baseV, baseD }));
 
+  // 6.6 文件中心按信息完成状态过滤：默认（status=open）只看未完成信息的附件，status 缺省全部可见
+  r = await j('/api/files?status=open&q=' + encodeURIComponent('自检.txt'));
+  ok('文件中心 status=open：未完成信息的附件可见', r.status === 200 && r.body.items.length === 1);
+  await post(`/api/messages/${mid}/toggle`); // 标记完成
+  r = await j('/api/files?status=open&q=' + encodeURIComponent('自检.txt'));
+  ok('已完成信息的附件不再出现在 status=open', r.body.items.length === 0);
+  r = await j('/api/files?status=done&q=' + encodeURIComponent('自检.txt'));
+  ok('status=done：已完成信息的附件可见且带状态', r.body.items.length === 1 && r.body.items[0].message_status === 'done');
+  r = await j('/api/files?q=' + encodeURIComponent('自检.txt'));
+  ok('status 缺省：全部可见（兼容旧行为）', r.body.items.length === 1);
+  await post(`/api/messages/${mid}/toggle`); // 还原为未完成，不影响后续自检
+  r = await j('/api/files?status=open&q=' + encodeURIComponent('自检.txt'));
+  ok('还原后附件重新可见', r.body.items.length === 1);
+
+  // 6.7 文件中心 offset 分页（配合前端「加载 / 显示更多」逐页追加）
+  r = await j('/api/files?limit=1');
+  const fp1 = r.body.items[0] || {};
+  ok('文件中心 limit=1 探总数（含全量统计）', r.status === 200 && r.body.total >= 2 && !!fp1.id && r.body.totalViews != null);
+  r = await j('/api/files?limit=1&offset=1');
+  ok('文件中心 offset=1 翻到下一条且不重复', r.body.items.length === 1 && r.body.items[0].id !== fp1.id);
+
   // 7. 智能解析
   r = await post('/api/parse', { text: '王老师：请同学们周五下午5点前把回执交给班主任，务必完成【重要】' });
   const p = r.body.parsed || {};
@@ -191,6 +218,10 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   const ics = await fetch(BASE + '/api/calendar.ics');
   const icsText = await ics.text();
   ok('.ics 日历导出', ics.status === 200 && icsText.includes('BEGIN:VCALENDAR') && icsText.includes('BEGIN:VEVENT'));
+  ok('DTSTAMP 符合 RFC 5545（YYYYMMDDTHHMMSS）', /DTSTAMP:\d{8}T\d{6}/.test(icsText), (icsText.match(/DTSTAMP:[^\r\n]*/) || [])[0]);
+  r = await j('/api/messages?limit=-1');
+  const lim1 = await j('/api/messages?limit=1');
+  ok('limit 负数被封底（与 limit=1 等价，SQLite 的 LIMIT -1 不限条数）', r.body.items.length === 1 && lim1.body.items.length === 1, JSON.stringify({ a: r.body.items.length, b: lim1.body.items.length }));
 
   // 8. 外部接入 webhook
   const cfg = (await j('/api/config')).body;
@@ -214,7 +245,12 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   ok('有数据时导入被拒（防重复）', r.status === 400);
 
   // 9.5 force 导入：附件与接龙一并恢复（附件文件本身不在 JSON 中，随 data/ 目录迁移）
-  r = await post('/api/import?force=1', {
+  // 记录导入前名单 / 生意的快照，后面只清理自检导入的行——库里有真实数据时也必须能安全跑
+  const rostersBefore = ((await j('/api/rosters')).body.items || []).map((x) => x.id);
+  const birthdaysBefore = ((await j('/api/birthdays')).body.items || []).map((x) => x.id);
+  // 名单用当次运行唯一的名字：force 导入对同名名单是覆盖语义，撞上真实名单会改写它
+  const importRosterName = '自检导入名单' + Date.now();
+  const backupPayload = {
     groups: [],
     messages: [{ id: 9900, title: '导入附件测试', content: '导入附件测试内容' }],
     attachments: [{ message_id: 9900, orig_name: '导入附件测试.txt', stored_name: '202601/0123456789abcdef.txt', size: 3, mime: 'text/plain', views: 3, downloads: 5, created_at: '2030-01-01 09:00' }],
@@ -226,38 +262,49 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
     ],
     draws: [{ id: 'dwimport1', title: '导入签箱测试', roster: '[{"id":"2023001","name":"张三"}]', per_draw: 1, created_at: 1700000000000 }],
     drawRounds: [{ draw_id: 'dwimport1', picked: '[{"id":"2023001","name":"张三"}]', count: 1, time: 1700000001000 }],
-    rosters: [{ name: '导入名单', roster: '张三\n李四', keep_id: 1, created_at: '', updated_at: '' }],
+    rosters: [{ name: importRosterName, roster: '张三\n李四', keep_id: 1, created_at: '', updated_at: '' }],
     birthdays: [{ name: '导入寿星', month: 3, day: 8, year: 0, note: '', created_at: '' }],
-  });
+  };
+  r = await post('/api/import?force=1', backupPayload);
   ok('force 导入恢复附件与接龙', r.status === 200 && r.body.attachments === 1 && r.body.jielongs === 1 && r.body.jielongEntries === 1 && r.body.draws === 1 && r.body.drawRounds === 1 && r.body.rosters === 1 && r.body.birthdays === 1, JSON.stringify(r.body));
   r = await j('/api/files?q=' + encodeURIComponent('导入附件测试.txt'));
   const impAtt = (r.body.items || [])[0] || {};
   ok('导入的附件出现在文件中心（阅读/下载计数保留）', r.status === 200 && r.body.items.length === 1 && impAtt.views === 3 && impAtt.downloads === 5, JSON.stringify(r.body));
   r = await j('/api/jielong/jlimport1');
   ok('导入的接龙可访问（含记录）', r.status === 200 && r.body.title === '导入接龙测试' && r.body.done === 1 && r.body.total === 1 && r.body.entries[0].values.f0 === '参加', JSON.stringify(r.body));
+  // force 合并导入幂等：同一份备份重导一遍，接龙记录先清后插不翻倍，名单同名覆盖、生日同名同日跳过
+  r = await post('/api/import?force=1', backupPayload);
+  ok('force 重导同一备份幂等', r.status === 200 && r.body.jielongEntries === 1 && r.body.rosters === 1 && r.body.birthdays === 0, JSON.stringify(r.body));
+  r = await j('/api/jielong/jlimport1');
+  ok('重导后接龙记录仍是一条', r.status === 200 && r.body.done === 1 && r.body.entries.length === 1, JSON.stringify({ n: r.body.entries.length }));
   r = await j('/api/jielong/jlimport1?t=importtoken', { method: 'DELETE' });
   ok('导入的接龙可管理（令牌随备份恢复）', r.status === 200);
   r = await j('/api/draw/dwimport1');
   ok('导入的签箱可访问（历史保留）', r.status === 200 && r.body.total === 1 && r.body.remainingCount === 0 && r.body.roundCount === 1, JSON.stringify(r.body));
   await j('/api/draw/dwimport1', { method: 'DELETE' });
   r = await j('/api/rosters');
-  ok('导入的名单进入名单库', r.status === 200 && r.body.items.length === 1 && r.body.items[0].name === '导入名单', JSON.stringify(r.body));
-  for (const it of r.body.items) await j('/api/rosters/' + it.id, { method: 'DELETE' });
+  ok('导入的名单进入名单库', r.status === 200 && r.body.items.some((x) => !rostersBefore.includes(x.id) && x.name === importRosterName && x.count === 2), JSON.stringify(r.body));
+  // 只删自检导入的行（对比导入前快照），绝不动库里已有的名单
+  for (const it of r.body.items.filter((x) => !rostersBefore.includes(x.id))) await j('/api/rosters/' + it.id, { method: 'DELETE' });
   r = await j('/api/birthdays');
-  ok('导入的生日成员进入生日列表', r.status === 200 && r.body.items.some((x) => x.name === '导入寿星' && x.month === 3 && x.day === 8), JSON.stringify(r.body));
-  for (const it of r.body.items) await j('/api/birthdays/' + it.id, { method: 'DELETE' });
+  ok('导入的生日成员进入生日列表', r.status === 200 && r.body.items.some((x) => !birthdaysBefore.includes(x.id) && x.name === '导入寿星' && x.month === 3 && x.day === 8), JSON.stringify(r.body));
+  for (const it of r.body.items.filter((x) => !birthdaysBefore.includes(x.id))) await j('/api/birthdays/' + it.id, { method: 'DELETE' });
   const imp = await j('/api/messages?q=' + encodeURIComponent('导入附件测试'));
   for (const it of (imp.body.items || [])) await j('/api/messages/' + it.id, { method: 'DELETE' });
 
-  // 9.6 导入原子性：中途失败（重复 ext_key 触发唯一索引）必须整体回滚，不残留半截数据
+  // 9.6 导入原子性：中途失败（载荷内重复的接龙 id）必须整体回滚，不残留半截数据
+  // （同 ext_key 的两个群不再触发失败——force 合并导入会把它们合并成一个群，这正是要测的新语义）
   const gBefore = (await j('/api/groups')).body.items.length;
   r = await post('/api/import?force=1', {
-    groups: [{ id: 1, name: '回滚测试甲', ext_key: 'qq:rb' }, { id: 2, name: '回滚测试乙', ext_key: 'qq:rb' }],
+    groups: [{ name: '回滚测试甲' }],
     messages: [{ title: '回滚测试信息' }],
+    jielongs: [{ id: 'duprb1', title: '回滚接龙一' }, { id: 'duprb1', title: '回滚接龙二' }],
   });
   ok('导入中途失败返回 500', r.status === 500, JSON.stringify(r.body));
   const gAfter = (await j('/api/groups')).body.items;
   ok('导入失败整体回滚（无残留）', gAfter.length === gBefore && !gAfter.some((g) => g.name === '回滚测试甲'), JSON.stringify(r.body));
+  r = await j('/api/jielong/duprb1');
+  ok('回滚后失败的接龙不留残骸', r.status === 404);
 
   // 10. 登录接口（未设密码时随意输都放行；设了密码时用正确密码再验一次）
   r = await post('/api/login', { password: authRequired ? adminPw : 'x' });
@@ -290,19 +337,30 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
     r = await j('/api/inbox/' + r2.body.id, { method: 'DELETE' });
     ok('忽略待审核消息', r.status === 200 && r.body.ok === true);
     // 待审核 limit 生效且 total 为全量（角标轮询 ?limit=1 不用拉全量）
-    await rep({ ...obPayload, sender: { card: '赵老师', nickname: 'z' }, message: [{ type: 'text', data: { text: '待审核分页测试甲，请同学们查收通知' } }] });
-    await rep({ ...obPayload, sender: { card: '钱老师', nickname: 'q' }, message: [{ type: 'text', data: { text: '待审核分页测试乙，请同学们查收通知' } }] });
+    const inboxIds = []; // 自检创建的待审核 id，最后逐条清理，绝不清空用户真实的收件箱
+    r = await rep({ ...obPayload, sender: { card: '赵老师', nickname: 'z' }, message: [{ type: 'text', data: { text: '待审核分页测试甲，请同学们查收通知' } }] });
+    inboxIds.push(r.body.id);
+    r = await rep({ ...obPayload, sender: { card: '钱老师', nickname: 'q' }, message: [{ type: 'text', data: { text: '待审核分页测试乙，请同学们查收通知' } }] });
+    inboxIds.push(r.body.id);
     r = await j('/api/inbox?limit=1');
-    ok('待审核 limit 生效且 total 为全量', r.body.items.length === 1 && r.body.total === 2, JSON.stringify(r.body));
+    ok('待审核 limit 生效且 total 为全量', r.body.items.length === 1 && r.body.total >= 2 && r.body.items[0].id === inboxIds[1], JSON.stringify(r.body));
     // 超长正文截断（与手动录入同一口径 20000）
-    await rep({ ...obPayload, sender: { card: '长文', nickname: 'c' }, message: [{ type: 'text', data: { text: '截断测试开头，请同学们查收。' + '长'.repeat(25000) } }] });
+    r = await rep({ ...obPayload, sender: { card: '长文', nickname: 'c' }, message: [{ type: 'text', data: { text: '截断测试开头，请同学们查收。' + '长'.repeat(25000) } }] });
+    inboxIds.push(r.body.id);
     r = await j('/api/inbox?limit=1');
     ok('OneBot 超长正文截断到 20000', (r.body.items[0].content || '').length === 20000, '实际长度 ' + (r.body.items[0] ? (r.body.items[0].content || '').length : '无'));
     // 同内容不同群：各自独立进待审核，不能跨群误判成重复
     r = await rep({ ...obPayload, group_id: 987654322 });
     ok('OneBot 同内容不同群不误判去重', r.status === 200 && r.body.inbox === true, JSON.stringify(r.body));
-    r = await j('/api/inbox', { method: 'DELETE' });
-    ok('清空待审核', r.status === 200 && r.body.dismissed === 4, JSON.stringify(r.body));
+    inboxIds.push(r.body.id);
+    // 逐条忽略自检创建的待审核消息（不清空整个收件箱，里面可能有真实待审核内容）
+    let dismissed = 0;
+    for (const id of inboxIds) {
+      r = await j('/api/inbox/' + id, { method: 'DELETE' });
+      if (r.status === 200) dismissed++;
+    }
+    r = await j('/api/inbox');
+    ok('自检待审核逐条清理（不动真实收件箱）', dismissed === 4 && !r.body.items.some((x) => inboxIds.includes(x.id)), JSON.stringify({ dismissed }));
   } else {
     ok('OneBot 群消息上报+自动识别', r.status === 200 && r.body.ok && r.body.id > 0 && r.body.parsed && !!r.body.parsed.deadline, JSON.stringify(r.body));
     if (r.body.id) created.messages.push(r.body.id);
@@ -368,7 +426,9 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   r = await post(`/api/jielong/${jl.id}/join`, { name: '2023004', values: { f0: '不参加' } });
   ok('按学号命中另一位重名同学', r.status === 200 && r.body.entry.rid === 3 && r.body.entry.id === '2023004');
   r = await post(`/api/jielong/${jl.id}/join`, { name: '张三', values: { f0: '不参加' } });
-  ok('重复提交覆盖不新增', r.status === 200 && r.body.updated === true && r.body.count === 2);
+  ok('重名裸姓名再提交被拒（409，防覆盖同名的另一个人）', r.status === 409, JSON.stringify(r.body));
+  r = await post(`/api/jielong/${jl.id}/join`, { rid: 0, name: '张三', values: { f0: '不参加' } });
+  ok('带槽位重复提交覆盖不新增', r.status === 200 && r.body.updated === true && r.body.count === 2);
   r = await j('/api/jielong/' + jl.id);
   ok('修改提交后名单次序不变', r.body.entries[0].name === '张三' && r.body.entries[0].id === '2023001' && r.body.entries[0].values.f0 === '不参加', JSON.stringify(r.body.entries.map((e) => e.name)));
   const g5 = await fetch(BASE + `/api/jielong/${jl.id}/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '赵六', values: { f0: '参加' } }) });
@@ -457,8 +517,14 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   r = await post('/api/rosters', { name: '自检名单', rosterRaw: '2023001 张三\n李四\n王五', keepId: true });
   ok('同名保存覆盖不重复', r.status === 200 && r.body.updated === true && r.body.id === rid1);
   r = await j('/api/rosters');
-  ok('名单库列表（含解析人数）', r.status === 200 && r.body.items.length === 1 && r.body.items[0].count === 3 && r.body.items[0].keepId === true, JSON.stringify(r.body));
-  r = await post('/api/jielong', { title: '名单库接龙', rosterRaw: r.body.items[0].roster, keepId: r.body.items[0].keepId });
+  let mineRoster = r.body.items.find((x) => x.id === rid1);
+  ok('名单库列表（含解析人数）', r.status === 200 && mineRoster && mineRoster.count === 3 && mineRoster.keepId === true, JSON.stringify(r.body));
+  r = await j('/api/rosters/' + rid1, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '自检名单改', rosterRaw: '2023001 张三\n李四\n王五\n赵六', keepId: true }) });
+  ok('编辑名单（改名 + 改内容）', r.status === 200 && r.body.ok === true);
+  r = await j('/api/rosters');
+  mineRoster = r.body.items.find((x) => x.id === rid1);
+  ok('编辑后名单生效（4 人，旧名不存在）', !!mineRoster && mineRoster.count === 4 && r.body.items.every((x) => x.name !== '自检名单'), JSON.stringify(r.body));
+  r = await post('/api/jielong', { title: '名单库接龙', rosterRaw: mineRoster.roster, keepId: mineRoster.keepId });
   ok('用保存的名单发起接龙', r.status === 200 && /^[a-z0-9]{7}$/.test(r.body.id || ''), JSON.stringify(r.body));
   await j('/api/jielong/' + r.body.id, { method: 'DELETE' });
   r = await post('/api/draw', { title: '名单库签箱', rosterRaw: '2023001 张三\n李四\n王五', keepId: true, perDraw: 2 });
@@ -466,7 +532,7 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   r = await j('/api/rosters/' + rid1, { method: 'DELETE' });
   ok('删除名单', r.status === 200);
   r = await j('/api/rosters');
-  ok('删除后名单库为空', r.status === 200 && r.body.items.length === 0);
+  ok('删除后名单查不到', r.status === 200 && !r.body.items.some((x) => x.id === rid1));
 
   // 15. 班级生日（倒计时 / 当天祝福 / 名单导入）
   const pad2t = (n) => String(n).padStart(2, '0');
@@ -489,7 +555,7 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   const bdLeap = r.body.id;
   ok('2 月 29 日可保存', r.status === 200 && /^(\d{4})-02-(28|29)$/.test(r.body.nextDate), JSON.stringify(r.body));
   r = await j('/api/birthdays');
-  ok('生日列表按倒计时排序（今天在前）', r.status === 200 && r.body.todayCount === 1 && r.body.items[0].isToday === true && r.body.items[0].id === bdToday, JSON.stringify(r.body.today));
+  ok('生日列表按倒计时排序（今天在前）', r.status === 200 && r.body.items[0] && r.body.items[0].isToday === true && r.body.items.some((x) => x.id === bdToday && x.isToday === true), JSON.stringify(r.body.today));
   if (authRequired) {
     const g10 = await fetch(BASE + '/api/birthdays', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'x', month: 1, day: 1 }) });
     ok('访客添加生日成员被拒（401）', g10.status === 401);
@@ -504,15 +570,20 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   r = await post('/api/birthdays/import', { rosterId: ridBd });
   ok('重复导入自动跳过', r.status === 200 && r.body.created === 0 && r.body.skipped === 2, JSON.stringify(r.body));
   r = await j('/api/birthdays');
-  const pendingOk = r.body.items.filter((x) => x.pending).length === 2 && r.body.items.every((x) => x.pending ? x.daysUntil === null : true);
+  const pend = r.body.items.filter((x) => x.name === '导入同学甲' || x.name === '导入同学乙');
+  const pendingOk = pend.length === 2 && pend.every((x) => x.pending && x.daysUntil === null);
   ok('未填生日的成员排在末尾且标记待填', pendingOk, JSON.stringify(r.body.items.filter((x) => x.pending)));
   await j('/api/rosters/' + ridBd, { method: 'DELETE' });
   r = await j('/api/birthdays');
-  for (const it of (r.body.items || [])) await j('/api/birthdays/' + it.id, { method: 'DELETE' });
+  // 只删自检新建的成员（对比测试前快照），不动库里已有的生日
+  for (const it of r.body.items.filter((x) => !birthdaysBefore.includes(x.id))) await j('/api/birthdays/' + it.id, { method: 'DELETE' });
   r = await j('/api/birthdays');
-  ok('生日成员清理完成', r.status === 200 && r.body.items.length === 0);
+  ok('生日自检数据清理完成', r.status === 200 && r.body.items.every((x) => birthdaysBefore.includes(x.id)));
 
-  // 16. 班徽背景（上传 / 访问 / 删除）
+  // 16. 班徽背景（上传 / 访问 / 删除）；真实环境已设置班徽时，测完原样还原
+  const prevBadge = await fetch(BASE + '/api/class-badge');
+  const prevBadgeBytes = prevBadge.status === 200 ? Buffer.from(await prevBadge.arrayBuffer()) : null;
+  const prevBadgeType = (prevBadge.headers.get('content-type') || 'image/png').split(';')[0];
   const pngBadge = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
   const bbd = '----bd' + Date.now();
   const bmp = Buffer.concat([
@@ -531,8 +602,21 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   }
   r = await j('/api/class-badge', { method: 'DELETE' });
   ok('移除班徽', r.status === 200);
-  const bg404 = await fetch(BASE + '/api/class-badge');
-  ok('移除后班徽 404', bg404.status === 404);
+  if (prevBadgeBytes) {
+    // 原本就有班徽：原样传回，不清掉真实环境的配置
+    const rbd = '----bd-r' + Date.now();
+    const bmp2 = Buffer.concat([
+      Buffer.from(`--${rbd}\r\nContent-Disposition: form-data; name="files"; filename="badge-restore"\r\nContent-Type: ${prevBadgeType}\r\n\r\n`),
+      prevBadgeBytes, Buffer.from(`\r\n--${rbd}--\r\n`),
+    ]);
+    r = await j('/api/class-badge', { method: 'POST', headers: { 'Content-Type': 'multipart/form-data; boundary=' + rbd }, body: new Uint8Array(bmp2) });
+    const bgBack = await fetch(BASE + '/api/class-badge');
+    const backLen = (await bgBack.arrayBuffer()).byteLength;
+    ok('原有班徽已还原', r.status === 200 && bgBack.status === 200 && backLen === prevBadgeBytes.length, 'len=' + backLen);
+  } else {
+    const bg404 = await fetch(BASE + '/api/class-badge');
+    ok('移除后班徽 404', bg404.status === 404);
+  }
 
   // ---- 清理自检数据 ----
   for (const id of created.messages) await j('/api/messages/' + id, { method: 'DELETE' });
@@ -543,8 +627,13 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   console.log(`结果：${passed} 通过，${failed} 失败`);
   console.log(failed === 0 ? '🎉 全部自检通过，可以放心使用/部署。' : '⚠️ 有失败项，请把上面的 ❌ 内容发给维护者排查。');
   process.exit(failed === 0 ? 0 : 1);
-})().catch((e) => {
+})().catch(async (e) => {
   console.error('自检脚本异常：', e.message);
   console.error('请确认服务已启动（node server.js）。');
+  // 异常退出前尽力清掉已创建的自检数据，避免半截数据残留在库里
+  try {
+    for (const id of created.messages) await j('/api/messages/' + id, { method: 'DELETE' });
+    for (const id of created.groups) await j('/api/groups/' + id, { method: 'DELETE' });
+  } catch (e2) { /* 尽力而为 */ }
   process.exit(1);
 });
