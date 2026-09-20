@@ -10,6 +10,7 @@ const ICON_PATHS = {
   'inbox': '<rect x="3" y="4" width="18" height="15" rx="2"/><path d="M3 10h5l2 3h4l2-3h5"/>',
   'feed': '<path d="M4 4h13a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M16 4v16"/><path d="M7 9h5M7 13h5M7 17h3"/>',
   'check': '<path d="M20 6 9 17l-5-5"/>',
+  'chev-down': '<path d="m6 9 6 6 6-6"/>',
   'jielong': '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="4" cy="18" r="1.6"/>',
   'draw': '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M9 3v6M15 3v6"/><path d="m9 14 2 2 4-4"/>',
   'birthday': '<path d="M4 21h16"/><path d="M6 21v-5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v5"/><path d="M12 14v-4"/><path d="M10.5 7.5C10.5 6.5 12 5 12 5s1.5 1.5 1.5 2.5a1.5 1.5 0 0 1-3 0z"/>',
@@ -257,6 +258,7 @@ function openModal(html) {
 }
 function closeModal() {
   $('#modal-root').innerHTML = '';
+  state.pendingFiles = []; // 弹窗已关，暂存的附件一并作废，否则离开页面会被误判“有未保存内容”
   if (lastFocusEl && document.body.contains(lastFocusEl)) { try { lastFocusEl.focus(); } catch (e) { /* 忽略 */ } }
   lastFocusEl = null;
 }
@@ -320,7 +322,8 @@ function cardHTML(it) {
   const done = it.status === 'done';
   const tags = (it.tags || '').split(',').map((s) => s.trim()).filter(Boolean);
   const body = (it.content || '').replace(/\r/g, '').trim();
-  const short = body.length > 150 ? body.slice(0, 150) + '…' : body;
+  // 长正文不再按字数砍断：全文渲染，超过约 8 行默认折叠，点「展开全文」查看
+  const folded = body.length > 300;
   const atts = (it.attachments || []).map((a) => {
     // 图片附件直接显示缩略图（/raw 不计阅读数），点击看大图才算一次阅读
     // 类型范围与服务端 /raw 白名单一致（SVG 等会被服务端转附件下载，不能当缩略图）
@@ -339,7 +342,7 @@ function cardHTML(it) {
       <span class="time">${esc(fmtReceived(it.received_at))}</span>
     </div>
     <h3 class="card-title">${hl(it.title || '(无标题)', state.q)}</h3>
-    ${short ? `<p class="card-body">${hl(short, state.q)}</p>` : ''}
+    ${body ? `<p class="card-body${folded ? ' clamped' : ''}">${hl(body, state.q)}</p>${folded ? `<button class="bodymore" data-act="bodymore" aria-expanded="${!folded}">${icon('chev-down')} 展开全文</button>` : ''}` : ''}
     <div>${dlChip(it.deadline)}</div>
     ${tags.length ? `<div class="tags">${tags.map((t) => `<span class="tag">#${esc(t)}</span>`).join('')}</div>` : ''}
     ${atts ? `<div class="atts">${atts}</div>` : ''}
@@ -353,6 +356,8 @@ function cardHTML(it) {
 }
 
 async function loadFeed(append = false) {
+  const seq = loadSeq; // 入口捕获代次：响应回来时若已切换视图/筛选（代次变化）则丢弃
+  const stale = () => seq !== loadSeq;
   const view = $('#view');
   if (!append) view.innerHTML = skeletonFeed();
   // 主列表只放未完成；已完成的单独放底部“已完成”区（offset 只数未完成卡片）
@@ -366,22 +371,27 @@ async function loadFeed(append = false) {
   params.set('limit', '50');
   params.set('offset', String(offset));
   const data = await api('/api/messages?' + params);
+  if (stale()) return; // 等待期间用户已切换视图 / 筛选，丢弃旧响应
   state.total = data.total;
   const more = $('#btn-more');
   if (more) more.closest('.morewrap').remove();
 
-  // 已完成区：勾选“显示已完成”时一次性取最近 100 条，永远固定在最底部
+  // 已完成区：勾选“显示已完成”时在底部出现。默认只探一次总数、不渲染卡片，
+  // 点「加载已完成 / 显示更多」按 100 条一页追加；有搜索词时直接加载第一页
   let doneSection = '';
+  let autoDone = false;
   if (state.showDone && offset === 0) {
     const dp = new URLSearchParams(params);
     dp.set('status', 'done');
     dp.set('sort', 'time');
-    dp.set('limit', '100');
+    dp.set('limit', '1');
     dp.delete('offset');
     try {
-      const d = await api('/api/messages?' + dp);
-      if (d.items.length) {
-        doneSection = `<div id="done-sec"><div class="feeddivider">${icon('check')} 已完成（${d.total}${d.total > d.items.length ? '，显示最近 ' + d.items.length + ' 条' : ''}）</div>${d.items.map(cardHTML).join('')}</div>`;
+      const probe = await api('/api/messages?' + dp);
+      if (stale()) return;
+      if (probe.total > 0) {
+        doneSection = `<div id="done-sec"><div id="done-list"></div>${doneBarHTML(probe.total, 0)}</div>`;
+        autoDone = !!state.q;
       }
     } catch (e) { /* 已完成区加载失败不影响主列表 */ }
   }
@@ -395,7 +405,10 @@ async function loadFeed(append = false) {
       : canEdit()
         ? `<div class="empty"><div class="big">${icon('inbox')}</div>还没有记录<br>点右上角「＋ 添加信息」，把老师发的通知粘贴进来试试</div>`
         : `<div class="empty"><div class="big">${icon('inbox')}</div>还没有记录<br>老师发布通知后会出现在这里</div>`;
-    if (doneSection) view.insertAdjacentHTML('beforeend', doneSection);
+    if (doneSection) {
+      view.insertAdjacentHTML('beforeend', doneSection);
+      if (autoDone) loadMoreDone().catch(() => {});
+    }
     addBdBanner();
     return;
   }
@@ -429,13 +442,56 @@ async function loadFeed(append = false) {
   const doneSec = $('#done-sec', view);
   if (doneSec) doneSec.insertAdjacentHTML('beforebegin', html + moreHtml);
   else view.insertAdjacentHTML('beforeend', html + moreHtml + doneSection);
+  if (autoDone) loadMoreDone().catch(() => {});
+  if (!append) addBdBanner();
   const newMore = $('#btn-more');
-  if (newMore) newMore.addEventListener('click', () => { loadFeed(true).catch((e) => toast(e.message, 'error')); });
-  addBdBanner();
+  if (newMore) newMore.addEventListener('click', () => {
+    // 先禁用再请求：响应慢时连点会用同一 offset 追加出重复的一页；失败后恢复可重试
+    newMore.disabled = true;
+    loadFeed(true).catch((e) => {
+      newMore.disabled = false;
+      toast(e.message, 'error');
+    });
+  });
+}
+// 「已完成」区的计数条与分页追加：已渲染的卡片数就是下一页的 offset，视图刷新后自然归位
+function doneBarHTML(total, loaded) {
+  const rest = total - loaded;
+  const label = loaded ? `已显示 ${Math.min(loaded, total)} / ${total} 条` : `共 ${total} 条已完成`;
+  const btn = rest > 0 ? `<button class="mini" data-act="donemore">${loaded ? '显示更多' : '加载已完成'}</button>` : '';
+  return `<div class="morebar"><span>${icon('check')} ${label}</span><span class="spacer"></span>${btn}</div>`;
+}
+async function loadMoreDone() {
+  const sec = $('#done-sec');
+  if (!sec) return;
+  const bar = sec.querySelector('.morebar');
+  const btn = bar && bar.querySelector('button');
+  if (btn) { btn.disabled = true; btn.textContent = '加载中…'; }
+  const offset = sec.querySelectorAll('.card').length;
+  const p = new URLSearchParams();
+  if (state.q) p.set('q', state.q);
+  if (state.category) p.set('category', state.category);
+  if (state.group) p.set('group_id', state.group);
+  p.set('status', 'done');
+  p.set('sort', 'time');
+  p.set('limit', '100');
+  p.set('offset', String(offset));
+  try {
+    const d = await api('/api/messages?' + p);
+    // 响应等待期间视图可能被重新渲染（同名的新容器），元素身份对不上就丢弃旧响应
+    const sec2 = $('#done-sec');
+    if (!sec2 || sec2 !== sec) return;
+    sec2.querySelector('#done-list').insertAdjacentHTML('beforeend', d.items.map(cardHTML).join(''));
+    if (bar && bar.isConnected) bar.outerHTML = doneBarHTML(d.total, offset + d.items.length);
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = offset ? '显示更多' : '加载已完成'; }
+  }
 }
 // 生日横幅：今天有人过生日时，信息页最顶部展示（含空结果页）
 function addBdBanner() {
   if (!bdTodayCache || !bdTodayCache.length) return;
+  if ($('.bd-feedbanner')) return; // 已展示过就不重复插（追加加载时 loadFeed 会再次走到这里）
   const view = $('#view');
   view.insertAdjacentHTML('afterbegin', `<div class="bd-feedbanner">${icon('birthday')} 今天是 ${bdTodayCache.map((m) => '<b>' + esc(m.name) + '</b>').join('、')} 的生日，让我们送上祝福！<a data-bd-goto>去看看 →</a></div>`);
   const goto = $('[data-bd-goto]');
@@ -465,9 +521,11 @@ function inboxRow(it) {
   </div>`;
 }
 async function loadInbox() {
+  const seq = loadSeq;
   const view = $('#view');
   view.innerHTML = '<div class="loading">加载中…</div>';
   const data = await api('/api/inbox');
+  if (seq !== loadSeq) return;
   setNavBadge('inbox', data.total);
   const items = !state.q ? data.items : data.items.filter((it) =>
     ((it.content || '') + (it.sender_name || '') + (it.group_name || '')).toLowerCase().includes(state.q.toLowerCase()));
@@ -534,6 +592,7 @@ function taskRow(it) {
 }
 
 async function loadTasks() {
+  const seq = loadSeq;
   const view = $('#view');
   view.innerHTML = '<div class="loading">加载中…</div>';
   // 大数据量下分三路取数：最近的逾期（新的在前）、未逾期事项、无截止时间的任务，
@@ -550,6 +609,7 @@ async function loadTasks() {
     api(mk({ sort: 'deadline', due: 'after' })),
     api(mk({ category: 'task' })),
   ]);
+  if (seq !== loadSeq) return;
   const overdueTotal = odRes.total || 0;
   const items = odRes.items.concat(upRes.items, tdRes.items.filter((it) => !it.deadline));
   if (!items.length) {
@@ -590,14 +650,27 @@ async function loadTasks() {
 
 /* ========= 日历视图 ========= */
 async function loadCalendar() {
+  const seq = loadSeq;
   const view = $('#view');
   view.innerHTML = '<div class="loading">加载中…</div>';
-  // 只取未逾期事项（due=after）：大数据量下按截止升序的前 200 条全是历史逾期，当月事项会被挤出
-  const params = new URLSearchParams({ status: 'open', sort: 'deadline', due: 'after', limit: '300' });
-  if (state.group) params.set('group_id', state.group);
-  const data = await api('/api/messages?' + params);
+  // 只取未逾期事项（due=after）。服务端单页上限 200，事项更多时按 offset 分页取全，
+  // 否则往后翻的月份会整体无数据且无提示（上限 1000 条兜底，正常班级远到不了）
+  const base = new URLSearchParams({ status: 'open', sort: 'deadline', due: 'after' });
+  if (state.group) base.set('group_id', state.group);
+  const items = [];
+  let total = Infinity;
+  while (items.length < total && items.length < 1000) {
+    const p = new URLSearchParams(base);
+    p.set('limit', '200');
+    p.set('offset', String(items.length));
+    const data = await api('/api/messages?' + p);
+    if (seq !== loadSeq) return;
+    total = data.total;
+    items.push(...data.items);
+    if (!data.items.length) break;
+  }
   state.calByDay = {};
-  for (const it of data.items) {
+  for (const it of items) {
     if (!it.deadline) continue;
     (state.calByDay[it.deadline.slice(0, 10)] ||= []).push(it);
   }
@@ -617,7 +690,7 @@ function renderCalendar() {
     const ds = prefix + pad(d);
     const list = state.calByDay[ds] || [];
     const chips = list.slice(0, 2).map((it) =>
-      `<button class="calchip cat-${it.category}" data-cal="${it.id}" title="${esc(it.title || '')}">${esc((it.title || '无标题').slice(0, 9))}</button>`).join('');
+      `<button class="calchip cat-${it.category}" data-cal="${it.id}" title="${esc(it.title || '')}">${esc(Array.from(it.title || '无标题').slice(0, 9).join(''))}</button>`).join('');
     const more = list.length > 2 ? `<span class="calmore">还有 ${list.length - 2} 项</span>` : '';
     const count = list.length ? `<span class="calcount">${list.length}</span>` : '';
     cells += `<div class="calcell${ds === today ? ' today' : ''}" data-day="${ds}">
@@ -687,43 +760,232 @@ function extIcon(name) {
   if (['mp3', 'wav', 'm4a'].includes(e)) return [icon('audio'), '音频'];
   return [icon('file'), '文件'];
 }
+function fileRowHTML(a) {
+  const [fileIcon, typeName] = extIcon(a.orig_name);
+  const plat = a.group_platform ? (PLATS[a.group_platform] || PLATS.other) : null;
+  return `<div class="frow">
+    <div class="ficon">${fileIcon}</div>
+    <div class="fmain">
+      <div class="fname">${hl(a.orig_name, state.q)} <span class="att-size">${fmtSize(a.size)}</span></div>
+      <div class="fmeta">
+        <span>${typeName}</span>
+        ${a.message_status === 'done' ? `<span class="fdone">${icon('check')} 已完成</span>` : ''}
+        <span title="打开预览次数">${icon('eye')} ${a.views || 0}</span>
+        <span title="下载次数">${icon('download')} ${a.downloads || 0}</span>
+        ${a.group_name ? `<span class="chip ${plat ? plat.cls : ''}">${plat ? plat.icon : ''}${plat ? plat.label : ''}·${esc(a.group_name)}</span>` : ''}
+        <span class="fmsg" data-msg="${a.message_id}">来自：${hl(a.message_title || '(无标题)', state.q)}</span>
+        <span>${esc(fmtReceived(a.created_at))}</span>
+      </div>
+    </div>
+    <a class="ghost" href="/api/attachments/${a.id}/download" target="_blank">打开</a>
+    <a class="ghost" href="/api/attachments/${a.id}/download?dl=1">下载</a>
+  </div>`;
+}
+function fileBarHTML(total, loaded, act, id, done) {
+  const rest = total - loaded;
+  const noun = done ? '个已完成文件' : '个文件';
+  const label = loaded ? `已显示 ${Math.min(loaded, total)} / ${total} ${noun}` : `共 ${total} ${noun}`;
+  const btn = rest > 0 ? `<button class="mini" data-act="${act}">${loaded ? '显示更多' : (done ? '加载已完成文件' : '加载文件列表')}</button>` : '';
+  return `<div class="morebar"${id ? ` id="${id}"` : ''}><span>${icon('file')} ${label}</span><span class="spacer"></span>${btn}</div>`;
+}
 async function loadFiles() {
+  const seq = loadSeq;
+  const stale = () => seq !== loadSeq;
   const view = $('#view');
   view.innerHTML = '<div class="loading">加载中…</div>';
-  const params = new URLSearchParams();
-  if (state.q) params.set('q', state.q);
-  if (state.group) params.set('group_id', state.group);
-  const data = await api('/api/files?' + params);
-  if (!data.items.length) {
-    view.innerHTML = `<div class="empty"><div class="big">${icon('file')}</div>还没有文件<br>在添加/编辑信息时可以上传附件</div>`;
+  const mkParams = (status) => {
+    const p = new URLSearchParams();
+    if (state.q) p.set('q', state.q);
+    if (state.group) p.set('group_id', state.group);
+    if (status) p.set('status', status);
+    return p;
+  };
+  // 主列表只放未完成信息的附件；已完成信息的附件像信息中心一样单独成区放在下方
+  // （勾选「显示已完成」时出现）。两区各自按需分页加载，默认只探总数；
+  // 搜索时直接加载第一页（搜索是要找具体文件，不该再多一步点击）
+  const openProbe = mkParams('open');
+  openProbe.set('limit', '1');
+  const data = await api('/api/files?' + openProbe);
+  if (stale()) return;
+  let doneTotal = 0, doneViews = 0, doneDls = 0, autoDone = false;
+  if (state.showDone) {
+    const doneProbe = mkParams('done');
+    doneProbe.set('limit', '1');
+    const d = await api('/api/files?' + doneProbe);
+    if (stale()) return;
+    doneTotal = d.total;
+    doneViews = d.totalViews || 0;
+    doneDls = d.totalDownloads || 0;
+    autoDone = !!state.q;
+  }
+  if (!data.total && !doneTotal) {
+    // 空态也要保留「显示已完成」开关：已完成附件可能存在，不能给一个无法翻案的假空结果
+    view.innerHTML = `
+      <div class="inboxhead"><h3>${icon('file')} 文件（0）</h3>
+        <label class="showdone"><input type="checkbox" id="files-showdone" ${state.showDone ? 'checked' : ''}> 显示已完成</label></div>
+      <div class="empty"><div class="big">${icon('file')}</div>还没有文件<br>在添加/编辑信息时可以上传附件</div>`;
+    const sd0 = $('#files-showdone');
+    if (sd0) sd0.addEventListener('change', () => {
+      state.showDone = sd0.checked;
+      renderView().catch((e2) => toast(e2.message, 'error'));
+    });
     return;
   }
-  // 「累计」用服务端的全量统计（跟随当前筛选）；老接口无此字段时退回当前页求和
-  const totViews = data.totalViews != null ? data.totalViews : data.items.reduce((s, a) => s + (a.views || 0), 0);
-  const totDls = data.totalDownloads != null ? data.totalDownloads : data.items.reduce((s, a) => s + (a.downloads || 0), 0);
+  const totViews = (data.totalViews || 0) + doneViews;
+  const totDls = (data.totalDownloads || 0) + doneDls;
   view.innerHTML = `
-    <div class="inboxhead"><h3>${icon('file')} 文件（${data.items.length}）</h3>
-      <span class="hint">${icon('eye')} 累计阅读 ${totViews} 次 · ${icon('download')} 累计下载 ${totDls} 次</span></div>
-    ` + data.items.map((a) => {
-    const [fileIcon, typeName] = extIcon(a.orig_name);
-    const plat = a.group_platform ? (PLATS[a.group_platform] || PLATS.other) : null;
-    return `<div class="frow">
-      <div class="ficon">${fileIcon}</div>
-      <div class="fmain">
-        <div class="fname">${hl(a.orig_name, state.q)} <span class="att-size">${fmtSize(a.size)}</span></div>
-        <div class="fmeta">
-          <span>${typeName}</span>
-          <span title="打开预览次数">${icon('eye')} ${a.views || 0}</span>
-          <span title="下载次数">${icon('download')} ${a.downloads || 0}</span>
-          ${a.group_name ? `<span class="chip ${plat ? plat.cls : ''}">${plat ? plat.icon : ''}${plat ? plat.label : ''}·${esc(a.group_name)}</span>` : ''}
-          <span class="fmsg" data-msg="${a.message_id}">来自：${hl(a.message_title || '(无标题)', state.q)}</span>
-          <span>${esc(fmtReceived(a.created_at))}</span>
+    <div class="inboxhead"><h3>${icon('file')} 文件（${data.total}）</h3>
+      <span class="hint">${icon('eye')} 累计阅读 ${totViews} 次 · ${icon('download')} 累计下载 ${totDls} 次</span>
+      <label class="showdone"><input type="checkbox" id="files-showdone" ${state.showDone ? 'checked' : ''}> 显示已完成</label></div>
+    ${data.total ? '<div id="file-list"></div>' + fileBarHTML(data.total, 0, 'filemore', 'file-more') : '<p class="empty-mini">没有未完成信息的附件</p>'}
+    ${doneTotal ? `<div id="done-files"><div class="feeddivider">${icon('check')} 已完成（${doneTotal}）</div><div id="done-file-list"></div>${fileBarHTML(doneTotal, 0, 'filedone', '', true)}</div>` : ''}`;
+  const sd = $('#files-showdone');
+  if (sd) sd.addEventListener('change', () => {
+    state.showDone = sd.checked;
+    renderView().catch((e2) => toast(e2.message, 'error'));
+  });
+  if (state.q) {
+    if (data.total) loadMoreFiles().catch((e2) => toast(e2.message, 'error'));
+    if (autoDone) loadMoreDoneFiles().catch(() => {});
+  }
+}
+async function loadMoreFiles() {
+  const list = $('#file-list');
+  if (!list) return;
+  const bar = $('#file-more');
+  const btn = bar && bar.querySelector('button');
+  if (btn) { btn.disabled = true; btn.textContent = '加载中…'; }
+  const offset = list.querySelectorAll('.frow').length;
+  const p = new URLSearchParams();
+  if (state.q) p.set('q', state.q);
+  if (state.group) p.set('group_id', state.group);
+  p.set('status', 'open');
+  p.set('limit', '100');
+  p.set('offset', String(offset));
+  try {
+    const d = await api('/api/files?' + p);
+    // 响应等待期间视图可能被重新渲染（同名的新容器），元素身份对不上就丢弃旧响应
+    if (!list.isConnected || $('#file-list') !== list) return;
+    list.insertAdjacentHTML('beforeend', d.items.map(fileRowHTML).join(''));
+    if (bar && bar.isConnected) bar.outerHTML = fileBarHTML(d.total, offset + d.items.length, 'filemore', 'file-more');
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = offset ? '显示更多' : '加载文件列表'; }
+  }
+}
+async function loadMoreDoneFiles() {
+  const list = $('#done-file-list');
+  if (!list) return;
+  const bar = list.parentElement.querySelector('.morebar');
+  const btn = bar && bar.querySelector('button');
+  if (btn) { btn.disabled = true; btn.textContent = '加载中…'; }
+  const offset = list.querySelectorAll('.frow').length;
+  const p = new URLSearchParams();
+  if (state.q) p.set('q', state.q);
+  if (state.group) p.set('group_id', state.group);
+  p.set('status', 'done');
+  p.set('limit', '100');
+  p.set('offset', String(offset));
+  try {
+    const d = await api('/api/files?' + p);
+    // 响应等待期间视图可能被重新渲染（同名的新容器），元素身份对不上就丢弃旧响应
+    if (!list.isConnected || $('#done-file-list') !== list) return;
+    list.insertAdjacentHTML('beforeend', d.items.map(fileRowHTML).join(''));
+    if (bar && bar.isConnected) bar.outerHTML = fileBarHTML(d.total, offset + d.items.length, 'filedone', '', true);
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = offset ? '显示更多' : '加载已完成文件'; }
+  }
+}
+
+/* ========= 名单库（独立视图：随时新建 / 编辑 / 删除，接龙、抽签、生日导处复用） ========= */
+function rosterPreviewChips(raw, keepId) {
+  const parsed = jlParseRoster(raw, keepId);
+  if (!parsed.list.length) return '<span class="hint">（名单内容为空）</span>';
+  return `识别到 <b>${parsed.list.length}</b> 人${keepId ? '（含学号）' : ''}：` +
+    parsed.list.slice(0, 50).map((m) => `<span class="jl-chip plain">${esc(jlSlotLabel(m))}</span>`).join('') +
+    (parsed.list.length > 50 ? `<span class="jl-chip plain">…共 ${parsed.list.length} 人</span>` : '');
+}
+async function loadRosters() {
+  const seq = loadSeq;
+  const view = $('#view');
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  const data = await api('/api/rosters');
+  if (seq !== loadSeq) return;
+  const items = data.items || [];
+  const emptyHint = items.length ? '' : `<div class="empty"><div class="big">${icon('users')}</div>还没有保存的名单<br>点「新建名单」，或在发起接龙时勾选「保存到名单库」</div>`;
+  view.innerHTML = `
+    <div class="inboxhead"><h3>${icon('users')} 名单库（${items.length}）</h3>
+      <span class="hint">名单存一份，发起接龙、抽签点名、生日导入时直接复用</span>
+      ${canEdit() ? `<button class="ghost" id="btn-roster-new">${icon('plus')} 新建名单</button>` : ''}</div>
+    ${items.map((r) => `
+      <div class="panel" data-rid="${r.id}">
+        <div class="jl-head"><h2>${esc(r.name)}</h2><span class="hint">${r.count} 人${r.keepId ? ' · 含学号' : ''} · ${esc(fmtReceived(r.updated_at))}</span></div>
+        <div class="roster-pv" hidden>${rosterPreviewChips(r.roster, r.keepId)}</div>
+        <div class="card-actions">
+          <button class="ghost" data-ract="toggle">${icon('eye')} 成员</button>
+          <button class="ghost" data-ract="copy">${icon('copy')} 复制全文</button>
+          ${canEdit() ? `<button class="ghost" data-ract="edit">${icon('edit')} 编辑</button>
+          <button class="ghost danger" data-ract="del">${icon('trash')} 删除</button>` : ''}
         </div>
-      </div>
-      <a class="ghost" href="/api/attachments/${a.id}/download" target="_blank">打开</a>
-      <a class="ghost" href="/api/attachments/${a.id}/download?dl=1">下载</a>
-    </div>`;
-  }).join('');
+      </div>`).join('')}
+    ${emptyHint}`;
+  const newBtn = $('#btn-roster-new');
+  if (newBtn) newBtn.addEventListener('click', () => openRosterModal(null));
+  view.querySelectorAll('.panel[data-rid]').forEach((card) => {
+    const r = items.find((x) => String(x.id) === card.dataset.rid);
+    if (!r) return;
+    const pv = card.querySelector('.roster-pv');
+    const tbtn = card.querySelector('[data-ract="toggle"]');
+    if (tbtn) tbtn.addEventListener('click', () => {
+      pv.hidden = !pv.hidden;
+      tbtn.innerHTML = icon('eye') + (pv.hidden ? ' 成员' : ' 收起');
+    });
+    const cbtn = card.querySelector('[data-ract="copy"]');
+    if (cbtn) cbtn.addEventListener('click', () => jlCopy(r.roster, '名单全文已复制，可粘贴到接龙 / 抽签'));
+    const ebtn = card.querySelector('[data-ract="edit"]');
+    if (ebtn) ebtn.addEventListener('click', () => openRosterModal(r));
+    const dbtn = card.querySelector('[data-ract="del"]');
+    if (dbtn) dbtn.addEventListener('click', async () => {
+      if (!confirm(`确定删除名单「${r.name}」（${r.count} 人）吗？\n已发起的接龙 / 抽签不受影响。`)) return;
+      try {
+        await api('/api/rosters/' + r.id, { method: 'DELETE' });
+        toast('名单已删除');
+        renderView().catch((e2) => toast(e2.message, 'error'));
+      } catch (e2) { toast(e2.message, 'error'); }
+    });
+  });
+}
+function openRosterModal(item) {
+  openModal(`
+    <h2>${item ? `${icon('edit')} 编辑名单` : `${icon('users')} 新建名单`}</h2>
+    <div class="form">
+      <div class="labrow"><label>名单名称</label></div>
+      <input id="rs-name" maxlength="60" value="${esc(item ? item.name : '')}" placeholder="如：计科2603班">
+      <div class="labrow"><label>名单内容（每行一个，支持「学号 姓名」，Excel 整列直接粘贴）</label></div>
+      <textarea id="rs-raw" rows="10" placeholder="2023001 张三&#10;李四">${esc(item ? item.roster : '')}</textarea>
+      <label class="splitline"><input type="checkbox" id="rs-keepid" ${item && item.keepId ? 'checked' : ''}> 保留学号（重名时按学号区分）</label>
+      <div id="rs-pv" class="hint"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" id="btn-cancel">取消</button>
+      <button class="primary" id="rs-save">${icon('check')} 保存</button>
+    </div>`);
+  const pv = () => { $('#rs-pv').innerHTML = rosterPreviewChips($('#rs-raw').value, $('#rs-keepid').checked); };
+  $('#rs-raw').addEventListener('input', pv);
+  $('#rs-keepid').addEventListener('change', pv);
+  pv();
+  $('#rs-save').addEventListener('click', async () => {
+    const body = { name: $('#rs-name').value.trim(), rosterRaw: $('#rs-raw').value, keepId: $('#rs-keepid').checked };
+    if (!body.name) { toast('请填写名单名称', 'error'); return; }
+    try {
+      if (item) await api('/api/rosters/' + item.id, { method: 'PUT', body });
+      else await api('/api/rosters', { method: 'POST', body });
+      toast(item ? '名单已更新 ✓' : '名单已保存 ✓');
+      closeModal();
+      renderView().catch((e2) => toast(e2.message, 'error'));
+    } catch (e) { toast(e.message, 'error'); }
+  });
 }
 
 /* ========= 统计与接入 ========= */
@@ -731,11 +993,14 @@ function statCard(lab, num, cls = '') {
   return `<div class="statcard ${cls}"><div class="num">${num}</div><div class="lab">${lab}</div></div>`;
 }
 async function loadStats() {
+  const seq = loadSeq;
   const view = $('#view');
   view.innerHTML = '<div class="loading">加载中…</div>';
   const st = await api('/api/stats'); // 会话状态由启动时的 loadMe 提供，这里不重复请求
+  if (seq !== loadSeq) return;
   const editable = canEdit();
   const cfg = editable ? await api('/api/config').catch(() => null) : null;
+  if (seq !== loadSeq) return;
   const maxG = Math.max(1, ...st.byGroup.map((g) => g.count));
   const maxC = Math.max(1, ...st.byCategory.map((c) => c.c));
   const ingestUrl = cfg ? `${cfg.lanUrls[0] || `http://localhost:${cfg.port}`}/api/ingest?token=${cfg.ingestToken}` : '';
@@ -1239,8 +1504,25 @@ function jlParseRoster(raw, keepId) {
         push(keepId ? pendingId : null, t);
         pendingId = null;
       } else if (idIdx >= 0) {
-        const idTok = tokens[idIdx];
-        tokens.filter((_, i) => i !== idIdx).forEach((n, i) => push(keepId && i === 0 ? idTok : null, n));
+        // 与 lib/jielong.js parseRoster 保持同步：多 token 段先剥 1-2 位小序号
+        // （"1 张三 2023001"），再让每个姓名就近配一个学号（"2023001 张三 2023002 李四"），
+        // 学号不再被当成姓名入库
+        const seqLike = tokens.length >= 3 && /^\d{1,2}$/.test(tokens[0]) && tokens.slice(1).some((t) => jlIsIdToken(t));
+        const toks = seqLike ? tokens.slice(1) : tokens;
+        const idOf = new Map(); // 姓名所在下标 -> 配对的学号
+        for (let ii = 0; ii < toks.length; ii++) {
+          if (!jlIsIdToken(toks[ii])) continue;
+          if (ii > 0 && !jlIsIdToken(toks[ii - 1]) && !idOf.has(ii - 1)) idOf.set(ii - 1, toks[ii]);
+          else {
+            let j = ii + 1;
+            while (j < toks.length && jlIsIdToken(toks[j])) j++;
+            if (j < toks.length && !idOf.has(j)) idOf.set(j, toks[ii]);
+          }
+        }
+        for (let k = 0; k < toks.length; k++) {
+          if (jlIsIdToken(toks[k])) continue;
+          push(keepId ? (idOf.get(k) || null) : null, toks[k]);
+        }
         pendingId = null;
       } else {
         tokens.forEach((t) => { push(keepId ? pendingId : null, t); pendingId = null; });
@@ -1316,11 +1598,13 @@ function jlProgressHtml(a) {
 
 /* ---------- 接龙列表 ---------- */
 async function loadJielong() {
+  const seq = loadSeq;
   jlStopTimer();
   const view = $('#view');
   if (state.jl) { await loadJielongDetail(); return; }
   view.innerHTML = '<div class="loading">加载中…</div>';
   const data = await api('/api/jielong');
+  if (seq !== loadSeq) return;
   // 清理已失效的本地入口（接龙被删除后）
   const known = new Set(data.items.map((x) => x.id));
   const mine = jlMine();
@@ -1360,15 +1644,19 @@ async function loadJielong() {
 
 /* ---------- 接龙详情（管理台） ---------- */
 async function loadJielongDetail() {
+  if (!state.jl) return; // 轮询回调可能在用户退出详情后才回来，此时不能再覆盖视图
+  const seq = loadSeq;
   const view = $('#view');
   view.innerHTML = '<div class="loading">加载中…</div>';
   let a;
   try { a = await api('/api/jielong/' + state.jl.id); }
   catch (e) {
+    if (seq !== loadSeq) return;
     state.jl = null;
     toast(e.message, 'error');
     return loadJielong();
   }
+  if (seq !== loadSeq) return; // 等待期间已切换视图，丢弃旧响应
   const token = state.jl.token || jlTokenOf(a.id) || (a.adminToken || ''); // 管理员可从详情取回令牌
   const canManage = canEdit() || !!token;
   if (token && !jlTokenOf(a.id)) jlMineRemember(a.id, token, a.title); // 委托链接：保存入口
@@ -1456,6 +1744,7 @@ async function loadJielongDetail() {
     try {
       await api('/api/jielong/' + state.jl.id); // 先探活，接口挂了就静默跳过本轮
     } catch (e) { /* 静默 */ return; }
+    if (!state.jl || state.view !== 'jielong') return; // 探活期间已退出详情页，别再覆盖视图
     const y = window.scrollY; // 在替换 DOM 前捕获，替换后内容高度变化可能重置滚动
     const cur = view.innerHTML;
     state.jlQuiet = true;
@@ -1681,10 +1970,12 @@ function openJielongEditModal(a, token) {
 
 /* ========= 抽签（按班级名单公平轮抽） ========= */
 async function loadDraw() {
+  const seq = loadSeq;
   const view = $('#view');
   if (state.draw) { await loadDrawDetail(); return; }
   view.innerHTML = '<div class="loading">加载中…</div>';
   const data = await api('/api/draw');
+  if (seq !== loadSeq) return;
   const items = data.items.map((d) => `
     <div class="panel">
       <div class="jl-head"><h2>${esc(d.title)}</h2>${d.remainingCount ? `<span class="jl-badge on">箱内剩 ${d.remainingCount}/${d.total}</span>` : '<span class="jl-badge off">本轮已抽完</span>'}</div>
@@ -1714,11 +2005,16 @@ async function loadDraw() {
 }
 
 async function loadDrawDetail() {
+  const seq = loadSeq;
   const view = $('#view');
   view.innerHTML = '<div class="loading">加载中…</div>';
   let d;
   try { d = await api('/api/draw/' + state.draw); }
-  catch (e) { state.draw = null; toast(e.message, 'error'); return loadDraw(); }
+  catch (e) {
+    if (seq !== loadSeq) return;
+    state.draw = null; toast(e.message, 'error'); return loadDraw();
+  }
+  if (seq !== loadSeq) return; // 等待期间已切换视图，丢弃旧响应
   renderDrawDetail(d);
 }
 
@@ -1948,6 +2244,8 @@ async function refreshBirthdaysToday() {
   try {
     bdTodayCache = (await api('/api/birthdays')).today || [];
     setNavBadge('birthday', bdTodayCache.length, { bday: true }); // 有人过生日时，导航「🎂 生日」亮起弹跳的 🎂
+    // 首屏竞态：生日数据比信息流先发出、后到达时，补插横幅（addBdBanner 自带查重）
+    if (state.view === 'feed' && !$('.bd-feedbanner')) addBdBanner();
   } catch (e) { /* 静默 */ }
   return bdTodayCache || [];
 }
@@ -1974,9 +2272,11 @@ async function checkBirthdayNotifs() {
 }
 
 async function loadBirthdays() {
+  const seq = loadSeq;
   const view = $('#view');
   view.innerHTML = '<div class="loading">加载中…</div>';
   const data = await api('/api/birthdays');
+  if (seq !== loadSeq) return;
   const wishes = {};
   const wishOf = (m) => { if (!wishes[m.id]) wishes[m.id] = bdWish(m); return wishes[m.id]; };
   const bdAvaColor = (m) => ['linear-gradient(135deg,#f783ac,#f9c74f)', 'linear-gradient(135deg,#a78bfa,#60a5fa)', 'linear-gradient(135deg,#4ade80,#38bdf8)', 'linear-gradient(135deg,#fb923c,#f472b6)'][(m.name || '?').charCodeAt(0) % 4];
@@ -2010,7 +2310,7 @@ async function loadBirthdays() {
 
   const upCards = data.items.filter((m) => !m.isToday).map((m, i) => `
     <div class="bd-card${m.pending ? ' pending' : (m.daysUntil <= 7 ? ' soon' : '')}${canEdit() ? ' has-acts' : ''}" style="animation-delay:${Math.min(i * 45, 600)}ms">
-      <div class="bd-ava" style="background:${m.pending ? 'var(--hover)' : bdAvaColor(m)}">${m.pending ? '?' : esc((m.name || '?')[0])}</div>
+      <div class="bd-ava" style="background:${m.pending ? 'var(--hover)' : bdAvaColor(m)}">${m.pending ? '?' : esc(Array.from(m.name || '?')[0])}</div>
       <div class="bd-uinfo">
         <div class="bd-uname">${esc(m.name)}</div>
         <div class="bd-usub">${m.pending ? '生日待填' : `${icon('birthday')} ${m.month} 月 ${m.day} 日${m.turningAge != null ? ' · 将满 ' + m.turningAge + ' 岁' : ''}`}</div>
@@ -2024,6 +2324,7 @@ async function loadBirthdays() {
   if (canEdit()) {
     let lib = [];
     try { lib = (await api('/api/rosters')).items; } catch (e) { /* 忽略 */ }
+    if (seq !== loadSeq) return; // 名单库慢响应期间切走视图，不再覆盖
     if (lib.length) {
       libHtml = `
       <div class="jl-actions">
@@ -2148,6 +2449,7 @@ const CMDK_VIEWS = [
   ['feed', '信息中心', 'feed'], ['inbox', '等待审核', 'inbox'], ['tasks', '待办任务', 'check'],
   ['jielong', '活动接龙', 'jielong'], ['draw', '抽签点名', 'draw'], ['birthday', '生日祝福', 'birthday'],
   ['calendar', '日历详情', 'calendar'], ['files', '文件中心', 'file'], ['stats', '统计接入', 'chart'],
+  ['rosters', '名单库', 'users'],
 ];
 let cmdkItems = [], cmdkIndex = 0, cmdkSearchTimer = null, cmdkSeq = 0;
 
@@ -2172,7 +2474,9 @@ function cmdkOpen() {
 }
 
 function cmdkCommands() {
-  const cmds = CMDK_VIEWS.map(([v, label, ic]) => ({
+  // 名单库是管理功能（访客隐藏入口），命令面板同步按权限过滤
+  const views = canEdit() ? CMDK_VIEWS : CMDK_VIEWS.filter(([v]) => v !== 'rosters');
+  const cmds = views.map(([v, label, ic]) => ({
     iconHtml: icon(ic), label: '转到：' + label, hint: '视图',
     run: () => { state.view = v; renderView().catch((e) => toast(e.message, 'error')); },
   }));
@@ -2279,11 +2583,15 @@ function openHelpModal() {
 /* ========= 视图切换 ========= */
 // 顶栏控件只在适用的页面显示：排序只在信息流有用；统计页不响应群筛选
 function syncTopbar() {
-  $('#group-sel').style.display = (state.view === 'stats' || state.view === 'jielong' || state.view === 'draw' || state.view === 'birthday') ? 'none' : '';
+  $('#group-sel').style.display = (state.view === 'stats' || state.view === 'jielong' || state.view === 'draw' || state.view === 'birthday' || state.view === 'rosters') ? 'none' : '';
   $('#sortsel').style.display = state.view === 'feed' ? '' : 'none';
 }
+// 视图加载代次：renderView 每次自增并传给视图加载器。加载器的响应回来时若代次已变
+// （用户已切换视图 / 改了筛选），直接丢弃，防止慢的旧请求覆盖新界面
+let loadSeq = 0;
 async function renderView() {
   jlStopTimer();
+  const seq = ++loadSeq;
   saveFilters();
   syncNavActive();
   syncTopbar();
@@ -2298,9 +2606,12 @@ async function renderView() {
     else if (state.view === 'birthday') await loadBirthdays();
     else if (state.view === 'calendar') await loadCalendar();
     else if (state.view === 'files') await loadFiles();
+    else if (state.view === 'rosters') await loadRosters();
     else await loadStats();
     window.scrollTo(0, 0);
   } catch (e) {
+    // 旧视图的迟到错误不覆盖新视图；只有仍是当前视图时才显示错误页
+    if (seq !== loadSeq) return;
     // 加载失败给出重试入口，而不是卡在"加载中"
     view.innerHTML = `<div class="empty"><div class="big">${icon('alert')}</div>加载失败：${esc(e.message || '网络错误')}<br>
       <button class="ghost" id="btn-retry" style="margin-top:12px">${icon('refresh')} 重试</button></div>`;
@@ -2321,7 +2632,7 @@ async function refresh() {
 // 所有导航按钮（侧栏 + 底栏 + 更多面板）统一同步活动态；
 // 「更多」按钮在当前视图属于低频视图时也点亮
 const NAV_SEL = '#mainnav button, #tabbar button, #tabsheet button';
-const MORE_VIEWS = ['inbox', 'calendar', 'files', 'stats'];
+const MORE_VIEWS = ['inbox', 'calendar', 'files', 'stats', 'rosters'];
 function syncNavActive() {
   $$(NAV_SEL).forEach((b) => {
     b.classList.toggle('active', b.dataset.view === state.view);
@@ -2414,6 +2725,29 @@ function bindEvents() {
   const loginBtn = $('#btn-login');
   if (loginBtn) loginBtn.addEventListener('click', () => { location.href = '/login'; });
 
+  // PWA 安装入口：仅 Android / 桌面 Chrome 等会触发安装事件（需 HTTPS），
+  // iOS 没有该事件，用 Safari 分享菜单「添加到主屏幕」，HTTP 局域网下两者都退化为普通快捷方式
+  let installEvt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    installEvt = e;
+    const b = $('#btn-install');
+    if (b) b.style.display = '';
+  });
+  window.addEventListener('appinstalled', () => {
+    installEvt = null;
+    const b = $('#btn-install');
+    if (b) b.style.display = 'none';
+    toast('已安装到桌面 ✓');
+  });
+  const installBtn = $('#btn-install');
+  if (installBtn) installBtn.addEventListener('click', async () => {
+    if (!installEvt) return;
+    try { await installEvt.prompt(); } catch (e) { /* 用户环境不支持 */ }
+    installEvt = null;
+    installBtn.style.display = 'none';
+  });
+
   // 全局键盘快捷键：/ 搜索、Ctrl+K 命令面板、n 新建、1-9 切视图、? 帮助
   document.addEventListener('keydown', (e) => {
     const tag = (document.activeElement && document.activeElement.tagName) || '';
@@ -2469,6 +2803,13 @@ function bindEvents() {
       }
       return;
     }
+    // 「已完成」区 / 文件中心（主列表与已完成区）的加载与显示更多（分页条不在卡片里，单独接住）
+    const moreBtn = e.target.closest('[data-act="donemore"], [data-act="filemore"], [data-act="filedone"]');
+    if (moreBtn) {
+      const handlers = { donemore: loadMoreDone, filemore: loadMoreFiles, filedone: loadMoreDoneFiles };
+      (handlers[moreBtn.dataset.act] || loadMoreFiles)().catch((e2) => toast(e2.message, 'error'));
+      return;
+    }
     // 文件中心：点"来自：xxx"打开对应信息编辑
     const fmsg = e.target.closest('.fmsg');
     if (fmsg && fmsg.dataset.msg) {
@@ -2485,6 +2826,15 @@ function bindEvents() {
     if (!card) return;
     const id = Number(card.dataset.id);
     const act = btn.dataset.act;
+    if (act === 'bodymore') {
+      // 展开/收起长正文：全文已在卡片里，只切换折叠样式，不用重新渲染
+      const p = card.querySelector('.card-body');
+      const clamped = p.classList.toggle('clamped');
+      btn.classList.toggle('open', !clamped);
+      btn.setAttribute('aria-expanded', String(!clamped));
+      btn.innerHTML = icon('chev-down') + (clamped ? ' 展开全文' : ' 收起');
+      return;
+    }
     try {
       if (act === 'toggle') { const it = await api(`/api/messages/${id}/toggle`, { method: 'POST' }); toast(it.status === 'done' ? '已完成 ✓' : '已取消完成'); refresh(); }
       else if (act === 'pin') { await api(`/api/messages/${id}/pin`, { method: 'POST' }); refresh(); }

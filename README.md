@@ -42,7 +42,7 @@ InfoHub 把这些搬到一个本地网页：老师发通知，同学点链接报
 | **活动接龙** | 生成链接发到班群，同学点开即填即交（无需注册）；粘贴班级名单自动比对，没接的直接列出来；重名按学号区分、名单外标记、专属链接防代填、未接名单一键提醒、导出 CSV、扫码接龙、管理权可委托给班委 |
 | **抽签点名** | 按班级名单抽 N 人：抽过的自动排除、下次不再被抽到，箱内抽空自动开新一轮；自定义人数、撤销、重置、历史留痕 |
 | **生日祝福** | 全班生日倒计时；生日当天祝福卡、信息页横幅、浏览器通知；祝福一键复制发班群；可上传班徽水印 |
-| **班级名单库** | 名单保存一份，接龙、抽签、生日到处复用；支持"学号 姓名"解析与实时预览 |
+| **班级名单库** | 独立视图随时管理：新建 / 编辑 / 删除 / 复制，成员实时预览；接龙、抽签、生日到处复用；支持"学号 姓名"解析（名单含学生信息，访客不可见） |
 | **QQ 机器人** | OneBot 11 接入（NapCat / LLOneBot 等），群消息自动进站；人工审核 / 自动收录两种模式，防闲聊过滤、群白名单、HMAC 签名校验 |
 | **命令面板** | `Ctrl/⌘+K` 唤起：视图跳转、常用操作、信息实时搜索；配套全套键盘快捷键（按 `?` 查看） |
 | **文件中心** | 图片 / PDF 在线预览，附件阅读 / 下载次数统计 |
@@ -171,6 +171,24 @@ curl -X POST "http://localhost:5757/api/ingest?token=你的令牌" \
 
 ---
 
+## 添加到手机桌面（PWA）
+
+信息中心可以像 App 一样装到手机桌面，点图标直接打开：
+
+**Android（Chrome / Edge）**
+1. 手机连同一 Wi-Fi，打开启动日志里的局域网地址（如 `http://192.168.x.x:5757`）
+2. 浏览器菜单（右上角 ⋮）→「添加到主屏幕」
+3. 未配置 HTTPS 时装的是网页快捷方式；绑域名 + HTTPS 后可独立窗口运行、支持离线缓存，条件满足时顶栏还会出现「安装到桌面」按钮
+
+**iPhone / iPad（Safari）**
+1. 用 Safari 打开站点
+2. 点底部分享按钮 →「添加到主屏幕」
+3. 添加后全屏运行，桌面显示班级图标
+
+> 完整的 App 体验（独立窗口、离线缓存、安装提示）依赖 HTTPS，公网部署绑定域名 + 证书即可获得，见 [部署](#部署)。
+
+---
+
 ## QQ 机器人接入（OneBot 11）
 
 在电脑上用 [NapCat](https://napneko.github.io/) / LLOneBot / Lagrange / go-cqhttp 等 OneBot 11 框架登录一个 QQ 小号拉进班级群，网络配置里添加 **HTTP POST 上报**，群消息就会自动进站。
@@ -252,14 +270,14 @@ curl -X POST "http://localhost:5757/api/ingest?token=你的令牌" \
 | POST | `/api/upload` | 上传附件（multipart/form-data，需 `message_id`） |
 | GET | `/api/attachments/:id/download` · `:raw` | 下载附件（`?dl=1` 强制下载；阅读/下载计数） |
 | DELETE | `/api/attachments/:id` | 删除附件 |
-| GET | `/api/files` | 附件列表（含阅读 / 下载统计） |
+| GET | `/api/files` | 附件列表（含阅读 / 下载统计；`status=open/done` 按信息完成状态过滤，`limit`/`offset` 分页） |
 | POST | `/api/parse` | 智能解析文本（不落库） |
 | POST | `/api/similar` | 相似信息检测（防重复录入） |
 | POST | `/api/ingest?token=` | 外部接入 Webhook |
 | POST | `/api/onebot/report` | OneBot 11 HTTP POST 上报（QQ 机器人） |
 | GET / POST / PUT / DELETE | `/api/jielong*` | 接龙 CRUD / 学生提交 / 停止 / 记录删除 / CSV 导出 |
 | GET / POST / PUT / DELETE | `/api/draw*` | 抽签签箱 CRUD / 抽签 / 撤销 / 重置 |
-| GET / POST / DELETE | `/api/rosters*` | 班级名单库 |
+| GET / POST / PUT / DELETE | `/api/rosters*` | 班级名单库（GET 需管理员——名单含学生学号姓名；PUT 用于改名 / 改内容） |
 | GET / POST / PUT / DELETE | `/api/birthdays*` | 生日成员 CRUD / 名单导入 |
 | GET / POST / DELETE | `/api/class-badge` | 班徽背景（上传 / 访问 / 移除） |
 | GET | `/api/inbox` | 待审核收件箱列表（仅管理员） |
@@ -267,7 +285,7 @@ curl -X POST "http://localhost:5757/api/ingest?token=你的令牌" \
 | DELETE | `/api/inbox/:id`、`/api/inbox` | 忽略待审核消息 |
 | GET | `/api/calendar.ics` | 导出截止提醒日历（只含未逾期事项） |
 | GET | `/api/export` | 导出 JSON 备份（含附件记录、接龙、抽签、名单库、生日） |
-| POST | `/api/import?force=1` | 导入 JSON 备份（仅空库时允许，事务保护） |
+| POST | `/api/import?force=1` | 导入 JSON 备份（事务保护；`force=1` 为合并导入：接龙/抽签按原 id 替换、群按 ext_key 合并、名单同名覆盖、生日同名同日跳过） |
 | GET | `/api/stats` | 统计数据 |
 | POST | `/api/login` / `/api/logout` | 管理员登录 / 登出 |
 

@@ -80,7 +80,15 @@ function autoBackup() {
     fs.mkdirSync(BACKUP_DIR, { recursive: true });
     const target = path.join(BACKUP_DIR, `auto-${nowStr().slice(0, 10)}.db`);
     if (fs.existsSync(target)) return;
-    db.exec(`VACUUM INTO '${target.replace(/\\/g, '/').replace(/'/g, "''")}'`);
+    // 顺手清掉历史失败留下的半截临时文件（正式轮换的匹配规则只认 .db，管不到它们）
+    for (const f of fs.readdirSync(BACKUP_DIR)) {
+      if (f.endsWith('.db.tmp')) { try { fs.unlinkSync(path.join(BACKUP_DIR, f)); } catch (e) { /* 忽略 */ } }
+    }
+    // 先写临时文件再改名：VACUUM 中途失败（磁盘满 / 断电）不会留下顶掉好备份的半截文件
+    const tmp = target + '.tmp';
+    try { fs.unlinkSync(tmp); } catch (e) { /* 不存在 */ }
+    db.exec(`VACUUM INTO '${tmp.replace(/\\/g, '/').replace(/'/g, "''")}'`);
+    fs.renameSync(tmp, target);
     const files = fs.readdirSync(BACKUP_DIR).filter((f) => /^auto-\d{4}-\d{2}-\d{2}\.db$/.test(f)).sort();
     while (files.length > 14) {
       const old = files.shift();
@@ -94,6 +102,38 @@ function autoBackup() {
 }
 autoBackup();
 setInterval(autoBackup, 30 * 60 * 1000);
+
+/* ---------- 附件目录清扫：删除磁盘上已无数据库引用的孤儿文件 ---------- */
+// 出处：Windows 下文件被占用导致删除信息时 unlink 失败、上传写盘后进程崩溃等。
+// 启动时扫一遍 + 每 24 小时一次；跳过 1 小时内的新文件，避免误删正在上传的内容。
+function sweepOrphanUploads() {
+  try {
+    const known = new Set(db.prepare('SELECT stored_name FROM attachments').all().map((r) => String(r.stored_name).replace(/\//g, path.sep)));
+    const cutoff = Date.now() - 3600 * 1000;
+    let removed = 0;
+    const scan = (dir, depth) => {
+      for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fp = path.join(dir, f.name);
+        if (f.isDirectory()) { if (depth < 2) scan(fp, depth + 1); continue; }
+        if (known.has(path.relative(UPLOAD_DIR, fp))) continue;
+        try {
+          if (fs.statSync(fp).mtimeMs > cutoff) continue;
+          fs.unlinkSync(fp);
+          removed++;
+        } catch (e) { /* 单个文件失败不影响整体 */ }
+      }
+    };
+    scan(UPLOAD_DIR, 0);
+    if (removed) {
+      console.log(`附件清扫：移除 ${removed} 个无引用文件`);
+      log(`附件清扫：移除 ${removed} 个无引用文件`);
+    }
+  } catch (e) {
+    console.error('附件清扫失败：' + e.message);
+  }
+}
+sweepOrphanUploads();
+setInterval(sweepOrphanUploads, 24 * 60 * 60 * 1000);
 
 /* ---------- 访问密码（可选，存 data/config.json 的 password 字段） ---------- */
 const SESSION_TTL = 30 * 24 * 60 * 60 * 1000; // 与 Cookie Max-Age 一致（30 天）
@@ -224,7 +264,9 @@ function bindOnebotGroup(qqGid, displayName) {
   const exist = db.prepare('SELECT * FROM groups WHERE ext_key = ?').get(ext);
   if (exist) return exist.id;
   const byName = db.prepare('SELECT * FROM groups WHERE name = ?').get(displayName);
-  if (byName) {
+  if (byName && !byName.ext_key) {
+    // 只认领还没绑过其它 QQ 群的同名群：两个 QQ 群配了相同显示名时，
+    // 否则后上报的会改写前者的 ext_key，两个群的消息来回混进同一个站内群
     db.prepare('UPDATE groups SET ext_key = ? WHERE id = ?').run(ext, byName.id);
     return byName.id;
   }
@@ -446,7 +488,7 @@ route('GET', '/api/messages', (ctx) => {
     const like = likeArg(search);
     args.push(like, like, like, like);
   }
-  const limit = Math.min(Number(q.get('limit')) || 50, 200);
+  const limit = Math.min(Math.max(Number(q.get('limit')) || 50, 1), 200);
   const offset = Math.max(Number(q.get('offset')) || 0, 0);
   const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
   const total = db.prepare(`SELECT COUNT(*) AS c FROM messages m ${whereSql}`).get(...args).c;
@@ -550,19 +592,29 @@ route('POST', '/api/upload', async (ctx) => {
   const msg = db.prepare('SELECT id FROM messages WHERE id = ?').get(mid);
   if (!msg) throw new HttpError(400, 'message_id 无效');
   const saved = [];
-  for (const f of files) {
-    const orig = sanitizeName(f.filename);
-    const ext = (orig.match(/\.[A-Za-z0-9]{1,9}$/) || [''])[0].toLowerCase();
-    const month = nowStr().slice(0, 7).replace('-', '');
-    const dir = path.join(UPLOAD_DIR, month);
-    fs.mkdirSync(dir, { recursive: true });
-    const stored = crypto.randomBytes(8).toString('hex') + ext;
-    fs.writeFileSync(path.join(dir, stored), f.data);
-    const rel = path.relative(UPLOAD_DIR, path.join(dir, stored)).replace(/\\/g, '/');
-    const info = db.prepare(`INSERT INTO attachments (message_id, orig_name, stored_name, size, mime, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(mid, orig, rel, f.data.length, sField(f.contentType, 100), nowStr());
-    saved.push(Number(info.lastInsertRowid));
+  const written = [];
+  try {
+    for (const f of files) {
+      const orig = sanitizeName(f.filename);
+      const ext = (orig.match(/\.[A-Za-z0-9]{1,9}$/) || [''])[0].toLowerCase();
+      const month = nowStr().slice(0, 7).replace('-', '');
+      const dir = path.join(UPLOAD_DIR, month);
+      fs.mkdirSync(dir, { recursive: true });
+      const stored = crypto.randomBytes(8).toString('hex') + ext;
+      const fp0 = path.join(dir, stored);
+      fs.writeFileSync(fp0, f.data);
+      written.push(fp0);
+      const rel = path.relative(UPLOAD_DIR, fp0).replace(/\\/g, '/');
+      const info = db.prepare(`INSERT INTO attachments (message_id, orig_name, stored_name, size, mime, created_at)
+          VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(mid, orig, rel, f.data.length, sField(f.contentType, 100), nowStr());
+      saved.push(Number(info.lastInsertRowid));
+    }
+  } catch (e) {
+    // 多文件上传中途失败（如磁盘满）：把本次已写盘的文件和已入库的记录一并回滚，不留孤儿
+    for (const id of saved) { try { db.prepare('DELETE FROM attachments WHERE id = ?').run(id); } catch (e2) { /* 忽略 */ } }
+    for (const fp0 of written) { try { fs.unlinkSync(fp0); } catch (e2) { /* 留给清扫任务 */ } }
+    throw e;
   }
   return { ok: true, ids: saved };
 });
@@ -581,7 +633,10 @@ function serveAttachment(ctx, a, { inline, count, cache } = {}) {
     'X-Content-Type-Options': 'nosniff',
     ...(cache ? { 'Cache-Control': 'public, max-age=3600' } : {}),
   });
-  fs.createReadStream(fp).pipe(res);
+  const stream = fs.createReadStream(fp);
+  // 头已发出，读流失败（文件被并发删除/权限变化）只能断开连接，避免响应永不结束
+  stream.on('error', () => res.destroy());
+  stream.pipe(res);
 }
 route('GET', '/api/attachments/:id/download', (ctx) => {
   const id = Number(ctx.params.id);
@@ -636,18 +691,23 @@ route('GET', '/api/files', (ctx) => {
     const like = likeArg(s);
     args.push(like, like);
   }
-  const limit = Math.min(Number(ctx.query.get('limit')) || 100, 300);
+  // 按信息完成状态过滤（status=open 只看未完成信息的附件 / status=done 只看已完成的）；缺省返回全部
+  const st = ctx.query.get('status');
+  if (st === 'open' || st === 'done') { where.push('m.status = ?'); args.push(st); }
+  const limit = Math.min(Math.max(Number(ctx.query.get('limit')) || 100, 1), 300);
+  const offset = Math.max(Number(ctx.query.get('offset')) || 0, 0);
   const whereSql = where.join(' AND ');
   const rows = db.prepare(`SELECT a.*, m.title AS message_title, m.status AS message_status, m.group_id,
       g.name AS group_name, g.platform AS group_platform
       FROM attachments a
       JOIN messages m ON m.id = a.message_id
       LEFT JOIN groups g ON g.id = m.group_id
-      WHERE ${whereSql} ORDER BY a.id DESC LIMIT ?`).all(...args, limit);
+      WHERE ${whereSql} ORDER BY a.id DESC LIMIT ? OFFSET ?`).all(...args, limit, offset);
   // 全量统计（跟随当前筛选）：前端「累计阅读/下载」按这个数显示，而不是只汇总当前页
   const tot = db.prepare(`SELECT COALESCE(SUM(a.views), 0) AS views, COALESCE(SUM(a.downloads), 0) AS downloads
       FROM attachments a JOIN messages m ON m.id = a.message_id WHERE ${whereSql}`).get(...args);
-  return { items: rows, totalViews: tot.views, totalDownloads: tot.downloads };
+  const cnt = db.prepare(`SELECT COUNT(*) AS c FROM attachments a JOIN messages m ON m.id = a.message_id WHERE ${whereSql}`).get(...args);
+  return { items: rows, total: cnt.c, totalViews: tot.views, totalDownloads: tot.downloads };
 });
 
 /* ---------- 智能解析（供前端"智能识别"按钮） ---------- */
@@ -701,6 +761,12 @@ function handleOnebotReport(ctx) {
       const size = Number(f.size) || 0;
       const bound = bindOnebotGroup(gid, (sField(wl[String(gid)], 60)) || `QQ群 ${gid}`);
       const text = `[文件] ${name}${size ? `（${fmtSize(size)}）` : ''}`;
+      // 文件通知与消息一样要做补发去重：同人入口 + 同内容 + 5 分钟内只记一条
+      const agoF = new Date(Date.now() - 5 * 60000);
+      const agoFStr = `${agoF.getFullYear()}-${pad(agoF.getMonth() + 1)}-${pad(agoF.getDate())} ${pad(agoF.getHours())}:${pad(agoF.getMinutes())}`;
+      const dupFile = db.prepare('SELECT id FROM messages WHERE group_id = ? AND content = ? AND received_at >= ? LIMIT 1')
+        .get(bound, text, agoFStr);
+      if (dupFile) return { ok: true, deduped: true, id: dupFile.id };
       const info = db.prepare(`INSERT INTO messages
           (title, content, category, status, group_id, sender_name, received_at, created_at, updated_at)
           VALUES (?, ?, 'file', 'open', ?, 'QQ群文件', ?, ?, ?)`)
@@ -767,6 +833,11 @@ function handleOnebotReport(ctx) {
     const dup = db.prepare(`SELECT id FROM messages WHERE group_id = ? AND sender_name = ? AND content = ? AND received_at >= ? LIMIT 1`)
       .get(gidInternal, sender, content, agoStr);
     if (dup) return { ok: true, deduped: true, id: dup.id };
+  } else {
+    // 私聊（includePrivate 开启时）与群消息一样要补发去重，否则框架重连后同一私聊重复入库
+    const dup = db.prepare(`SELECT id FROM messages WHERE group_id IS NULL AND sender_name = ? AND content = ? AND received_at >= ? LIMIT 1`)
+      .get(sender, content, agoStr);
+    if (dup) return { ok: true, deduped: true, id: dup.id };
   }
 
   const { id, parsed } = insertParsedMessage(content, { groupId: gidInternal, sender, received });
@@ -789,7 +860,7 @@ function acceptInboxItem(id) {
   return mid;
 }
 route('GET', '/api/inbox', (ctx) => {
-  const limit = Math.min(Number(ctx.query.get('limit')) || 300, 500);
+  const limit = Math.min(Math.max(Number(ctx.query.get('limit')) || 300, 1), 500);
   const total = db.prepare('SELECT COUNT(*) AS c FROM inbox').get().c;
   const rows = db.prepare('SELECT * FROM inbox ORDER BY id DESC LIMIT ?').all(limit);
   return { total, items: rows };
@@ -941,12 +1012,25 @@ route('POST', '/api/jielong/:id/join', (ctx) => {
   if (a.roster.length) {
     let slot = null;
     if (Number.isInteger(b.rid) && b.rid >= 0 && b.rid < a.roster.length) {
-      slot = { i: b.rid, r: a.roster[b.rid] };
-    } else {
+      const r0 = a.roster[b.rid];
+      // 名单可能被编辑过：rid 指向的槽位与提交的姓名对不上时不再盲信 rid，退回按姓名匹配。
+      // 按词精确比较而非子串包含：防止「张三丰」带着「张三」的 rid 时误绑到张三头上
+      const words = rawName.split(/\s+/).filter(Boolean);
+      const matches = rawName === r0.name
+        || (r0.id && words.includes(r0.id))
+        || words.some((w) => w === r0.name);
+      if (matches) slot = { i: b.rid, r: r0 };
+    }
+    if (!slot) {
       const hits = JL.findRosterHits(a.roster, rawName);
       if (hits.length) {
-        // 重名时优先绑定还没接龙的槽位
-        slot = hits.find((h) => !a.entries.some((e) => !e.outside && e.rid === h.i)) || hits[0];
+        // 重名时优先绑定还没接龙的槽位；全部已认领且命中不止一个，
+        // 说明是重名学生用裸姓名提交，无法确定身份——绝不猜一个槽位去覆盖别人的记录
+        slot = hits.find((h) => !a.entries.some((e) => !e.outside && e.rid === h.i));
+        if (!slot) {
+          if (hits.length === 1) slot = hits[0]; // 唯一匹配：本人再次提交即覆盖更新
+          else throw new HttpError(409, '「' + rawName + '」在名单中有重名且均已接龙，请从下拉列表选择带学号的一项');
+        }
       }
     }
     if (slot) { rid = slot.i; id = slot.r.id; name = slot.r.name; }
@@ -1097,6 +1181,27 @@ route('POST', '/api/rosters', (ctx) => {
   const info = db.prepare('INSERT INTO rosters (name, roster, keep_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
     .run(name, rosterRaw, keepId ? 1 : 0, nowStr(), nowStr());
   return { ok: true, id: Number(info.lastInsertRowid), updated: false };
+});
+
+// 编辑名单：改名 / 改内容 / 改是否保留学号（名单库视图调用）
+route('PUT', '/api/rosters/:id', (ctx) => {
+  const id = Number(ctx.params.id);
+  if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
+  const old = db.prepare('SELECT id FROM rosters WHERE id = ?').get(id);
+  if (!old) throw new HttpError(404, '名单不存在');
+  const b = ctx.body || {};
+  const name = sField(b.name, 60);
+  if (!name) throw new HttpError(400, '请填写名单名称');
+  const keepId = b.keepId === true;
+  const rosterRaw = String(b.rosterRaw || '');
+  const list = JL.parseRoster(rosterRaw, keepId).list;
+  if (!list.length) throw new HttpError(400, '名单不能为空');
+  if (list.length > 500) throw new HttpError(400, '名单最多 500 人');
+  const clash = db.prepare('SELECT id FROM rosters WHERE name = ? AND id <> ?').get(name, id);
+  if (clash) throw new HttpError(409, '已有同名名单，请换一个名称');
+  db.prepare('UPDATE rosters SET name = ?, roster = ?, keep_id = ?, updated_at = ? WHERE id = ?')
+    .run(name, rosterRaw, keepId ? 1 : 0, nowStr(), id);
+  return { ok: true, id };
 });
 
 route('DELETE', '/api/rosters/:id', (ctx) => {
@@ -1421,18 +1526,32 @@ route('POST', '/api/import', (ctx) => {
   if (exist > 0 && ctx.query.get('force') !== '1') {
     throw new HttpError(400, '当前已有数据，为防止重复导入被拒绝。请先用空数据文件夹再导入');
   }
+  // force=1 为合并导入：接龙/抽签按原 id 替换（记录先清后插，保证重导同一份备份结果一致），
+  // 群按 ext_key 合并，名单同名覆盖，生日同名同生日跳过——否则固定主键撞唯一索引必然整体回滚
+  const force = ctx.query.get('force') === '1';
   let n = 0, nAtt = 0, nGroups = 0, nJl = 0, nJlE = 0, nDw = 0, nDwR = 0, nRs = 0, nBd = 0;
   db.exec('BEGIN'); // 整体导入：任何一步失败就整体回滚，不残留半截数据
   try {
     const insG = db.prepare('INSERT INTO groups (name, platform, color, remark, ext_key, created_at) VALUES (?, ?, ?, ?, ?, ?)');
     const gmap = {};
     for (const g of b.groups) {
+      const ext = sField(g.ext_key, 40);
+      if (force && ext) {
+        const same = db.prepare('SELECT id FROM groups WHERE ext_key = ?').get(ext);
+        if (same) { // 机器人白名单按 ext_key 关联，合并进已有群而不是撞唯一索引
+          db.prepare('UPDATE groups SET name = ?, platform = ?, color = ?, remark = ? WHERE id = ?')
+            .run(sField(g.name, 60) || '未命名群', PLATFORMS.includes(g.platform) ? g.platform : 'other',
+              /^#[0-9a-fA-F]{6}$/.test(g.color || '') ? g.color : pickColor(), sField(g.remark, 200), same.id);
+          if (g.id != null) gmap[String(g.id)] = same.id;
+          continue;
+        }
+      }
       const info = insG.run(
         sField(g.name, 60) || '未命名群',
         PLATFORMS.includes(g.platform) ? g.platform : 'other',
         /^#[0-9a-fA-F]{6}$/.test(g.color || '') ? g.color : pickColor(),
         sField(g.remark, 200),
-        sField(g.ext_key, 40),
+        ext,
         cleanDT(g.created_at) || nowStr());
       if (g.id != null) gmap[String(g.id)] = Number(info.lastInsertRowid);
     }
@@ -1467,8 +1586,10 @@ route('POST', '/api/import', (ctx) => {
         if (!mid) continue; // 对应信息不在本次备份中，跳过
         const stored = sField(a.stored_name, 200).replace(/\\/g, '/');
         if (!stored || stored.includes('..') || stored.startsWith('/')) continue;
+        // mime 会原样写进 Content-Type 响应头，只接受干净的类型串，防止借导入塞进非法头值
+        const mime = /^[A-Za-z0-9][\w!#$&^_.+-]*\/[\w!#$&^_.+-]*$/.test(String(a.mime || '')) ? String(a.mime) : '';
         insA.run(mid, sField(a.orig_name, 200), stored, Math.max(0, Number(a.size) || 0),
-          sField(a.mime, 100), Math.max(0, Number(a.views) || 0), Math.max(0, Number(a.downloads) || 0),
+          mime, Math.max(0, Number(a.views) || 0), Math.max(0, Number(a.downloads) || 0),
           cleanDT(a.created_at) || nowStr());
         nAtt++;
       }
@@ -1481,11 +1602,12 @@ route('POST', '/api/import', (ctx) => {
     };
     // 恢复接龙与接龙记录（id 为随机字符串主键，原样保留；记录按 jielong_id 直接挂回）
     if (Array.isArray(b.jielongs)) {
-    const insJ = db.prepare(`INSERT INTO jielongs (id, title, description, deadline, roster, fields, allow_outside, closed, admin_token, created_at)
+    const insJ = db.prepare(`${force ? 'INSERT OR REPLACE' : 'INSERT'} INTO jielongs (id, title, description, deadline, roster, fields, allow_outside, closed, admin_token, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const jlIds = new Set();
     for (const g of b.jielongs) {
       const id = /^[a-z0-9]{3,32}$/.test(String(g.id || '')) ? String(g.id) : JL.genId(7);
+      if (jlIds.has(id)) throw new Error('备份中存在重复的接龙 id：' + id); // 载荷自身矛盾，让事务整体回滚
       insJ.run(id,
         sField(g.title, 60) || '未命名接龙',
         sField(g.description, 1000),
@@ -1499,6 +1621,7 @@ route('POST', '/api/import', (ctx) => {
       jlIds.add(id);
       nJl++;
     }
+    if (force) for (const id of jlIds) db.prepare('DELETE FROM jielong_entries WHERE jielong_id = ?').run(id);
     if (Array.isArray(b.jielongEntries)) {
       const insJE = db.prepare(`INSERT INTO jielong_entries (jielong_id, rid, sid, name, values_json, remark, outside, time, seq)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -1522,10 +1645,11 @@ route('POST', '/api/import', (ctx) => {
   }
   // 恢复抽签与轮次（id 原样保留；轮次按 draw_id 直接挂回）
   if (Array.isArray(b.draws)) {
-    const insDw = db.prepare('INSERT INTO draws (id, title, roster, per_draw, created_at) VALUES (?, ?, ?, ?, ?)');
+    const insDw = db.prepare(`${force ? 'INSERT OR REPLACE' : 'INSERT'} INTO draws (id, title, roster, per_draw, created_at) VALUES (?, ?, ?, ?, ?)`);
     const dwIds = new Set();
     for (const g of b.draws) {
       const id = /^[a-z0-9]{3,32}$/.test(String(g.id || '')) ? String(g.id) : JL.genId(7);
+      if (dwIds.has(id)) throw new Error('备份中存在重复的抽签 id：' + id);
       insDw.run(id,
         sField(g.title, 60) || '未命名抽签',
         asJsonText(g.roster, '[]'),
@@ -1534,6 +1658,7 @@ route('POST', '/api/import', (ctx) => {
       dwIds.add(id);
       nDw++;
     }
+    if (force) for (const id of dwIds) db.prepare('DELETE FROM draw_rounds WHERE draw_id = ?').run(id);
     if (Array.isArray(b.drawRounds)) {
       const insDR = db.prepare('INSERT INTO draw_rounds (draw_id, picked, count, time) VALUES (?, ?, ?, ?)');
       for (const e of b.drawRounds) {
@@ -1550,8 +1675,15 @@ route('POST', '/api/import', (ctx) => {
   if (Array.isArray(b.rosters)) {
     const insR = db.prepare('INSERT INTO rosters (name, roster, keep_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)');
     for (const g of b.rosters) {
-      insR.run(sField(g.name, 60) || '未命名名单', String(g.roster || ''), g.keep_id ? 1 : 0,
-        cleanDT(g.created_at) || nowStr(), cleanDT(g.updated_at) || nowStr());
+      const name = sField(g.name, 60) || '未命名名单';
+      const same = force ? db.prepare('SELECT id FROM rosters WHERE name = ?').get(name) : null;
+      if (same) { // 同名覆盖（与名单库"同名保存覆盖"语义一致）
+        db.prepare('UPDATE rosters SET roster = ?, keep_id = ?, updated_at = ? WHERE id = ?')
+          .run(String(g.roster || ''), g.keep_id ? 1 : 0, cleanDT(g.updated_at) || nowStr(), same.id);
+      } else {
+        insR.run(name, String(g.roster || ''), g.keep_id ? 1 : 0,
+          cleanDT(g.created_at) || nowStr(), cleanDT(g.updated_at) || nowStr());
+      }
       nRs++;
     }
   }
@@ -1559,9 +1691,9 @@ route('POST', '/api/import', (ctx) => {
   if (Array.isArray(b.birthdays)) {
     const insB = db.prepare('INSERT INTO birthdays (name, month, day, year, note, created_at) VALUES (?, ?, ?, ?, ?, ?)');
     for (const g of b.birthdays) {
-      insB.run(sField(g.name, 60) || '未命名成员',
-        Math.max(0, Number(g.month) || 0), Math.max(0, Number(g.day) || 0),
-        Math.max(0, Number(g.year) || 0), sField(g.note, 200), cleanDT(g.created_at) || nowStr());
+      const nm = sField(g.name, 60) || '未命名成员', mo = Math.max(0, Number(g.month) || 0), dy = Math.max(0, Number(g.day) || 0);
+      if (force && db.prepare('SELECT id FROM birthdays WHERE name = ? AND month = ? AND day = ?').get(nm, mo, dy)) continue; // 重导幂等
+      insB.run(nm, mo, dy, Math.max(0, Number(g.year) || 0), sField(g.note, 200), cleanDT(g.created_at) || nowStr());
       nBd++;
     }
   }
@@ -1586,7 +1718,8 @@ route('GET', '/api/calendar.ics', (ctx) => {
       WHERE m.status = 'open' AND m.deadline IS NOT NULL AND m.deadline <> '' AND ${DEADLINE_EXPR} >= ?
       ORDER BY m.deadline LIMIT 500`).all(nowStr());
   const icsEsc = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
-  const stamp = nowStr().replace(/[-: ]/g, '') + '00';
+  // RFC 5545 要求 DATE-TIME 形如 YYYYMMDDTHHMMSS（日期与时间之间必须有 T）
+  const stamp = nowStr().slice(0, 10).replace(/-/g, '') + 'T' + nowStr().slice(11, 16).replace(':', '') + '00';
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//InfoHub//信息汇总//CN', 'X-WR-CALNAME:信息汇总·截止提醒', 'CALSCALE:GREGORIAN'];
   for (const m of rows) {
     const date = m.deadline.slice(0, 10).replace(/-/g, '');
@@ -1689,15 +1822,19 @@ function serveStatic(req, res, pathname) {
     else { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Not Found'); return; }
   }
   const ext = path.extname(fp).toLowerCase();
-  // 基础安全头（OWASP Secure Headers）：页面禁止被第三方嵌入（防点击劫持），引用地址不外泄到外站
+  // 基础安全头（OWASP Secure Headers）：页面禁止被第三方嵌入（防点击劫持），引用地址不外泄到外站。
+  // CSP 允许内联脚本/样式（页面零构建所依赖），但把其余来源都锁到本站，作为转义遗漏时的第二道防线
   res.writeHead(200, {
     'Content-Type': MIME[ext] || 'application/octet-stream',
     'Cache-Control': 'no-cache',
     'X-Frame-Options': 'DENY',
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'",
     'Referrer-Policy': 'same-origin',
   });
   if (req.method === 'HEAD') { res.end(); return; }
-  fs.createReadStream(fp).pipe(res);
+  const stream = fs.createReadStream(fp);
+  stream.on('error', () => res.destroy()); // 头已发出，读流失败只能断开连接
+  stream.pipe(res);
 }
 
 /* ---------- HTTP 入口 ---------- */
@@ -1707,6 +1844,9 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname.startsWith('/api/')) {
     if (process.env.INFOHUB_DEBUG === '1') console.log('[debug]', req.method, pathname + u.search);
+    // 归一化路径：/api/export/ 与 /api//export 与 /api/export 必须同判——
+    // 路由匹配对斜杠不敏感，门禁若按原始 pathname 精确比较，尾斜杠就能绕过保护
+    const norm = '/' + pathname.split('/').filter(Boolean).join('/');
     // 不开放跨域：避免未设密码时，用户浏览器里打开的任意网页都能读取局域网内的数据。
     // 机器人 / 快捷指令走 curl 等非浏览器客户端，不受同源策略影响。
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
@@ -1714,12 +1854,13 @@ const server = http.createServer(async (req, res) => {
     // 写入类操作需要管理员登录。机器人凭接入令牌通行（ingest 自带令牌校验，不在此拦截）。
     // /api/jielong/* 同理白名单放行：浏览公开、学生提交无需登录，管理操作由接口自己校验
     // 管理员登录或该接龙的管理令牌（可委托给班委）。
-    // /api/config 含接入令牌、/api/export 是全量备份，仅管理员可读；/api/parse 无副作用，保持开放。
+    // /api/config 含接入令牌、/api/export 是全量备份、/api/rosters 是学生名单（含学号姓名，敏感），
+    // 三者仅管理员可读；/api/parse 无副作用，保持开放。
     if (CONFIG.password && !authOk(req)
-      && !pathname.startsWith('/api/jielong')
+      && !norm.startsWith('/api/jielong')
       && !['/api/login', '/api/logout', '/api/me', '/api/health', '/api/ingest', '/api/parse',
-        '/api/onebot/report', '/api/onebot'].includes(pathname)
-      && (req.method !== 'GET' || ['/api/config', '/api/export', '/api/inbox'].includes(pathname))) {
+        '/api/onebot/report', '/api/onebot'].includes(norm)
+      && (req.method !== 'GET' || ['/api/config', '/api/export', '/api/inbox', '/api/rosters'].includes(norm))) {
       sendJSON(res, 401, { error: '需要管理员登录', authRequired: true });
       return;
     }
