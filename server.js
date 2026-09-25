@@ -18,6 +18,7 @@ const { db, DATA_DIR, UPLOAD_DIR } = require('./db');
 const { smartParse, hasNoticeSignal } = require('./lib/smartparse');
 const { parseMultipart } = require('./lib/multipart');
 const JL = require('./lib/jielong');
+const safeJson = JL.safeJson; // 投票的 roster / options / choices 均为 JSON 文本字段，读取统一走安全解析
 
 const PORT = Number(process.env.PORT || 5757);
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -55,6 +56,12 @@ function loadConfig() {
   if (!c || typeof c !== 'object') c = {};
   // 逐字段补缺：不能整体覆盖，否则会把用户已设置的密码清掉
   if (typeof c.ingestToken !== 'string' || !c.ingestToken) c.ingestToken = crypto.randomBytes(16).toString('hex');
+  // apiToken 与 ingestToken 分离：前者是管理接口凭证（X-Token），后者只能投递通知——
+  // 快捷指令/机器人常把令牌发到群里或存进第三方，泄露投递令牌不应等于泄露管理员
+  if (typeof c.apiToken !== 'string' || !c.apiToken || c.apiToken === c.ingestToken) {
+    if (c.apiToken === c.ingestToken) console.error('config.json 中 apiToken 与 ingestToken 相同，已自动重新生成 apiToken');
+    c.apiToken = crypto.randomBytes(16).toString('hex');
+  }
   if (typeof c.password !== 'string') c.password = '';
   // OneBot 11（QQ 机器人）接入配置：mode=review 消息先进「待审核」由人工收录（默认），
   // mode=auto 通过过滤后直接进信息流；token=access_token 鉴权；secret 非空时改用 HMAC 签名校验；
@@ -155,8 +162,8 @@ function safeEqual(a, b) {
 function authOk(req) {
   if (!CONFIG.password) return true; // 未设密码 = 不启用访问控制（家庭局域网场景）
   if (hasSession(req)) return true;
-  const x = req.headers['x-token'];  // 机器人/脚本用接入令牌也能通行
-  return typeof x === 'string' && x !== '' && safeEqual(x, CONFIG.ingestToken);
+  const x = req.headers['x-token'];  // 机器人/脚本用管理接口令牌（apiToken）通行；投递令牌 ingestToken 不再具备管理权限
+  return typeof x === 'string' && x !== '' && safeEqual(x, CONFIG.apiToken);
 }
 
 /* ---------- 小工具 ---------- */
@@ -180,6 +187,18 @@ function log(...args) {
     fs.appendFileSync(LOG_FILE, line + '\n');
   } catch (e) { /* 写不了文件就只打印 */ }
   console.log(line);
+}
+/* ---------- 敏感操作审计（data/logs/audit.log：时间 + 来源 IP + 动作） ---------- */
+// 覆盖：删除信息 / 名单增删改 / 投票编辑停止删除 / 备份导出导入 / 登录成功。
+// 局限：直连部署记到的是本机地址；经反向代理时需自行透传真实 IP。
+const AUDIT_FILE = path.join(DATA_DIR, 'logs', 'audit.log');
+function audit(ctx, action, detail) {
+  try {
+    const ip = (ctx && ctx.req && ctx.req.socket.remoteAddress) || '?';
+    const line = `[${nowStr()}] ${ip} ${action}${detail ? ' ' + detail : ''}`;
+    fs.mkdirSync(path.dirname(AUDIT_FILE), { recursive: true });
+    fs.appendFileSync(AUDIT_FILE, line + '\n');
+  } catch (e) { /* 审计失败不影响主流程 */ }
 }
 function sField(v, max) {
   const s = String(v == null ? '' : v).trim();
@@ -387,6 +406,7 @@ route('POST', '/api/login', (ctx) => {
   const token = crypto.randomBytes(24).toString('hex');
   sessions.set(token, Date.now());
   ctx.res.setHeader('Set-Cookie', `infohub_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
+  audit(ctx, '登录成功');
   log('登录成功，新会话已建立');
   return { ok: true };
 });
@@ -406,6 +426,7 @@ route('GET', '/api/config', (ctx) => {
   return {
     port: PORT,
     ingestToken: CONFIG.ingestToken,
+    apiToken: CONFIG.apiToken,
     lanUrls: lanIPs().map((ip) => `http://${ip}:${PORT}`),
     onebot: {
       mode: CONFIG.onebot.mode || 'review',
@@ -579,8 +600,10 @@ route('DELETE', '/api/messages/:id', (ctx) => {
     const fp = path.resolve(UPLOAD_DIR, a.stored_name);
     try { if (fp.startsWith(UPLOAD_DIR + path.sep) && fs.existsSync(fp)) fs.unlinkSync(fp); } catch (e) { /* 忽略 */ }
   }
+  const info = db.prepare('SELECT title FROM messages WHERE id = ?').get(id);
   db.prepare('DELETE FROM attachments WHERE message_id = ?').run(id);
   db.prepare('DELETE FROM messages WHERE id = ?').run(id);
+  audit(ctx, '删除信息', `id=${id}${info && info.title ? '「' + info.title + '」' : ''}`);
   return { ok: true };
 });
 
@@ -718,8 +741,10 @@ route('POST', '/api/parse', (ctx) => {
 
 /* ---------- 外部接入 webhook（机器人 / 手机快捷指令） ---------- */
 route('POST', '/api/ingest', (ctx) => {
+  // 投递令牌（ingestToken）与管理令牌（apiToken）都能投递通知——前者泄露不再波及管理权限
   const token = ctx.query.get('token') || ctx.req.headers['x-token'] || '';
-  if (!token || !safeEqual(token, CONFIG.ingestToken)) throw new HttpError(401, '令牌无效');
+  const ok = token !== '' && (safeEqual(token, CONFIG.ingestToken) || safeEqual(token, CONFIG.apiToken));
+  if (!ok) throw new HttpError(401, '令牌无效');
   const b = ctx.body || {};
   const text = sField(b.text, 20000);
   if (!text) throw new HttpError(400, 'text 不能为空');
@@ -1176,10 +1201,12 @@ route('POST', '/api/rosters', (ctx) => {
   if (exist) {
     db.prepare('UPDATE rosters SET roster = ?, keep_id = ?, updated_at = ? WHERE id = ?')
       .run(rosterRaw, keepId ? 1 : 0, nowStr(), exist.id);
+    audit(ctx, '保存名单（覆盖同名）', '「' + name + '」' + list.length + ' 人');
     return { ok: true, id: exist.id, updated: true };
   }
   const info = db.prepare('INSERT INTO rosters (name, roster, keep_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
     .run(name, rosterRaw, keepId ? 1 : 0, nowStr(), nowStr());
+  audit(ctx, '新建名单', '「' + name + '」' + list.length + ' 人');
   return { ok: true, id: Number(info.lastInsertRowid), updated: false };
 });
 
@@ -1201,14 +1228,17 @@ route('PUT', '/api/rosters/:id', (ctx) => {
   if (clash) throw new HttpError(409, '已有同名名单，请换一个名称');
   db.prepare('UPDATE rosters SET name = ?, roster = ?, keep_id = ?, updated_at = ? WHERE id = ?')
     .run(name, rosterRaw, keepId ? 1 : 0, nowStr(), id);
+  audit(ctx, '编辑名单', '「' + name + '」' + list.length + ' 人');
   return { ok: true, id };
 });
 
 route('DELETE', '/api/rosters/:id', (ctx) => {
   const id = Number(ctx.params.id);
   if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
+  const name = db.prepare('SELECT name FROM rosters WHERE id = ?').get(id);
   const info = db.prepare('DELETE FROM rosters WHERE id = ?').run(id);
   if (!info.changes) throw new HttpError(404, '名单不存在');
+  audit(ctx, '删除名单', name ? '「' + name.name + '」' : 'id=' + id);
   return { ok: true };
 });
 
@@ -1406,6 +1436,196 @@ function getBday(id) {
   return row ? { ...row, year: Number(row.year) || 0 } : null;
 }
 
+/* ---------- 投票表决（资格制名单 / 匿名可选 / 一人一票） ---------- */
+function voteIsClosed(v) {
+  return !!v.closed || !!(v.deadline && Date.now() > new Date(String(v.deadline).replace(' ', 'T')).getTime());
+}
+// 管理权限：管理员登录，或持有该投票的管理令牌 ?t=（可委托给班委）
+function voteCanManage(ctx, v) {
+  if (authOk(ctx.req)) return true;
+  const t = ctx.query.get('t') || '';
+  return !!v.admin_token && t !== '' && safeEqual(t, v.admin_token);
+}
+function voteTally(v, rows) {
+  return safeJson(v.options, []).map((o) => ({
+    key: o.key, label: o.label,
+    votes: rows.filter((b) => safeJson(b.choices, []).includes(o.key)).length,
+  }));
+}
+
+// 创建投票（管理操作）：资格名单必选——只有名单内的同学可以投票
+route('POST', '/api/vote', (ctx) => {
+  if (!authOk(ctx.req)) throw new HttpError(401, '需要管理员登录');
+  const b = ctx.body || {};
+  const title = sField(b.title, 60);
+  if (!title) throw new HttpError(400, '请填写投票标题');
+  let roster = [];
+  if (b.rosterId != null && b.rosterId !== '') {
+    const r = db.prepare('SELECT * FROM rosters WHERE id = ?').get(Number(b.rosterId));
+    if (!r) throw new HttpError(400, '所选名单不存在，请重新选择');
+    roster = JL.parseRoster(r.roster, !!r.keep_id).list;
+  } else {
+    roster = JL.parseRoster(String(b.rosterRaw || ''), b.keepId === true).list;
+  }
+  if (!roster.length) throw new HttpError(400, '请设置投票名单（只有名单内的同学可以投票）');
+  if (roster.length > 500) throw new HttpError(400, '名单最多 500 人');
+  const lines = String(b.optionsRaw || '').split(/[\n\r]+/).map((s) => s.trim()).filter(Boolean);
+  if (lines.length < 2) throw new HttpError(400, '请至少填写 2 个选项（每行一个候选人或选项）');
+  if (lines.length > 50) throw new HttpError(400, '选项最多 50 个');
+  const options = lines.map((label, i) => ({ key: 'o' + i, label: sField(label, 60) }));
+  const maxSelect = Math.max(1, Math.min(Number(b.maxSelect) || 1, options.length));
+  const token = JL.genToken();
+  const vid = JL.genId(7);
+  db.prepare(`INSERT INTO votes (id, title, description, deadline, closed, anonymous, require_sid, roster, options, max_select, admin_token, created_at)
+      VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(vid, title, sField(b.description, 1000), cleanDT(b.deadline) || '',
+      b.anonymous === false ? 0 : 1,
+      b.requireSid === true ? 1 : 0,
+      JSON.stringify(roster), JSON.stringify(options), maxSelect, token, Date.now());
+  return { ok: true, id: vid, adminToken: token };
+});
+
+route('GET', '/api/vote', () => {
+  const items = db.prepare('SELECT * FROM votes ORDER BY created_at DESC').all().map((v) => {
+    const total = safeJson(v.roster, []).length;
+    const done = db.prepare('SELECT COUNT(*) AS c FROM vote_ballots WHERE vote_id = ?').get(v.id).c;
+    return {
+      id: v.id, title: v.title, description: v.description, deadline: v.deadline,
+      closed: voteIsClosed(v), closedByAdmin: !!v.closed, anonymous: !!v.anonymous, maxSelect: v.max_select,
+      total, done,
+    };
+  });
+  return { items };
+});
+
+route('GET', '/api/vote/:id', (ctx) => {
+  const v = db.prepare('SELECT * FROM votes WHERE id = ?').get(ctx.params.id);
+  if (!v) throw new HttpError(404, '投票不存在');
+  const roster = safeJson(v.roster, []);
+  const options = safeJson(v.options, []);
+  const rows = db.prepare('SELECT * FROM vote_ballots WHERE vote_id = ? ORDER BY time').all(v.id);
+  const canManage = voteCanManage(ctx, v);
+  // 匿名投票的选票明细（谁投给了谁）只有发起人能看；非匿名对所有人公开。
+  // 资格名单是公示名单，对所有人可见——学生页的联想与专属链接锁定身份依赖它。
+  const showBallots = canManage || !v.anonymous;
+  const base = {
+    id: v.id, title: v.title, description: v.description, deadline: v.deadline,
+    closed: voteIsClosed(v), closedByAdmin: !!v.closed, anonymous: !!v.anonymous,
+    requireSid: !!v.require_sid,
+    options, maxSelect: v.max_select, rosterSize: roster.length, done: rows.length,
+    // 需学号验证的投票不下发学号：防止「从详情读学号 → 回填 sid」绕过验证；发起人不遮蔽
+    roster: canManage || !v.require_sid ? roster : roster.map((r) => ({ name: r.name })),
+    tally: voteTally(v, rows),
+  };
+  // 发起人管理令牌仅在设密码部署且已登录时下发（未设密码时管理本就开放，无需下发）
+  if (CONFIG.password && authOk(ctx.req)) base.adminToken = v.admin_token;
+  if (canManage) {
+    // 完成统计：未投票的资格名单槽位，仅发起人可见（用于提醒与核对冒票）
+    base.missing = roster
+      .map((r, i) => ({ i, id: r.id, name: r.name }))
+      .filter((r) => !rows.some((b) => b.rid === r.i));
+  }
+  if (showBallots) {
+    base.ballots = rows.map((b) => ({
+      rid: b.rid, name: b.name, sid: b.sid, time: b.time,
+      choices: safeJson(b.choices, []).map((k) => (options.find((o) => o.key === k) || {}).label || k),
+    }));
+  }
+  return base;
+});
+
+// 投票（学生免登录）：必须是资格名单内的槽位，一人一票（重投=覆盖改票）
+route('POST', '/api/vote/:id/ballot', (ctx) => {
+  const v = db.prepare('SELECT * FROM votes WHERE id = ?').get(ctx.params.id);
+  if (!v) throw new HttpError(404, '投票不存在');
+  if (voteIsClosed(v)) throw new HttpError(400, '投票已结束，不能再提交');
+  const roster = safeJson(v.roster, []);
+  const options = safeJson(v.options, []);
+  const b = ctx.body || {};
+  const rawName = String(b.name || '').trim();
+  if (!rawName) throw new HttpError(400, '请填写你的姓名或学号');
+  let rid = null, id = null, name = rawName;
+  if (Number.isInteger(b.rid) && b.rid >= 0 && b.rid < roster.length) {
+    const r0 = roster[b.rid];
+    const words = rawName.split(/\s+/).filter(Boolean);
+    if (rawName === r0.name || words.includes(r0.name) || (r0.id && words.includes(r0.id))) {
+      rid = b.rid; id = r0.id; name = r0.name;
+    }
+  }
+  if (rid == null) {
+    const hits = [];
+    roster.forEach((r, i) => { if (r.name === rawName || (r.id && r.id === rawName)) hits.push(i); });
+    // 精确匹配不到时按词匹配：兼容「2023001 张三」这类"学号+姓名"一起输入的写法
+    if (!hits.length && /\s/.test(rawName)) {
+      const words = rawName.split(/\s+/).filter(Boolean);
+      roster.forEach((r, i) => { if (words.includes(r.name) || (r.id && words.includes(r.id))) hits.push(i); });
+    }
+    if (!hits.length) throw new HttpError(403, '你不在本次投票名单中，无法投票');
+    if (hits.length > 1) throw new HttpError(409, '名单中有重名，请输入学号确认身份');
+    rid = hits[0]; id = roster[rid].id; name = roster[rid].name;
+  }
+  // 学号强验证（发起时勾选）：槽位必须有学号，且提交内容里必须含有该学号。
+  // 姓名可能是别人代填的，学号必须本人输入——冒用门槛从"知道姓名"提高到"知道学号"。
+  // 专属链接 ?u= 视作已验证（链接一对一私发即凭证）
+  if (v.require_sid && !(b.via === 'u' && rid != null)) {
+    if (!id) throw new HttpError(400, '本次投票需学号验证，但名单中该成员没有学号，请联系发起人');
+    const typedSid = String(b.sid || '').trim();
+    if (typedSid !== String(id) && !rawName.includes(String(id))) {
+      throw new HttpError(400, '学号验证未通过：请输入你的学号后再提交');
+    }
+  }
+  // 选项清洗：去重、只认有效选项、不超过最多可选数；空选 = 弃权（计入已投，不计入票数）
+  const chosen = [...new Set((Array.isArray(b.choices) ? b.choices : []).map(String))]
+    .filter((k) => options.some((o) => o.key === k));
+  if (chosen.length > v.max_select) throw new HttpError(400, `最多选择 ${v.max_select} 项`);
+  const exist = db.prepare('SELECT id FROM vote_ballots WHERE vote_id = ? AND rid = ?').get(v.id, rid);
+  if (exist) {
+    db.prepare('UPDATE vote_ballots SET choices = ?, time = ? WHERE id = ?').run(JSON.stringify(chosen), Date.now(), exist.id);
+    return { ok: true, updated: true };
+  }
+  db.prepare('INSERT INTO vote_ballots (vote_id, rid, sid, name, choices, time) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(v.id, rid, id || '', name, JSON.stringify(chosen), Date.now());
+  return { ok: true };
+});
+
+route('PUT', '/api/vote/:id', (ctx) => {
+  const v = db.prepare('SELECT * FROM votes WHERE id = ?').get(ctx.params.id);
+  if (!v) throw new HttpError(404, '投票不存在');
+  if (!voteCanManage(ctx, v)) throw new HttpError(401, '需要管理员登录或管理令牌');
+  const b = ctx.body || {};
+  db.prepare('UPDATE votes SET title = ?, description = ?, deadline = ? WHERE id = ?')
+    .run(sField(b.title, 60) || v.title, sField(b.description, 1000) || v.description,
+      cleanDT(b.deadline) || v.deadline, v.id);
+  audit(ctx, '编辑投票', '「' + (sField(b.title, 60) || v.title) + '」');
+  return { ok: true };
+});
+
+route('POST', '/api/vote/:id/stop', (ctx) => {
+  const v = db.prepare('SELECT * FROM votes WHERE id = ?').get(ctx.params.id);
+  if (!v) throw new HttpError(404, '投票不存在');
+  if (!voteCanManage(ctx, v)) throw new HttpError(401, '需要管理员登录或管理令牌');
+  db.prepare('UPDATE votes SET closed = 1 WHERE id = ?').run(v.id);
+  audit(ctx, '停止投票', '「' + v.title + '」');
+  return { ok: true };
+});
+
+route('DELETE', '/api/vote/:id', (ctx) => {
+  const v = db.prepare('SELECT * FROM votes WHERE id = ?').get(ctx.params.id);
+  if (!v) throw new HttpError(404, '投票不存在');
+  if (!voteCanManage(ctx, v)) throw new HttpError(401, '需要管理员登录或管理令牌');
+  db.exec('BEGIN'); // 选票与投票一起删，不残留孤儿选票
+  try {
+    db.prepare('DELETE FROM vote_ballots WHERE vote_id = ?').run(v.id);
+    db.prepare('DELETE FROM votes WHERE id = ?').run(v.id);
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  audit(ctx, '删除投票', '「' + v.title + '」');
+  return { ok: true };
+});
+
 route('GET', '/api/birthdays', () => {
   const now = new Date();
   const items = db.prepare('SELECT * FROM birthdays').all()
@@ -1521,7 +1741,7 @@ route('POST', '/api/import', (ctx) => {
     throw new HttpError(400, '备份文件格式不对（缺少 groups / messages）');
   }
   // 非空库一律拒绝（force=1 除外）：检查全部业务表，防止只有名单/生日等数据时被误判为空库而重复导入
-  const exist = ['messages', 'groups', 'attachments', 'inbox', 'jielongs', 'jielong_entries', 'draws', 'draw_rounds', 'rosters', 'birthdays']
+  const exist = ['messages', 'groups', 'attachments', 'inbox', 'jielongs', 'jielong_entries', 'draws', 'draw_rounds', 'rosters', 'birthdays', 'votes', 'vote_ballots']
     .reduce((sum, t) => sum + db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get().c, 0);
   if (exist > 0 && ctx.query.get('force') !== '1') {
     throw new HttpError(400, '当前已有数据，为防止重复导入被拒绝。请先用空数据文件夹再导入');
@@ -1529,7 +1749,7 @@ route('POST', '/api/import', (ctx) => {
   // force=1 为合并导入：接龙/抽签按原 id 替换（记录先清后插，保证重导同一份备份结果一致），
   // 群按 ext_key 合并，名单同名覆盖，生日同名同生日跳过——否则固定主键撞唯一索引必然整体回滚
   const force = ctx.query.get('force') === '1';
-  let n = 0, nAtt = 0, nGroups = 0, nJl = 0, nJlE = 0, nDw = 0, nDwR = 0, nRs = 0, nBd = 0;
+  let n = 0, nAtt = 0, nGroups = 0, nJl = 0, nJlE = 0, nDw = 0, nDwR = 0, nRs = 0, nBd = 0, nV = 0, nVB = 0;
   db.exec('BEGIN'); // 整体导入：任何一步失败就整体回滚，不残留半截数据
   try {
     const insG = db.prepare('INSERT INTO groups (name, platform, color, remark, ext_key, created_at) VALUES (?, ?, ?, ?, ?, ?)');
@@ -1697,16 +1917,55 @@ route('POST', '/api/import', (ctx) => {
       nBd++;
     }
   }
+  // 恢复投票与选票（id 随机字符串主键原样保留；选票按 vote_id 直接挂回）
+  if (Array.isArray(b.votes)) {
+    const insV = db.prepare(`${force ? 'INSERT OR REPLACE' : 'INSERT'} INTO votes (id, title, description, deadline, closed, anonymous, require_sid, roster, options, max_select, admin_token, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const vIds = new Set();
+    for (const g of b.votes) {
+      const id = /^[a-z0-9]{3,32}$/.test(String(g.id || '')) ? String(g.id) : JL.genId(7);
+      if (vIds.has(id)) throw new Error('备份中存在重复的投票 id：' + id);
+      insV.run(id,
+        sField(g.title, 60) || '未命名投票',
+        sField(g.description, 1000),
+        cleanDT(g.deadline) || '',
+        g.closed ? 1 : 0,
+        g.anonymous === false ? 0 : 1,
+        g.require_sid ? 1 : 0,
+        asJsonText(g.roster, '[]'),
+        asJsonText(g.options, '[]'),
+        Math.max(1, Number(g.max_select) || 1),
+        sField(g.admin_token, 64),
+        Math.max(0, Number(g.created_at) || Date.now()));
+      vIds.add(id);
+      nV++;
+    }
+    if (force) for (const id of vIds) db.prepare('DELETE FROM vote_ballots WHERE vote_id = ?').run(id);
+    if (Array.isArray(b.voteBallots)) {
+      const insVB = db.prepare('INSERT INTO vote_ballots (vote_id, rid, sid, name, choices, time) VALUES (?, ?, ?, ?, ?, ?)');
+      for (const e of b.voteBallots) {
+        if (!vIds.has(String(e.vote_id || ''))) continue; // 对应投票不在本次备份中，跳过
+        insVB.run(String(e.vote_id),
+          Number.isInteger(e.rid) ? e.rid : null,
+          sField(e.sid, 40),
+          sField(e.name, 60),
+          asJsonText(e.choices, '[]'),
+          Math.max(0, Number(e.time) || 0));
+        nVB++;
+      }
+    }
+  }
     nGroups = Object.keys(gmap).length;
     db.exec('COMMIT');
   } catch (e) {
     db.exec('ROLLBACK');
     throw new HttpError(500, '导入失败已整体回滚（' + e.message + '），数据库未变动');
   }
-  const summary = `${nGroups} 个群、${n} 条信息、${nAtt} 条附件记录、${nJl} 个接龙、${nJlE} 条接龙记录、${nDw} 个抽签、${nDwR} 轮抽签历史、${nRs} 份名单、${nBd} 位生日成员`;
+  const summary = `${nGroups} 个群、${n} 条信息、${nAtt} 条附件记录、${nJl} 个接龙、${nJlE} 条接龙记录、${nDw} 个抽签、${nDwR} 轮抽签历史、${nV} 个投票、${nVB} 张选票、${nRs} 份名单、${nBd} 位生日成员`;
   console.log('导入备份：' + summary);
   log('导入备份：' + summary);
-  return { ok: true, groups: nGroups, imported: n, attachments: nAtt, jielongs: nJl, jielongEntries: nJlE, draws: nDw, drawRounds: nDwR, rosters: nRs, birthdays: nBd };
+  audit(ctx, '导入备份', summary);
+  return { ok: true, groups: nGroups, imported: n, attachments: nAtt, jielongs: nJl, jielongEntries: nJlE, draws: nDw, drawRounds: nDwR, votes: nV, voteBallots: nVB, rosters: nRs, birthdays: nBd };
 });
 
 /* ---------- 导出 .ics 日历（截止时间进手机系统日历） ---------- */
@@ -1793,10 +2052,14 @@ route('GET', '/api/export', (ctx) => {
     // 抽签：同上，签箱 id 原样保留，轮次按 draw_id 直接挂回
     draws: db.prepare('SELECT id, title, roster, per_draw, created_at FROM draws ORDER BY created_at, id').all(),
     drawRounds: db.prepare('SELECT draw_id, picked, count, time FROM draw_rounds ORDER BY draw_id, id').all(),
+    // 投票：id 随机字符串主键原样保留，选票按 vote_id 直接挂回
+    votes: db.prepare('SELECT id, title, description, deadline, closed, anonymous, require_sid, roster, options, max_select, admin_token, created_at FROM votes ORDER BY created_at, id').all(),
+    voteBallots: db.prepare('SELECT vote_id, rid, sid, name, choices, time FROM vote_ballots ORDER BY vote_id, id').all(),
     rosters: db.prepare('SELECT * FROM rosters ORDER BY id').all(),
     birthdays: db.prepare('SELECT id, name, month, day, year, note, created_at FROM birthdays ORDER BY id').all(),
   };
   const body = JSON.stringify(dump, null, 2);
+  audit(ctx, '导出备份', Object.keys(dump).length + ' 类数据');
   const res = ctx.res;
   res.wrote = true;
   res.writeHead(200, {
@@ -1815,6 +2078,7 @@ function serveStatic(req, res, pathname) {
   if (p === '/quick') p = '/quick.html';
   if (p === '/login') p = '/login.html';
   if (/^\/j\/[a-z0-9]+$/i.test(p)) p = '/jielong-join.html'; // 学生接龙页，接龙 ID 由页面脚本从路径解析
+  if (/^\/v\/[a-z0-9]+$/i.test(p)) p = '/vote.html'; // 学生投票页，投票 ID 由页面脚本从路径解析
   let fp = path.normalize(path.join(PUBLIC_DIR, p));
   if (fp !== PUBLIC_DIR && !fp.startsWith(PUBLIC_DIR + path.sep)) { res.writeHead(403); res.end('Forbidden'); return; }
   if (!fs.existsSync(fp) || !fs.statSync(fp).isFile()) {
@@ -1858,6 +2122,7 @@ const server = http.createServer(async (req, res) => {
     // 三者仅管理员可读；/api/parse 无副作用，保持开放。
     if (CONFIG.password && !authOk(req)
       && !norm.startsWith('/api/jielong')
+      && !norm.startsWith('/api/vote')
       && !['/api/login', '/api/logout', '/api/me', '/api/health', '/api/ingest', '/api/parse',
         '/api/onebot/report', '/api/onebot'].includes(norm)
       && (req.method !== 'GET' || ['/api/config', '/api/export', '/api/inbox', '/api/rosters'].includes(norm))) {
