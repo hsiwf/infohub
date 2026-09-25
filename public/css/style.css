@@ -209,6 +209,9 @@ input,select,textarea{font-family:inherit;font-size:14px;color:var(--text)}
 .card-body{margin:2px 0 6px;color:var(--text-2);line-height:1.65;white-space:pre-wrap;word-break:break-word}
 /* 长正文折叠：全文都在卡片里，仅视觉收起约 8 行，由「展开全文」按钮切换 */
 .card-body.clamped{max-height:13.2em;overflow:hidden}
+/* 信息中心标题/正文里自动识别的网址：可点击跳转（新标签页打开），长网址在行内折行 */
+.card-title a,.card-body a{color:var(--primary);text-decoration:underline;text-underline-offset:3px;overflow-wrap:anywhere}
+.card-title a:hover,.card-body a:hover{color:var(--primary-dark)}
 .bodymore{display:inline-flex;align-items:center;gap:3px;margin:-2px 0 6px;padding:2px 4px;border:0;background:none;color:var(--primary);font-size:12.5px;cursor:pointer;font-family:inherit}
 .bodymore .icon{width:13px;height:13px;transition:transform .15s}
 .bodymore.open .icon{transform:rotate(180deg)}
@@ -253,7 +256,6 @@ input,select,textarea{font-family:inherit;font-size:14px;color:var(--text)}
 .tmain{flex:1;min-width:0}
 .ttitle{cursor:pointer;font-weight:600;word-break:break-word}
 .tmeta{font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center;margin-top:5px;flex-wrap:wrap}
-.sec-overdue .ttitle{color:var(--danger)}
 
 /* ---------- 文件中心 ---------- */
 .frow{display:flex;align-items:center;gap:12px;background:var(--card);border-radius:var(--radius-sm);box-shadow:var(--shadow);padding:12px 14px;margin:8px 0}

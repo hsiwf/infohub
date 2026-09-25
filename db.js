@@ -119,12 +119,50 @@ CREATE TABLE IF NOT EXISTS birthdays (
   note TEXT DEFAULT '',
   created_at TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS votes (
+  id TEXT PRIMARY KEY,
+  title TEXT DEFAULT '',
+  description TEXT DEFAULT '',
+  deadline TEXT DEFAULT '',
+  closed INTEGER DEFAULT 0,
+  anonymous INTEGER DEFAULT 1,
+  require_sid INTEGER DEFAULT 0,
+  roster TEXT DEFAULT '[]',
+  options TEXT DEFAULT '[]',
+  max_select INTEGER DEFAULT 1,
+  admin_token TEXT DEFAULT '',
+  created_at INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS vote_ballots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  vote_id TEXT NOT NULL,
+  rid INTEGER,
+  sid TEXT DEFAULT '',
+  name TEXT DEFAULT '',
+  choices TEXT DEFAULT '[]',
+  time INTEGER DEFAULT 0
+);
 CREATE INDEX IF NOT EXISTS idx_messages_group ON messages(group_id);
 CREATE INDEX IF NOT EXISTS idx_messages_deadline ON messages(deadline);
 CREATE INDEX IF NOT EXISTS idx_att_message ON attachments(message_id);
 CREATE INDEX IF NOT EXISTS idx_jl_entries ON jielong_entries(jielong_id);
 CREATE INDEX IF NOT EXISTS idx_draw_rounds ON draw_rounds(draw_id);
+CREATE INDEX IF NOT EXISTS idx_vote_ballots ON vote_ballots(vote_id);
 `);
+// 一人一票：同一投票里名单槽位唯一（重投=覆盖），部分唯一索引不动名单外的历史数据。
+// 防御：历史脏数据已有重复槽位时建索引会失败——先按最早一条去重再重建，保证启动不崩
+try {
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vote_ballots_slot ON vote_ballots(vote_id, rid) WHERE rid IS NOT NULL;`);
+} catch (e) {
+  console.error('选票存在重复槽位，已按最早一条去重后重建索引');
+  db.exec(`DELETE FROM vote_ballots WHERE id NOT IN (SELECT MIN(id) FROM vote_ballots GROUP BY vote_id, rid) AND rid IS NOT NULL;`);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vote_ballots_slot ON vote_ballots(vote_id, rid) WHERE rid IS NOT NULL;`);
+}
+// 轻量迁移：投票表补 require_sid（学号强验证开关；新库建表已含此列，PRAGMA 返回空自动跳过）
+const voteCols = db.prepare('PRAGMA table_info(votes)').all();
+if (voteCols.length && !voteCols.some((c) => c.name === 'require_sid')) {
+  db.exec('ALTER TABLE votes ADD COLUMN require_sid INTEGER DEFAULT 0');
+}
 
 // 轻量迁移：老库补 ext_key 列（QQ 群号等外部标识，机器人上报自动归群用）
 const gcols = db.prepare('PRAGMA table_info(groups)').all();

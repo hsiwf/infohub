@@ -11,6 +11,8 @@ const ICON_PATHS = {
   'feed': '<path d="M4 4h13a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M16 4v16"/><path d="M7 9h5M7 13h5M7 17h3"/>',
   'check': '<path d="M20 6 9 17l-5-5"/>',
   'chev-down': '<path d="m6 9 6 6 6-6"/>',
+  'vote': '<rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V5h8v5"/><path d="m9.5 14 2 2 3.5-3.5"/>',
+  'dots': '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   'jielong': '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="4" cy="18" r="1.6"/>',
   'draw': '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M9 3v6M15 3v6"/><path d="m9 14 2 2 4-4"/>',
   'birthday': '<path d="M4 21h16"/><path d="M6 21v-5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v5"/><path d="M12 14v-4"/><path d="M10.5 7.5C10.5 6.5 12 5 12 5s1.5 1.5 1.5 2.5a1.5 1.5 0 0 1-3 0z"/>',
@@ -53,7 +55,6 @@ const ICON_PATHS = {
   'sparkles': '<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/>',
   'undo': '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/>',
   'eye': '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
-  'dots': '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   'message': '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   'wechat': '<path d="M3 5.5A2.5 2.5 0 0 1 5.5 3h6A2.5 2.5 0 0 1 14 5.5v3a2.5 2.5 0 0 1-2.5 2.5H8l-3.2 3V11h.7A2.5 2.5 0 0 1 3 8.5z"/><path d="M11 10.2c.6-.1 1.3-.2 2-.2 3.3 0 6 1.9 6 4.2 0 1.2-.7 2.3-1.8 3.1l.5 1.9-2.3-1.2c-.7.2-1.5.3-2.4.3-1 0-2-.2-2.8-.5"/>',
   'globe': '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/>',
@@ -81,6 +82,41 @@ function hl(text, q) {
     if (!m[0].length) re.lastIndex++;
   }
   return out + esc(raw.slice(last));
+}
+/* 信息中心标题/正文里的网址自动转成可点击链接（新标签页打开）。
+ * 先在原文里切出 URL 段、各段分别转义，不吃 XSS；URL 字符集排除 CJK 与全角区，
+ * 避免「…com.cn请及时填写」这类通知把后面的话拼进链接。 */
+const URL_RE = /(?:https?:\/\/|www\.)[^\s<>"'`\u2000-\u206f\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uff00-\uffef]+/gi;
+function trimUrlTail(u) {
+  // 粘在链接尾部的英文标点去掉；右括号只在链接内没配上左括号时才当作正文标点
+  const PAIRS = { ')': '(', ']': '[', '}': '{' };
+  while (u.length) {
+    const c = u.slice(-1);
+    if ('.,;:!?"\''.includes(c)) { u = u.slice(0, -1); continue; }
+    if (PAIRS[c] && u.split(PAIRS[c]).length < u.split(c).length) { u = u.slice(0, -1); continue; }
+    break;
+  }
+  return u;
+}
+function linkify(text, q) {
+  const raw = String(text == null ? '' : text);
+  let out = '', last = 0, m;
+  URL_RE.lastIndex = 0;
+  while ((m = URL_RE.exec(raw))) {
+    const url = trimUrlTail(m[0]);
+    out += hl(raw.slice(last, m.index), q);
+    last = m.index + url.length;
+    // 去掉尾部标点后已不成其为网址的（如只剩「https://」）按普通文本输出
+    const core = url.replace(/^(?:https?:\/\/|www\.)/i, '');
+    if (core && /[.:]/.test(core)) {
+      const href = /^https?:\/\//i.test(url) ? url : 'https://' + url;
+      out += `<a class="tlink" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${hl(url, q)}</a>`;
+    } else {
+      out += esc(url);
+    }
+    URL_RE.lastIndex = last; // 被当标点去掉的尾部字符留给下轮按普通文本渲染
+  }
+  return out + hl(raw.slice(last), q);
 }
 function pad(n) { return String(n).padStart(2, '0'); }
 function ymd(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
@@ -206,6 +242,7 @@ const state = {
   editingId: null,
   pendingFiles: [],
   existingAtts: [],
+  vote: null,
   me: { authRequired: false, loggedIn: true, readOnly: false }, // 会话状态（启动时从 /api/me 拉取）
   cal: { y: new Date().getFullYear(), m: new Date().getMonth() + 1 },
   calByDay: {},
@@ -341,8 +378,8 @@ function cardHTML(it) {
       <span class="spacer"></span>
       <span class="time">${esc(fmtReceived(it.received_at))}</span>
     </div>
-    <h3 class="card-title">${hl(it.title || '(无标题)', state.q)}</h3>
-    ${body ? `<p class="card-body${folded ? ' clamped' : ''}">${hl(body, state.q)}</p>${folded ? `<button class="bodymore" data-act="bodymore" aria-expanded="${!folded}">${icon('chev-down')} 展开全文</button>` : ''}` : ''}
+    <h3 class="card-title">${linkify(it.title || '(无标题)', state.q)}</h3>
+    ${body ? `<p class="card-body${folded ? ' clamped' : ''}">${linkify(body, state.q)}</p>${folded ? `<button class="bodymore" data-act="bodymore" aria-expanded="${!folded}">${icon('chev-down')} 展开全文</button>` : ''}` : ''}
     <div>${dlChip(it.deadline)}</div>
     ${tags.length ? `<div class="tags">${tags.map((t) => `<span class="tag">#${esc(t)}</span>`).join('')}</div>` : ''}
     ${atts ? `<div class="atts">${atts}</div>` : ''}
@@ -410,6 +447,7 @@ async function loadFeed(append = false) {
       if (autoDone) loadMoreDone().catch(() => {});
     }
     addBdBanner();
+    addNoPasswordBanner();
     return;
   }
   // 提醒功能一次性引导（仅在通知权限未决定时出现）
@@ -443,7 +481,7 @@ async function loadFeed(append = false) {
   if (doneSec) doneSec.insertAdjacentHTML('beforebegin', html + moreHtml);
   else view.insertAdjacentHTML('beforeend', html + moreHtml + doneSection);
   if (autoDone) loadMoreDone().catch(() => {});
-  if (!append) addBdBanner();
+  if (!append) { addBdBanner(); addNoPasswordBanner(); }
   const newMore = $('#btn-more');
   if (newMore) newMore.addEventListener('click', () => {
     // 先禁用再请求：响应慢时连点会用同一 offset 追加出重复的一页；失败后恢复可重试
@@ -499,6 +537,20 @@ function addBdBanner() {
     state.view = 'birthday';
     syncNavActive();
     renderView().catch((e) => toast(e.message, 'error'));
+  });
+}
+// 未设密码提醒：这种部署下任何人都能修改内容，信息页常驻提示（可一次性关闭）
+function addNoPasswordBanner() {
+  if (state.me.authRequired !== false) return; // 已设密码时不出现
+  if (localStorage.getItem('infohub-nopass-dismissed')) return;
+  if ($('.nopass-banner')) return;
+  const view = $('#view');
+  view.insertAdjacentHTML('afterbegin', `<div class="nopass-banner notifbar">${icon('alert')} 未设置管理密码：任何打开此页面的人都能修改内容。可在 data/config.json 的 password 字段设置密码后重启生效。<button class="mini" id="nopass-ok">知道了</button></div>`);
+  const b = $('#nopass-ok');
+  if (b) b.addEventListener('click', () => {
+    localStorage.setItem('infohub-nopass-dismissed', '1');
+    const el = document.querySelector('.nopass-banner');
+    if (el) el.remove();
   });
 }
 
@@ -898,7 +950,7 @@ async function loadMoreDoneFiles() {
   }
 }
 
-/* ========= 名单库（独立视图：随时新建 / 编辑 / 删除，接龙、抽签、生日导处复用） ========= */
+/* ========= 班级名单（独立视图：随时新建 / 编辑 / 删除，接龙、抽签、生日导处复用） ========= */
 function rosterPreviewChips(raw, keepId) {
   const parsed = jlParseRoster(raw, keepId);
   if (!parsed.list.length) return '<span class="hint">（名单内容为空）</span>';
@@ -913,9 +965,9 @@ async function loadRosters() {
   const data = await api('/api/rosters');
   if (seq !== loadSeq) return;
   const items = data.items || [];
-  const emptyHint = items.length ? '' : `<div class="empty"><div class="big">${icon('users')}</div>还没有保存的名单<br>点「新建名单」，或在发起接龙时勾选「保存到名单库」</div>`;
+  const emptyHint = items.length ? '' : `<div class="empty"><div class="big">${icon('users')}</div>还没有保存的名单<br>点「新建名单」，或在发起接龙时勾选「保存到班级名单」</div>`;
   view.innerHTML = `
-    <div class="inboxhead"><h3>${icon('users')} 名单库（${items.length}）</h3>
+    <div class="inboxhead"><h3>${icon('users')} 班级名单（${items.length}）</h3>
       <span class="hint">名单存一份，发起接龙、抽签点名、生日导入时直接复用</span>
       ${canEdit() ? `<button class="ghost" id="btn-roster-new">${icon('plus')} 新建名单</button>` : ''}</div>
     ${items.map((r) => `
@@ -984,6 +1036,211 @@ function openRosterModal(item) {
       toast(item ? '名单已更新 ✓' : '名单已保存 ✓');
       closeModal();
       renderView().catch((e2) => toast(e2.message, 'error'));
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+/* ========= 投票表决（资格制名单 / 匿名可选 / 一人一票） ========= */
+const voteStatusBadge = (v) => {
+  if (v.closedByAdmin) return '<span class="jl-badge off">已停止</span>';
+  if (v.closed) return '<span class="jl-badge off">已结束</span>';
+  return '<span class="jl-badge on">进行中</span>';
+};
+async function loadVotes() {
+  const seq = loadSeq;
+  const view = $('#view');
+  if (state.vote) { await loadVoteDetail(); return; }
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  const data = await api('/api/vote');
+  if (seq !== loadSeq) return;
+  const items = data.items || [];
+  view.innerHTML = `
+    <div class="inboxhead"><h3>${icon('vote')} 投票表决（${items.length}）</h3>
+      <span class="hint">班委选举、评优表决；资格名单控制、匿名可选</span>
+      ${canEdit() ? `<button class="ghost" id="btn-vote-new">${icon('plus')} 发起投票</button>` : ''}</div>
+    ${items.map((v) => `
+      <div class="panel" data-vid="${v.id}" style="cursor:pointer">
+        <div class="jl-head"><h2>${esc(v.title)}</h2>${voteStatusBadge(v)}</div>
+        ${v.description ? `<p class="act-desc">${esc(v.description)}</p>` : ''}
+        <div class="jl-head"><span class="hint">已投 <b>${v.done}</b> / ${v.total} 人${v.deadline ? ' · 截止 ' + esc(v.deadline) : ''}${v.anonymous ? ' · 匿名' : ' · 记名'}</span></div>
+      </div>`).join('')}
+    ${items.length ? '' : `<div class="empty"><div class="big">${icon('vote')}</div>还没有发起过投票<br>${canEdit() ? '点「发起投票」开始一次班级表决' : '班委发起投票后会出现在这里'}</div>`}`;
+  const newBtn = $('#btn-vote-new');
+  if (newBtn) newBtn.addEventListener('click', () => openVoteModal());
+  view.querySelectorAll('.panel[data-vid]').forEach((card) => {
+    card.addEventListener('click', () => {
+      state.vote = card.dataset.vid;
+      renderView().catch((e) => toast(e.message, 'error'));
+    });
+  });
+}
+async function loadVoteDetail() {
+  if (!state.vote) return;
+  const seq = loadSeq;
+  const view = $('#view');
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  const token = voteTokenOf(state.vote);
+  const tArg = token ? '?t=' + encodeURIComponent(token) : '';
+  let d;
+  try { d = await api('/api/vote/' + state.vote + tArg); }
+  catch (e) {
+    if (seq !== loadSeq) return;
+    vStopTimer(); // 投票已不存在，别让空转的轮询定时器留在内存里
+    state.vote = null;
+    toast(e.message, 'error');
+    return loadVotes();
+  }
+  if (seq !== loadSeq) return; // 等待期间已切换视图，丢弃旧响应
+  const fmtTs = (ts) => {
+    const dt = new Date(ts);
+    const p2 = (n) => String(n).padStart(2, '0');
+    return `${dt.getFullYear()}-${p2(dt.getMonth() + 1)}-${p2(dt.getDate())} ${p2(dt.getHours())}:${p2(dt.getMinutes())}`;
+  };
+  // 无密码部署下服务端不下发令牌，但管理本就开放（与接龙 canManage = canEdit() || 令牌 同口径）
+  const canManage = canEdit() || !!token;
+  const stuLink = location.origin + '/v/' + d.id;
+  const maxVotes = Math.max(1, ...d.tally.map((t) => t.votes));
+  const totalVotes = d.tally.reduce((s, t) => s + t.votes, 0);
+  view.innerHTML = `
+    <div class="jl-head"><button class="ghost" id="vote-back">← 返回投票列表</button><span class="spacer"></span>${voteStatusBadge(d)}</div>
+    <div class="panel">
+      <div class="jl-head"><h2>${esc(d.title)}</h2></div>
+      ${d.description ? `<p class="act-desc">${esc(d.description)}</p>` : ''}
+      <div class="act-meta">
+        ${d.deadline ? `<span>截止：${esc(d.deadline)}</span>` : ''}
+        <span>${d.anonymous ? '匿名投票（明细仅发起人可见）' : '记名投票（明细公开）'}</span>
+        <span>${d.maxSelect > 1 ? `每人最多投 ${d.maxSelect} 项` : '每人一票'}</span>
+        ${d.requireSid ? '<span>需学号验证</span>' : ''}
+      </div>
+    </div>
+    <div class="panel">
+      <div class="jl-head"><h2 style="font-size:15px">实时票数</h2><span class="hint">已完成 ${d.done} / ${d.rosterSize} 人</span></div>
+      ${d.tally.map((t) => {
+        const pct = Math.round(t.votes * 100 / maxVotes);
+        const share = totalVotes ? Math.round(t.votes * 100 / totalVotes) : 0;
+        return `<div class="tally-row"><div class="tlabel"><b>${esc(t.label)}</b><span class="hint">${t.votes} 票 · ${share}%</span></div><div class="tbar"><i style="width:${pct}%"></i></div></div>`;
+      }).join('')}
+      <div class="jl-linkrow"><input readonly value="${esc(stuLink)}"><button class="ghost" id="vote-copy-stu">${icon('link')} 复制学生链接</button></div>
+    </div>
+    ${canManage && Array.isArray(d.missing) ? `
+    <div class="panel">
+      <div class="jl-head"><h2 style="font-size:15px">完成统计</h2><span class="hint">已投 ${d.done} / ${d.rosterSize} 人，未投 ${d.missing.length} 人</span></div>
+      ${d.missing.length ? d.missing.map((m) => `<span class="jl-chip">${esc(m.id ? m.id + ' ' : '')}${esc(m.name)}</span>`).join('') : '<span class="hint">全部投完 ✓</span>'}
+      ${d.missing.length ? `<div class="card-actions"><button class="ghost" id="vote-copy-miss">${icon('copy')} 复制未投名单提醒</button></div>` : ''}
+    </div>` : ''}
+    ${Array.isArray(d.ballots) ? `
+    <div class="panel">
+      <div class="jl-head"><h2 style="font-size:15px">选票明细${d.anonymous ? '（匿名投票，仅发起人可见）' : '（记名投票，对所有人公开）'}</h2></div>
+      ${(d.ballots || []).map((b, i) => `<div class="entry-line"><b>${i + 1}. ${esc(b.name)}</b><span class="entry-txt">投给：${esc(b.choices.join('、') || '弃权')} · ${esc(fmtTs(b.time))}</span></div>`).join('') || '<span class="hint">还没有人投票</span>'}
+    </div>` : ''}
+    ${canManage ? `<div class="card-actions">
+      ${!d.closed ? '<button class="ghost" id="vote-stop">停止投票</button>' : ''}
+      <button class="ghost danger" id="vote-del">${icon('trash')} 删除投票</button>
+    </div>` : ''}`;
+  const back = $('#vote-back');
+  if (back) back.addEventListener('click', () => { state.vote = null; renderView().catch(() => {}); });
+  const copyStu = $('#vote-copy-stu');
+  if (copyStu) copyStu.addEventListener('click', () => jlCopy(stuLink, '学生链接已复制，可发到班群'));
+  const copyMiss = $('#vote-copy-miss');
+  if (copyMiss) copyMiss.addEventListener('click', () => {
+    const lines = (d.missing || []).map((m) => (m.id ? m.id + ' ' : '') + m.name);
+    jlCopy('以下同学还没完成投票「' + d.title + '」，请尽快：\n' + lines.join('\n') + '\n投票入口：' + stuLink, '未投名单提醒已复制');
+  });
+  const stopBtn = $('#vote-stop');
+  if (stopBtn) stopBtn.addEventListener('click', async () => {
+    if (!confirm('确定停止这次投票吗？停止后不能再提交。')) return;
+    try { await api('/api/vote/' + d.id + '/stop' + tArg, { method: 'POST' }); toast('投票已停止'); state.vote = null; renderView().catch(() => {}); }
+    catch (e) { toast(e.message, 'error'); }
+  });
+  const delBtn = $('#vote-del');
+  if (delBtn) delBtn.addEventListener('click', async () => {
+    if (!confirm('确定删除这次投票吗？所有选票将一并删除，不可恢复。')) return;
+    try { await api('/api/vote/' + d.id + tArg, { method: 'DELETE' }); toast('投票已删除'); state.vote = null; renderView().catch(() => {}); }
+    catch (e) { toast(e.message, 'error'); }
+  });
+  // 结果页定时原地刷新（管理台/访客都能看到实时票数）
+  // 每次重设前先清旧定时器：轮询回调自身也会进入这里，不清理会越积越多形成请求风暴
+  vStopTimer();
+  vTimer = setInterval(async () => {
+    if ($('#modal-root').children.length) return;
+    const el = document.activeElement;
+    if (el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return;
+    const y = window.scrollY;
+    try { await loadVoteDetail(); if (window.scrollY !== y) window.scrollTo(0, y); } catch (e) { /* 静默 */ }
+  }, 8000);
+}
+function openVoteModal() {
+  openModal(`
+    <h2>${icon('vote')} 发起投票</h2>
+    <div class="form">
+      <div class="labrow"><label>投票标题</label></div>
+      <input id="vt-title" maxlength="60" placeholder="如：评选入团积极分子">
+      <div class="labrow"><label>投票说明（选填）</label></div>
+      <textarea id="vt-desc" rows="2" maxlength="1000" placeholder="投票规则、候选人情况等说明…"></textarea>
+      <div class="labrow"><label>选项 / 候选人（每行一个，至少 2 个）</label></div>
+      <textarea id="vt-options" rows="4" placeholder="张三&#10;李四&#10;王五"></textarea>
+      <div class="labrow"><label>投票资格名单（只有名单内的同学可以投票）</label></div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <select id="vt-roster-lib" style="flex:1;min-width:0"><option value="">— 手动粘贴名单 —</option></select>
+        <button type="button" class="mini danger" id="vt-roster-lib-del" style="display:none;white-space:nowrap">${icon('trash')} 删除</button>
+      </div>
+      <textarea id="vt-roster" rows="4" placeholder="也可直接粘贴名单，每行一个（支持「学号 姓名」）…"></textarea>
+      <label class="splitline"><input type="checkbox" id="vt-keepid"> 保留学号（重名时按学号区分）</label>
+      <div id="vt-roster-pv" class="hint"></div>
+      <div class="labrow"><label>每人最多可选</label></div>
+      <input id="vt-max" type="number" min="1" value="1" style="max-width:120px">
+      <div class="labrow"><label>截止时间（选填，到点自动结束）</label></div>
+      <input id="vt-deadline" type="datetime-local">
+      <label class="splitline"><input type="checkbox" id="vt-anon" checked> 匿名投票（同学间看不到彼此投给谁，选票明细仅发起人可查）</label>
+      <label class="splitline"><input type="checkbox" id="vt-reqsid"> 需学号验证（提交时必须填写本人学号，防冒名投票）</label>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" id="btn-cancel">取消</button>
+      <button class="primary" id="vt-save">${icon('check')} 发起投票</button>
+    </div>`);
+  const pv = () => {
+    const rosterId = $('#vt-roster-lib').value;
+    const raw = $('#vt-roster').value;
+    if (rosterId) { $('#vt-roster-pv').innerHTML = '<span class="ok-t">✓ 使用班级名单中的名单，提交时自动读取</span>'; return; }
+    const parsed = jlParseRoster(raw, $('#vt-keepid').checked);
+    $('#vt-roster-pv').innerHTML = parsed.list.length
+      ? `识别到 <b>${parsed.list.length}</b> 人${$('#vt-keepid').checked ? '（含学号）' : ''}：` + parsed.list.slice(0, 50).map((m) => `<span class="jl-chip plain">${esc(jlSlotLabel(m))}</span>`).join('')
+      : '<span class="warn-t">尚未设置名单：请从班级名单选择，或直接粘贴</span>';
+  };
+  setupRosterLib('vt', (r) => {
+    $('#vt-roster').value = r.roster;
+    $('#vt-keepid').checked = !!r.keepId;
+    pv();
+  });
+  $('#vt-roster').addEventListener('input', pv);
+  $('#vt-keepid').addEventListener('change', pv);
+  $('#vt-roster-lib').addEventListener('change', pv);
+  pv();
+  $('#vt-save').addEventListener('click', async () => {
+    const title = $('#vt-title').value.trim();
+    if (!title) { toast('请填写投票标题', 'error'); return; }
+    const rosterId = $('#vt-roster-lib').value;
+    const rosterRaw = $('#vt-roster').value;
+    if (!rosterId && !rosterRaw.trim()) { toast('请设置投票名单', 'error'); return; }
+    try {
+      const body = {
+        title,
+        description: $('#vt-desc').value.trim(),
+        optionsRaw: $('#vt-options').value,
+        maxSelect: Number($('#vt-max').value) || 1,
+        anonymous: $('#vt-anon').checked,
+        requireSid: $('#vt-reqsid').checked,
+        deadline: valToDt($('#vt-deadline').value),
+        rosterId: rosterId || null,
+        rosterRaw,
+        keepId: $('#vt-keepid').checked,
+      };
+      const r = await api('/api/vote', { method: 'POST', body });
+      if (r.adminToken) voteMineRemember(r.id, r.adminToken, title);
+      toast('投票已发起 ✓');
+      closeModal();
+      state.vote = r.id;
+      renderView().catch(() => {});
     } catch (e) { toast(e.message, 'error'); }
   });
 }
@@ -1403,8 +1660,8 @@ function openGroupModal(group) {
   });
 }
 
-/* ========= 班级名单库（创建接龙 / 签箱时复用名单） ========= */
-// 在弹窗里绑定"从名单库选择 + 删除"控件；applyRoster(选中项) 由调用方填充表单
+/* ========= 班级名单（创建接龙 / 签箱时复用名单） ========= */
+// 在弹窗里绑定"从班级名单选择 + 删除"控件；applyRoster(选中项) 由调用方填充表单
 async function setupRosterLib(prefix, applyRoster) {
   const sel = $('#' + prefix + '-roster-lib');
   const delBtn = $('#' + prefix + '-roster-lib-del');
@@ -1423,18 +1680,18 @@ async function setupRosterLib(prefix, applyRoster) {
   });
   delBtn.addEventListener('click', async () => {
     const r = lib.find((x) => String(x.id) === sel.value);
-    if (!r || !confirm(`从名单库删除「${r.name}」？`)) return;
+    if (!r || !confirm(`从班级名单删除「${r.name}」？`)) return;
     try {
       await api('/api/rosters/' + r.id, { method: 'DELETE' });
       lib = lib.filter((x) => x.id !== r.id);
       renderOptions();
       sel.value = '';
       delBtn.style.display = 'none';
-      toast('已从名单库删除');
+      toast('已从班级名单删除');
     } catch (e) { toast(e.message, 'error'); }
   });
 }
-// 保存到名单库（名称留空则跳过）；失败抛错由调用方提示
+// 保存到班级名单（名称留空则跳过）；失败抛错由调用方提示
 async function saveRosterToLib(prefix, name, rosterRaw, keepId) {
   return api('/api/rosters', { method: 'POST', body: { name, rosterRaw, keepId } });
 }
@@ -1442,6 +1699,17 @@ async function saveRosterToLib(prefix, name, rosterRaw, keepId) {
 /* ========= 班级接龙（自「接龙小助手」并入） ========= */
 let jlTimer = null;
 function jlStopTimer() { if (jlTimer) { clearInterval(jlTimer); jlTimer = null; } }
+let vTimer = null;
+function vStopTimer() { if (vTimer) { clearInterval(vTimer); vTimer = null; } }
+function voteMine() {
+  try { return JSON.parse(localStorage.getItem('infohub-vote-mine') || '[]'); } catch (e) { return []; }
+}
+function voteMineRemember(id, token, title) {
+  const list = voteMine().filter((x) => x.id !== id);
+  list.unshift({ id, token, title }); // 头插：超出保留上限时丢的是最旧的令牌
+  try { localStorage.setItem('infohub-vote-mine', JSON.stringify(list.slice(0, 50))); } catch (e) { /* 忽略 */ }
+}
+const voteTokenOf = (id) => (voteMine().find((x) => x.id === id) || {}).token || null;
 
 function jlMine() {
   try { return JSON.parse(localStorage.getItem('infohub-jielong-mine') || '[]'); } catch (e) { return []; }
@@ -1867,7 +2135,7 @@ function openJielongCreateModal() {
       <input id="jl-title" maxlength="60" placeholder="例如：9月12日春游报名">
       <label>说明（选填）</label>
       <textarea id="jl-desc" rows="2" maxlength="1000" placeholder="时间、地点、要求等，同学打开链接就能看到"></textarea>
-      <label>从名单库选择（可选）</label>
+      <label>从班级名单选择（可选）</label>
       <div class="labrow">
         <select id="jl-roster-lib" style="flex:1;min-width:0"><option value="">— 手动粘贴名单 —</option></select>
         <button type="button" class="mini danger" id="jl-roster-lib-del" style="display:none;white-space:nowrap">${icon('trash')} 删除</button>
@@ -1876,7 +2144,7 @@ function openJielongCreateModal() {
       <textarea id="jl-roster" rows="5" placeholder="每行一个，支持“学号 姓名”&#10;例如：&#10;2023001 张三&#10;2. 李四&#10;王五"></textarea>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer"><input type="checkbox" id="jl-withid" style="width:auto"> 名单包含学号（输入学号或姓名都能匹配）</label>
       <div id="jl-roster-pv" class="jl-roster-pv"></div>
-      <label>保存到名单库（选填，同名覆盖，下次创建时可直接选用）</label>
+      <label>保存到班级名单（选填，同名覆盖，下次创建时可直接选用）</label>
       <input id="jl-roster-libname" maxlength="60" placeholder="例如：三年二班名单">
       <label>截止时间（选填）</label>
       <input id="jl-deadline" type="datetime-local">
@@ -2115,7 +2383,7 @@ function openDrawCreateModal() {
     <div class="form">
       <label>抽签标题</label>
       <input id="dw-title" maxlength="60" placeholder="例如：运动会志愿者抽签">
-      <label>从名单库选择（可选）</label>
+      <label>从班级名单选择（可选）</label>
       <div class="labrow">
         <select id="dw-roster-lib" style="flex:1;min-width:0"><option value="">— 手动粘贴名单 —</option></select>
         <button type="button" class="mini danger" id="dw-roster-lib-del" style="display:none;white-space:nowrap">${icon('trash')} 删除</button>
@@ -2124,7 +2392,7 @@ function openDrawCreateModal() {
       <textarea id="dw-roster" rows="5" placeholder="每行一个，支持“学号 姓名”&#10;例如：&#10;2023001 张三&#10;2. 李四&#10;王五"></textarea>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer"><input type="checkbox" id="dw-withid" style="width:auto"> 名单包含学号（重名班级建议保留，按学号区分）</label>
       <div id="dw-roster-pv" class="jl-roster-pv"></div>
-      <label>保存到名单库（选填，同名覆盖，下次创建时可直接选用）</label>
+      <label>保存到班级名单（选填，同名覆盖，下次创建时可直接选用）</label>
       <input id="dw-roster-libname" maxlength="60" placeholder="例如：三年二班名单">
       <label>每次抽几人（抽签时还可以临时改）</label>
       <input id="dw-perdraw" type="number" min="1" value="1">
@@ -2319,12 +2587,12 @@ async function loadBirthdays() {
       ${canEdit() ? `<div class="bd-acts"><button class="mini" data-bd-edit="${m.id}" title="编辑">${icon('edit')}</button><button class="mini danger" data-bd-del="${m.id}" title="删除">${icon('trash')}</button></div>` : ''}
     </div>`).join('');
 
-  // 名单库导入控件
+  // 班级名单导入控件
   let libHtml = '';
   if (canEdit()) {
     let lib = [];
     try { lib = (await api('/api/rosters')).items; } catch (e) { /* 忽略 */ }
-    if (seq !== loadSeq) return; // 名单库慢响应期间切走视图，不再覆盖
+    if (seq !== loadSeq) return; // 班级名单慢响应期间切走视图，不再覆盖
     if (lib.length) {
       libHtml = `
       <div class="jl-actions">
@@ -2351,7 +2619,7 @@ async function loadBirthdays() {
     ${todayWrap}
     <div class="panel">
       <div class="jl-head" style="margin:0 0 4px"><h3 style="margin:0">${icon('birthday')} 生日倒计时（${data.items.filter((x) => !x.isToday).length} 人）</h3></div>
-      ${upCards ? `<div class="bd-grid">${upCards}</div>` : `<div class="empty"><div class="big">${icon('birthday')}</div>还没有成员<br>${canEdit() ? '先在名单库保存班级名单，再从下面一键导入' : '等老师添加成员后，这里就会热闹起来'}</div>`}
+      ${upCards ? `<div class="bd-grid">${upCards}</div>` : `<div class="empty"><div class="big">${icon('birthday')}</div>还没有成员<br>${canEdit() ? '先在「班级名单」保存名单，再从下面一键导入' : '等老师添加成员后，这里就会热闹起来'}</div>`}
       ${libHtml}
       ${badgeHtml}
       ${canEdit() ? `<div class="jl-actions"><button class="primary" id="btn-bd-add">${icon('plus')} 添加成员</button></div>` : ''}
@@ -2447,9 +2715,9 @@ function openBdayModal(m) {
 /* ========= 命令面板（Ctrl/⌘+K，参考 Linear 的 cmdk 交互） ========= */
 const CMDK_VIEWS = [
   ['feed', '信息中心', 'feed'], ['inbox', '等待审核', 'inbox'], ['tasks', '待办任务', 'check'],
-  ['jielong', '活动接龙', 'jielong'], ['draw', '抽签点名', 'draw'], ['birthday', '生日祝福', 'birthday'],
+  ['jielong', '活动接龙', 'jielong'], ['draw', '抽签点名', 'draw'], ['vote', '投票表决', 'vote'], ['birthday', '生日祝福', 'birthday'],
   ['calendar', '日历详情', 'calendar'], ['files', '文件中心', 'file'], ['stats', '统计接入', 'chart'],
-  ['rosters', '名单库', 'users'],
+  ['rosters', '班级名单', 'users'],
 ];
 let cmdkItems = [], cmdkIndex = 0, cmdkSearchTimer = null, cmdkSeq = 0;
 
@@ -2474,7 +2742,7 @@ function cmdkOpen() {
 }
 
 function cmdkCommands() {
-  // 名单库是管理功能（访客隐藏入口），命令面板同步按权限过滤
+  // 班级名单是管理功能（访客隐藏入口），命令面板同步按权限过滤
   const views = canEdit() ? CMDK_VIEWS : CMDK_VIEWS.filter(([v]) => v !== 'rosters');
   const cmds = views.map(([v, label, ic]) => ({
     iconHtml: icon(ic), label: '转到：' + label, hint: '视图',
@@ -2583,7 +2851,7 @@ function openHelpModal() {
 /* ========= 视图切换 ========= */
 // 顶栏控件只在适用的页面显示：排序只在信息流有用；统计页不响应群筛选
 function syncTopbar() {
-  $('#group-sel').style.display = (state.view === 'stats' || state.view === 'jielong' || state.view === 'draw' || state.view === 'birthday' || state.view === 'rosters') ? 'none' : '';
+  $('#group-sel').style.display = (state.view === 'stats' || state.view === 'jielong' || state.view === 'draw' || state.view === 'vote' || state.view === 'birthday' || state.view === 'rosters') ? 'none' : '';
   $('#sortsel').style.display = state.view === 'feed' ? '' : 'none';
 }
 // 视图加载代次：renderView 每次自增并传给视图加载器。加载器的响应回来时若代次已变
@@ -2591,6 +2859,7 @@ function syncTopbar() {
 let loadSeq = 0;
 async function renderView() {
   jlStopTimer();
+  vStopTimer();
   const seq = ++loadSeq;
   saveFilters();
   syncNavActive();
@@ -2603,6 +2872,7 @@ async function renderView() {
     else if (state.view === 'tasks') await loadTasks();
     else if (state.view === 'jielong') await loadJielong();
     else if (state.view === 'draw') await loadDraw();
+    else if (state.view === 'vote') await loadVotes();
     else if (state.view === 'birthday') await loadBirthdays();
     else if (state.view === 'calendar') await loadCalendar();
     else if (state.view === 'files') await loadFiles();
@@ -2632,7 +2902,7 @@ async function refresh() {
 // 所有导航按钮（侧栏 + 底栏 + 更多面板）统一同步活动态；
 // 「更多」按钮在当前视图属于低频视图时也点亮
 const NAV_SEL = '#mainnav button, #tabbar button, #tabsheet button';
-const MORE_VIEWS = ['inbox', 'calendar', 'files', 'stats', 'rosters'];
+const MORE_VIEWS = ['inbox', 'calendar', 'files', 'stats', 'rosters', 'vote'];
 function syncNavActive() {
   $$(NAV_SEL).forEach((b) => {
     b.classList.toggle('active', b.dataset.view === state.view);
