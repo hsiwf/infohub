@@ -447,6 +447,8 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   ok('进度与未接名单', r.body.done === 3 && r.body.total === 4 && r.body.missing.length === 1 && r.body.missing[0].name === '王五', JSON.stringify(r.body.missing));
   r = await post(`/api/jielong/${jl.id}/join`, { name: '王五', values: {} });
   ok('必填项缺失被拒', r.status === 400);
+  r = await post(`/api/jielong/${jl.id}/join`, { name: '王五', values: { f0: '绕过下拉的任意文本' } });
+  ok('单选项只接受预设选项值（400）', r.status === 400, JSON.stringify(r.body));
   if (authRequired) {
     // 密码模式下：无 Cookie 且令牌错误 → 管理操作 401（未设密码时全站开放，无此拒绝路径）
     const g6 = await fetch(`${BASE}/api/jielong/${jl.id}/export?t=` + encodeURIComponent('错误令牌'));
@@ -475,6 +477,12 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   ok('删除整个接龙', r.status === 200);
   r = await j('/api/jielong/' + jl.id);
   ok('删除后详情 404', r.status === 404);
+  // 纯日期截止时间按当天 23:59 判定（与信息中心 DEADLINE_EXPR 同口径）：已过的纯日期即自动截止
+  r = await post('/api/jielong', { title: '自检日期截止接龙', deadline: '2020-01-01' });
+  const jlDate = r.body.id;
+  r = await post(`/api/jielong/${jlDate}/join`, { name: '张三' });
+  ok('接龙纯日期截止视为当天23:59（已过期拒绝提交）', r.status === 400, JSON.stringify(r.body));
+  await j('/api/jielong/' + jlDate, { method: 'DELETE' });
 
   // 13. 抽签（名单轮抽：抽过的人下次不再被抽到，抽空自动开新一轮）
   r = await post('/api/draw', { title: '自检签箱', rosterRaw: '2023001 张三\n2. 李四\n王五\n赵六', keepId: true, perDraw: 2 });
@@ -665,6 +673,24 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   ok('裸姓名改票被拒（400）', r.status === 400);
   r = await post(`/api/vote/${vid2}/ballot`, { rid: 1, name: '李四', via: 'u', choices: ['o1'] });
   ok('专属链接 ?u= 豁免学号验证', r.status === 200);
+  // 回归：学生页提交选票必须携带 via:'u'，否则「需学号验证」投票的专属链接打不开票
+  // （服务端豁免依赖该字段；学生页是静态 HTML，这里做源码金丝雀防止前后端契约回退）
+  const votePageSrc = await (await fetch(BASE + '/v/smoke')).text();
+  ok('学生页投票提交携带 via:\'u\'（专属链接豁免回归）', /via\s*:[^,}]*['"]u['"]/.test(votePageSrc));
+  // 编辑投票：说明与截止传空串即清空（显式字段语义）
+  r = await post('/api/vote', { title: '自检编辑投票', optionsRaw: '赞成\n反对', rosterRaw: '张三\n李四', deadline: '2030-01-01 10:00' });
+  const vidEdit = r.body.id;
+  r = await j(`/api/vote/${vidEdit}?t=${encodeURIComponent(r.body.adminToken)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deadline: '' }) });
+  ok('编辑投票可清空截止时间', r.status === 200, JSON.stringify(r.body));
+  r = await j('/api/vote/' + vidEdit);
+  ok('清空后截止时间为空', r.status === 200 && r.body.deadline === '', JSON.stringify(r.body));
+  // 纯日期截止时间按当天 23:59 判定：已过的纯日期 → 投票自动结束
+  r = await post('/api/vote', { title: '自检日期截止投票', optionsRaw: '赞成\n反对', rosterRaw: '张三\n李四', deadline: '2020-01-01' });
+  const vidDate = r.body.id;
+  r = await j('/api/vote/' + vidDate);
+  ok('投票纯日期截止视为当天23:59（已过期自动结束）', r.status === 200 && r.body.closed === true, JSON.stringify({ closed: r.body.closed }));
+  await j('/api/vote/' + vidDate, { method: 'DELETE' });
+  await j('/api/vote/' + vidEdit, { method: 'DELETE' });
   r = await j(`/api/vote/${vid2}`, { method: 'DELETE' });
   ok('清理学号验证投票', r.status === 200 || r.status === 404);
   await j('/api/rosters/' + sidRosterId, { method: 'DELETE' });
