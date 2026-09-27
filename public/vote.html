@@ -130,7 +130,9 @@
 const $ = (s) => document.querySelector(s);
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function pad2(n){return String(n).padStart(2,'0');}
-function fmtDT(s){if(!s)return '';const d=new Date(String(s).replace(' ','T'));return isNaN(d)?'':d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+' '+pad2(d.getHours())+':'+pad2(d.getMinutes());}
+function fmtDT(s){if(!s)return '';const t=String(s);if(/^\d{4}-\d{2}-\d{2}$/.test(t))return t;const d=new Date(t.replace(' ','T'));return isNaN(d)?'':d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+' '+pad2(d.getHours())+':'+pad2(d.getMinutes());}
+// 截止时间统一口径：纯日期按当天 23:59（本地时间），与服务端判定一致
+function deadlineDate(s){const t=String(s||'');if(!t)return null;const d=new Date(t.length===10?t+'T23:59':t.replace(' ','T'));return isNaN(d.getTime())?null:d;}
 function fmtRemain(ms){const m=Math.max(0,Math.floor(ms/60000));const d=Math.floor(m/1440),h=Math.floor((m%1440)/60),mm=m%60;if(d>0)return d+' 天 '+h+' 小时';if(h>0)return h+' 小时 '+mm+' 分钟';return mm+' 分钟';}
 function slotLabel(r){return r.id ? r.id + ' ' + r.name : r.name;}
 let toastTimer=null;
@@ -148,6 +150,7 @@ async function api(url,opt){
 const VOTE_ID=((location.pathname.match(/\/v\/([a-z0-9]+)/i)||[])[1]||'').toLowerCase();
 let act=null;
 let pickedRid=null;   // 锁定的名单槽位
+let lockedFromUrl=false; // 身份是否仍由专属链接 ?u= 锁定（服务端据此豁免学号验证，解锁后必须重新验证）
 const urlRid=(()=>{
   const raw=new URLSearchParams(location.search).get('u');
   if(raw==null||raw==='')return null;
@@ -179,7 +182,8 @@ function renderHead(){
   const meta=[];
   if(act.deadline)meta.push('截止：'+fmtDT(act.deadline));
   if(open&&act.deadline){
-    const remain=new Date(String(act.deadline).replace(' ','T'))-new Date();
+    const dl=deadlineDate(act.deadline);
+    const remain=dl?dl-new Date():0;
     if(remain>0)meta.push('剩余 '+fmtRemain(remain));
   }
   meta.push(act.anonymous?'匿名投票（同学间互不可见，仅发起人可查明细）':'记名投票（选择对所有人公开）');
@@ -217,6 +221,7 @@ function renderBallot(){
   // 专属链接 ?u= 序号锁定身份
   if(urlRid!=null&&act.roster[urlRid]){
     pickedRid=urlRid;
+    lockedFromUrl=true;
     $('#nameLabel').textContent='投票身份';
     $('#name').value=slotLabel(act.roster[urlRid]);
     $('#name').readOnly=true;
@@ -224,6 +229,7 @@ function renderBallot(){
     $('#lockedHint').style.display='';
     $('#unlockBtn').addEventListener('click',()=>{
       pickedRid=null;
+      lockedFromUrl=false;
       $('#name').readOnly=false;$('#name').value='';
       $('#lockedHint').style.display='none';
       updateMatchHint();
@@ -314,7 +320,8 @@ $('#submitBtn').addEventListener('click',async()=>{
   const btn=$('#submitBtn');
   btn.disabled=true;btn.textContent='提交中…';
   try{
-    const r=await api('/api/vote/'+VOTE_ID+'/ballot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rid:pickedRid,name,choices,sid})});
+    // 专属链接锁定的身份视作已验证（服务端豁免字段；解锁后不带，联想选中的姓名仍需学号验证）
+    const r=await api('/api/vote/'+VOTE_ID+'/ballot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rid:pickedRid,name,choices,sid,via:lockedFromUrl?'u':undefined})});
     $('#okBanner').textContent=r.updated?'✓ 已更新你的选票':'✓ 投票成功，感谢参与';
     $('#okBanner').style.display='';
     toast(r.updated?'选票已更新':'投票成功');

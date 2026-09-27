@@ -1134,6 +1134,7 @@ async function loadVoteDetail() {
       ${(d.ballots || []).map((b, i) => `<div class="entry-line"><b>${i + 1}. ${esc(b.name)}</b><span class="entry-txt">投给：${esc(b.choices.join('、') || '弃权')} · ${esc(fmtTs(b.time))}</span></div>`).join('') || '<span class="hint">还没有人投票</span>'}
     </div>` : ''}
     ${canManage ? `<div class="card-actions">
+      ${!d.closed ? '<button class="ghost" id="vote-edit">' + icon('edit') + ' 编辑</button>' : ''}
       ${!d.closed ? '<button class="ghost" id="vote-stop">停止投票</button>' : ''}
       <button class="ghost danger" id="vote-del">${icon('trash')} 删除投票</button>
     </div>` : ''}`;
@@ -1152,6 +1153,8 @@ async function loadVoteDetail() {
     try { await api('/api/vote/' + d.id + '/stop' + tArg, { method: 'POST' }); toast('投票已停止'); state.vote = null; renderView().catch(() => {}); }
     catch (e) { toast(e.message, 'error'); }
   });
+  const editBtn = $('#vote-edit');
+  if (editBtn) editBtn.addEventListener('click', () => openVoteEditModal(d, token));
   const delBtn = $('#vote-del');
   if (delBtn) delBtn.addEventListener('click', async () => {
     if (!confirm('确定删除这次投票吗？所有选票将一并删除，不可恢复。')) return;
@@ -1241,6 +1244,35 @@ function openVoteModal() {
       closeModal();
       state.vote = r.id;
       renderView().catch(() => {});
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+// 编辑投票（发起人/管理员）：标题 / 说明 / 截止时间；名单与选项发起后不可改（选票已按其校验）
+function openVoteEditModal(v, token) {
+  const tArg = token ? '?t=' + encodeURIComponent(token) : '';
+  openModal(`
+    <h2>${icon('edit')} 编辑投票</h2>
+    <div class="form">
+      <label>标题</label><input id="vt-e-title" maxlength="60" value="${esc(v.title)}">
+      <label>说明</label><textarea id="vt-e-desc" rows="2" maxlength="1000">${esc(v.description || '')}</textarea>
+      <label>截止时间（留空表示不设截止）</label><input id="vt-e-deadline" type="datetime-local" value="${dtToVal(v.deadline)}">
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" id="btn-cancel">取消</button>
+      <button class="primary" id="vt-e-save">保存修改</button>
+    </div>`);
+  $('#vt-e-save').addEventListener('click', async () => {
+    if (!$('#vt-e-title').value.trim()) { toast('标题不能为空', 'error'); return; }
+    try {
+      await api(`/api/vote/${v.id}${tArg}`, { method: 'PUT', body: {
+        title: $('#vt-e-title').value.trim(),
+        description: $('#vt-e-desc').value,
+        deadline: valToDt($('#vt-e-deadline').value),
+      } });
+      closeModal();
+      toast('修改已保存');
+      loadVoteDetail();
     } catch (e) { toast(e.message, 'error'); }
   });
 }

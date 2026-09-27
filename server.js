@@ -892,7 +892,15 @@ route('GET', '/api/inbox', (ctx) => {
 });
 route('POST', '/api/inbox/accept-all', () => {
   const ids = db.prepare('SELECT id FROM inbox ORDER BY id LIMIT 500').all().map((r) => r.id);
-  for (const id of ids) acceptInboxItem(id);
+  // 整体事务：逐条收录是独立写库，中途失败（如磁盘满）不应留下半收录状态
+  db.exec('BEGIN');
+  try {
+    for (const id of ids) acceptInboxItem(id);
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
   console.log(`待审核批量收录：${ids.length} 条`);
   return { ok: true, accepted: ids.length };
 });
@@ -1070,6 +1078,10 @@ route('POST', '/api/jielong/:id/join', (ctx) => {
   for (const f of a.fields) {
     let v = String(vals[f.key] == null ? '' : vals[f.key]).trim().slice(0, 300);
     if (f.required && !v) throw new HttpError(400, '请填写「' + f.label + '」');
+    // 单选项只认预设选项：绕过页面下拉的请求不能往统计表/CSV 里塞任意文本
+    if (f.type === 'select' && v && !f.options.includes(v)) {
+      throw new HttpError(400, '「' + f.label + '」只能从预设选项中选择');
+    }
     if (v) values[f.key] = v;
   }
   const remark = sField(b.remark, 300);
@@ -1438,7 +1450,9 @@ function getBday(id) {
 
 /* ---------- 投票表决（资格制名单 / 匿名可选 / 一人一票） ---------- */
 function voteIsClosed(v) {
-  return !!v.closed || !!(v.deadline && Date.now() > new Date(String(v.deadline).replace(' ', 'T')).getTime());
+  if (!!v.closed) return true;
+  const d = JL.deadlineDate(v.deadline); // 纯日期按当天 23:59，与接龙口径一致
+  return !!(d && Date.now() > d.getTime());
 }
 // 管理权限：管理员登录，或持有该投票的管理令牌 ?t=（可委托给班委）
 function voteCanManage(ctx, v) {
@@ -1588,15 +1602,19 @@ route('POST', '/api/vote/:id/ballot', (ctx) => {
   return { ok: true };
 });
 
+// 编辑（标题/说明/截止）：字段显式传入才修改，说明与截止传空串即清空
 route('PUT', '/api/vote/:id', (ctx) => {
   const v = db.prepare('SELECT * FROM votes WHERE id = ?').get(ctx.params.id);
   if (!v) throw new HttpError(404, '投票不存在');
   if (!voteCanManage(ctx, v)) throw new HttpError(401, '需要管理员登录或管理令牌');
   const b = ctx.body || {};
+  const title = b.title !== undefined ? sField(b.title, 60) : v.title;
+  if (!title) throw new HttpError(400, '标题不能为空');
+  const description = b.description !== undefined ? sField(b.description, 1000) : v.description;
+  const deadline = b.deadline !== undefined ? (cleanDT(b.deadline) || '') : (v.deadline || '');
   db.prepare('UPDATE votes SET title = ?, description = ?, deadline = ? WHERE id = ?')
-    .run(sField(b.title, 60) || v.title, sField(b.description, 1000) || v.description,
-      cleanDT(b.deadline) || v.deadline, v.id);
-  audit(ctx, '编辑投票', '「' + (sField(b.title, 60) || v.title) + '」');
+    .run(title, description, deadline, v.id);
+  audit(ctx, '编辑投票', '「' + title + '」');
   return { ok: true };
 });
 
