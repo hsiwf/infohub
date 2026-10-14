@@ -271,9 +271,9 @@ function renderForm(){
   act.fields.forEach(f=>{
     const w=document.createElement('div');
     let inner='<label class="fl">'+esc(f.label)+(f.required?' <span class="req">*</span>':'')+'</label>';
-    if(f.type==='text')inner+='<input type="text" data-fkey="'+f.key+'" maxlength="300" placeholder="请输入'+esc(f.label)+'">';
-    else if(f.type==='textarea')inner+='<textarea rows="2" data-fkey="'+f.key+'" maxlength="300" placeholder="请输入'+esc(f.label)+'"></textarea>';
-    else inner+='<select data-fkey="'+f.key+'"><option value="">请选择</option>'+f.options.map(o=>'<option>'+esc(o)+'</option>').join('')+'</select>';
+    if(f.type==='text')inner+='<input type="text" data-fkey="'+esc(f.key)+'" maxlength="300" placeholder="请输入'+esc(f.label)+'">';
+    else if(f.type==='textarea')inner+='<textarea rows="2" data-fkey="'+esc(f.key)+'" maxlength="300" placeholder="请输入'+esc(f.label)+'"></textarea>';
+    else inner+='<select data-fkey="'+esc(f.key)+'"><option value="">请选择</option>'+f.options.map(o=>'<option>'+esc(o)+'</option>').join('')+'</select>';
     w.innerHTML=inner;
     box.appendChild(w);
   });
@@ -314,7 +314,7 @@ function renderForm(){
       nameInput.value=(myEntry.outside||myEntry.rid==null||!act.roster[myEntry.rid])?myEntry.name:slotLabel(act.roster[myEntry.rid]);
     }
     act.fields.forEach(f=>{
-      const el=document.querySelector('[data-fkey="'+f.key+'"]');
+      const el=document.querySelector('[data-fkey="'+esc(f.key)+'"]');
       if(el)el.value=myEntry.values[f.key]||'';
     });
     $('#remark').value=myEntry.remark||'';

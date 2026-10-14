@@ -58,7 +58,7 @@ if ('serviceWorker' in navigator) {
 <script>
 'use strict';
 const $ = (s) => document.querySelector(s);
-function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function pad(n){return String(n).padStart(2,'0');}
 function ymd(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
 const CATL={notice:'通知',task:'任务',activity:'活动',file:'文件',other:'其他'};
@@ -97,7 +97,7 @@ $('#q-text').addEventListener('input',()=>{
       if(seq!==parseSeq)return;
       const p=r.parsed;
       box.style.display='block';
-      box.innerHTML=`识别为：<b>${CATL[p.category]||p.category}</b>${p.deadline?' · 截止 '+esc(p.deadline):''}${p.priority?' · 重要':''}${p.title?'<br>标题：'+esc(p.title):''}`;
+      box.innerHTML=`识别为：<b>${esc(CATL[p.category]||p.category)}</b>${p.deadline?' · 截止 '+esc(p.deadline):''}${p.priority?' · 重要':''}${p.title?'<br>标题：'+esc(p.title):''}`;
     }catch(e){box.style.display='none';}
   },400);
 });

@@ -602,3 +602,63 @@ input[type=checkbox]{accent-color:var(--primary);width:15px;height:15px;flex:0 0
 /* ---------- Firefox 滚动条 / 长列表渲染优化 ---------- */
 html{scrollbar-width:thin;scrollbar-color:rgba(100,116,139,.4) transparent}
 .card{content-visibility:auto;contain-intrinsic-size:auto 150px}
+
+/* ---------- 班费收支 ---------- */
+.fund-sum{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:14px 0}
+.fund-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-md);padding:14px 16px;display:flex;flex-direction:column;gap:6px}
+.fund-card span{font-size:13px;color:var(--muted)}
+.fund-card b{font-size:24px;font-weight:700;letter-spacing:.3px;font-variant-numeric:tabular-nums}
+.fund-card.income b{color:#0a9f56}
+.fund-card.expense b{color:var(--danger)}
+.fund-card.balance b{color:var(--primary)}
+.fund-card.balance.neg b{color:var(--danger)}
+.fund-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}
+.fund-toolbar select,.fund-toolbar input{padding:8px 10px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--card);color:var(--text);font-size:13px;outline:none}
+.fund-toolbar input[type=search]{flex:1;min-width:150px}
+.fund-toolbar input[type=date]{width:auto}
+.fund-toolbar select:focus,.fund-toolbar input:focus{border-color:var(--primary)}
+.fund-dash{color:var(--muted)}
+.fund-item{border-bottom:1px solid var(--line)}
+.fund-item:last-child{border-bottom:none}
+.fund-row{display:grid;grid-template-columns:96px 26px 1fr auto;gap:10px;align-items:center;padding:10px 4px}
+.fund-row.has-acts{grid-template-columns:96px 26px 1fr auto auto}
+.fund-date{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.fund-tag{width:22px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#fff}
+.fund-tag.income{background:#0a9f56}
+.fund-tag.expense{background:var(--danger)}
+.fund-note{font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fund-fcount{display:inline-flex;align-items:center;gap:2px;color:var(--muted);font-size:12px;vertical-align:1px}
+.fund-fcount .icon{width:12px;height:12px}
+.fund-files{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:0 4px 12px 142px}
+.fund-filewrap{position:relative;display:inline-flex}
+.fund-thumb img{width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block;transition:border-color .15s}
+.fund-thumb:hover img{border-color:var(--primary)}
+.fund-file{display:inline-flex;align-items:center;gap:5px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:12px;color:var(--text);background:var(--card);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fund-file:hover{border-color:var(--primary)}
+.fund-file .icon{width:13px;height:13px;flex:0 0 auto}
+.fund-file-del{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--danger);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;line-height:1}
+.fund-file-del .icon{width:12px;height:12px}
+.fund-file-del:hover{background:var(--danger);color:#fff;border-color:var(--danger)}
+.fund-upl{display:inline-flex;align-items:center;gap:5px;padding:6px 10px;border:1px dashed var(--line);border-radius:8px;font-size:12px;color:var(--muted);cursor:pointer;transition:border-color .15s,color .15s}
+.fund-upl:hover{border-color:var(--primary);color:var(--primary)}
+.fund-upl .icon{width:13px;height:13px}
+.fund-amt{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.fund-amt.income{color:#0a9f56}
+.fund-amt.expense{color:var(--danger)}
+.fund-acts{display:inline-flex;gap:6px}
+.fund-modal-files{margin-top:6px;font-size:13px;color:var(--muted)}
+.fund-modal-files .icon{width:13px;height:13px;vertical-align:-2px}
+.fund-seg{display:flex;gap:10px;margin:6px 0}
+.fund-seg label{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border:1px solid var(--line);border-radius:var(--radius-sm);cursor:pointer;font-size:14px;margin:0;color:var(--text)}
+.fund-seg label.on{border-color:var(--primary);background:color-mix(in srgb,var(--primary) 10%,var(--card));color:var(--primary);font-weight:600}
+.fund-seg input{width:auto}
+@media(max-width:760px){
+  .fund-sum{grid-template-columns:1fr}
+  .fund-row,.fund-row.has-acts{grid-template-columns:26px 1fr auto;grid-auto-rows:auto;gap:6px 10px}
+  .fund-tag{grid-row:1;grid-column:1}
+  .fund-date{grid-row:1;grid-column:2;color:var(--muted)}
+  .fund-amt{grid-row:1;grid-column:3}
+  .fund-note{grid-row:2;grid-column:2;white-space:normal}
+  .fund-acts{grid-row:2;grid-column:3;justify-self:end}
+  .fund-files{padding-left:36px}
+}

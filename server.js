@@ -115,7 +115,10 @@ setInterval(autoBackup, 30 * 60 * 1000);
 // 启动时扫一遍 + 每 24 小时一次；跳过 1 小时内的新文件，避免误删正在上传的内容。
 function sweepOrphanUploads() {
   try {
-    const known = new Set(db.prepare('SELECT stored_name FROM attachments').all().map((r) => String(r.stored_name).replace(/\//g, path.sep)));
+    const known = new Set([
+      ...db.prepare('SELECT stored_name FROM attachments').all(),
+      ...db.prepare('SELECT stored_name FROM fund_attachments').all(),
+    ].map((r) => String(r.stored_name).replace(/\//g, path.sep)));
     const cutoff = Date.now() - 3600 * 1000;
     let removed = 0;
     const scan = (dir, depth) => {
@@ -203,6 +206,39 @@ function audit(ctx, action, detail) {
 function sField(v, max) {
   const s = String(v == null ? '' : v).trim();
   return s.slice(0, max);
+}
+/* ---------- 班费收支：金额一律以「分」存整数，避免浮点累加误差 ---------- */
+const FUND_TYPES = ['income', 'expense'];
+function fundAmountFen(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  const fen = Math.round(n * 100); // 元 → 分（四舍五入到分）
+  if (fen <= 0 || fen > 10000000000) return null; // 必须为正，上限 1 亿元
+  return fen;
+}
+function fundView(row) {
+  return {
+    id: row.id, type: row.type, amount: row.amount / 100,
+    note: row.note, happened_at: row.happened_at,
+    created_at: row.created_at, updated_at: row.updated_at,
+  };
+}
+// 筛选条件构造（列表与 CSV 导出共用同一口径）
+function fundWhere(query) {
+  const where = [];
+  const args = [];
+  const type = query.get('type');
+  if (type === 'income' || type === 'expense') { where.push('type = ?'); args.push(type); }
+  const from = cleanDT(query.get('from'));
+  const to = cleanDT(query.get('to'));
+  if (from) { where.push('happened_at >= ?'); args.push(from.length === 10 ? from + ' 00:00' : from); }
+  if (to) { where.push('happened_at <= ?'); args.push(to.length === 10 ? to + ' 23:59' : to); }
+  const search = (query.get('q') || '').trim();
+  if (search) {
+    where.push(`note LIKE ? ESCAPE '\\'`);
+    args.push(likeArg(search));
+  }
+  return { whereSql: where.length ? 'WHERE ' + where.join(' AND ') : '', args };
 }
 function sanitizeName(name) {
   let s = String(name || 'file').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').trim();
@@ -871,18 +907,42 @@ function handleOnebotReport(ctx) {
 route('POST', '/api/onebot/report', handleOnebotReport);
 route('POST', '/api/onebot', handleOnebotReport);
 
+/* ---------- 可嵌套事务 ----------
+ * SQLite 不支持嵌套 BEGIN（"cannot start a transaction within a transaction"）。
+ * 这里用 SAVEPOINT 实现嵌套：最外层用 BEGIN/COMMIT，内层用 SAVEPOINT/RELEASE，
+ * 任一层抛错就回滚到其保存点，最外层回滚整个事务。node:sqlite 是同步执行，
+ * 计数器在单线程内安全。 */
+let txDepth = 0;
+function transact(fn) {
+  if (txDepth === 0) {
+    db.exec('BEGIN');
+    txDepth = 1;
+    try { const r = fn(); db.exec('COMMIT'); txDepth = 0; return r; }
+    catch (e) { try { db.exec('ROLLBACK'); } catch (e2) { /* 忽略 */ } txDepth = 0; throw e; }
+  }
+  const sp = 'sp' + txDepth;
+  db.exec(`SAVEPOINT ${sp}`);
+  txDepth++;
+  try { const r = fn(); db.exec(`RELEASE ${sp}`); txDepth--; return r; }
+  catch (e) { try { db.exec(`ROLLBACK TO ${sp}`); db.exec(`RELEASE ${sp}`); } catch (e2) { /* 忽略 */ } txDepth--; throw e; }
+}
+
 /* ---------- 待审核收件箱（review 模式：QQ 消息先入箱，管理员挑着收录） ---------- */
 function acceptInboxItem(id) {
   const item = db.prepare('SELECT * FROM inbox WHERE id = ?').get(id);
   if (!item) throw new HttpError(404, '待审核消息不存在');
-  const gid = item.qq_gid ? bindOnebotGroup(item.qq_gid, item.group_name || `QQ群 ${item.qq_gid}`) : null;
-  const { id: mid } = insertParsedMessage(item.content, {
-    groupId: gid,
-    sender: item.sender_name,
-    received: item.received_at || nowStr(),
+  // 事务包裹：INSERT messages + DELETE inbox 必须原子完成，避免中途失败导致重复收录
+  // 被 accept-all 的外层事务调用时自动降为 SAVEPOINT，不产生嵌套 BEGIN
+  return transact(() => {
+    const gid = item.qq_gid ? bindOnebotGroup(item.qq_gid, item.group_name || `QQ群 ${item.qq_gid}`) : null;
+    const { id: mid } = insertParsedMessage(item.content, {
+      groupId: gid,
+      sender: item.sender_name,
+      received: item.received_at || nowStr(),
+    });
+    db.prepare('DELETE FROM inbox WHERE id = ?').run(id);
+    return mid;
   });
-  db.prepare('DELETE FROM inbox WHERE id = ?').run(id);
-  return mid;
 }
 route('GET', '/api/inbox', (ctx) => {
   const limit = Math.min(Math.max(Number(ctx.query.get('limit')) || 300, 1), 500);
@@ -893,14 +953,7 @@ route('GET', '/api/inbox', (ctx) => {
 route('POST', '/api/inbox/accept-all', () => {
   const ids = db.prepare('SELECT id FROM inbox ORDER BY id LIMIT 500').all().map((r) => r.id);
   // 整体事务：逐条收录是独立写库，中途失败（如磁盘满）不应留下半收录状态
-  db.exec('BEGIN');
-  try {
-    for (const id of ids) acceptInboxItem(id);
-    db.exec('COMMIT');
-  } catch (e) {
-    db.exec('ROLLBACK');
-    throw e;
-  }
+  transact(() => { for (const id of ids) acceptInboxItem(id); });
   console.log(`待审核批量收录：${ids.length} 条`);
   return { ok: true, accepted: ids.length };
 });
@@ -977,19 +1030,14 @@ function saveJielongEntries(a) {
   const del = db.prepare('DELETE FROM jielong_entries WHERE jielong_id = ?');
   const ins = db.prepare(`INSERT INTO jielong_entries (jielong_id, rid, sid, name, values_json, remark, outside, time, seq)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  db.exec('BEGIN');
-  try {
+  transact(() => {
     del.run(a.id);
     a.entries.forEach((e, i) => {
       // seq 固定为当前数组下标：修改提交只更新内容与时间，不改变名单里的先后次序
       ins.run(a.id, e.rid == null ? null : e.rid, e.id || '', e.name, JSON.stringify(e.values || {}),
         e.remark || '', e.outside ? 1 : 0, e.time || Date.now(), i);
     });
-    db.exec('COMMIT');
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
+  });
 }
 
 route('GET', '/api/jielong', () => ({
@@ -1125,9 +1173,13 @@ route('PUT', '/api/jielong/:id', (ctx) => {
     a.roster = newRoster;
     if (newRoster.length) JL.rematchEntries(a, newRoster); // 无名单接龙编辑时保持记录不变
   }
-  db.prepare(`UPDATE jielongs SET title = ?, description = ?, deadline = ?, roster = ?, allow_outside = ? WHERE id = ?`)
-    .run(a.title, a.description, a.deadline, JSON.stringify(a.roster), a.allowOutside ? 1 : 0, a.id);
-  saveJielongEntries(a);
+  // 元数据 UPDATE 与 entries 重写在同一事务内：名单变更后 rematch + 重写 entries，
+  // 任何一步失败（如磁盘满）都整体回滚，避免元数据已改但记录未同步的半截状态
+  transact(() => {
+    db.prepare(`UPDATE jielongs SET title = ?, description = ?, deadline = ?, roster = ?, allow_outside = ? WHERE id = ?`)
+      .run(a.title, a.description, a.deadline, JSON.stringify(a.roster), a.allowOutside ? 1 : 0, a.id);
+    saveJielongEntries(a);
+  });
   return jielongView(a);
 });
 
@@ -1580,6 +1632,8 @@ route('POST', '/api/vote/:id/ballot', (ctx) => {
   }
   // 学号强验证（发起时勾选）：槽位必须有学号，且提交内容里必须含有该学号。
   // 姓名可能是别人代填的，学号必须本人输入——冒用门槛从"知道姓名"提高到"知道学号"。
+  // 整串「学号 姓名」经姓名分段匹配后仍要求 rawName 含该学号，等同于在 sid 字段证明知悉学号，
+  // 访客页 roster 已对学号打码，能打出正确学号即通过验证，非绕过。
   // 专属链接 ?u= 视作已验证（链接一对一私发即凭证）
   if (v.require_sid && !(b.via === 'u' && rid != null)) {
     if (!id) throw new HttpError(400, '本次投票需学号验证，但名单中该成员没有学号，请联系发起人');
@@ -1712,6 +1766,171 @@ route('POST', '/api/birthdays/import', (ctx) => {
   return { ok: true, created, skipped };
 });
 
+/* ---------- 班费收支（班级班费的收入 / 支出记账与结余公示） ----------
+ * 浏览公开（与信息中心一致，班费本就讲透明公示）；记 / 改 / 删为管理操作，走常规门禁（需管理员登录）。
+ * 金额以「分」存整数；结余 = 收入合计 − 支出合计，按当前筛选口径实时算，不入库。 */
+route('GET', '/api/funds', (ctx) => {
+  const { whereSql, args } = fundWhere(ctx.query);
+  const limit = Math.min(Math.max(Number(ctx.query.get('limit')) || 200, 1), 500);
+  const offset = Math.max(Number(ctx.query.get('offset')) || 0, 0);
+  const total = db.prepare(`SELECT COUNT(*) AS c FROM funds ${whereSql}`).get(...args).c;
+  const rows = db.prepare(`SELECT * FROM funds ${whereSql} ORDER BY happened_at DESC, id DESC LIMIT ? OFFSET ?`)
+    .all(...args, limit, offset);
+  const sum = db.prepare(`SELECT
+      COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) AS income,
+      COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) AS expense
+      FROM funds ${whereSql}`).get(...args);
+  // 内联每条记录的凭证附件元数据（图片缩略图 / 文件名），一次批量查避免 N+1
+  const attsBy = {};
+  if (rows.length) {
+    const ids = rows.map((x) => x.id);
+    const ph = ids.map(() => '?').join(',');
+    for (const a of db.prepare(`SELECT id, fund_id, orig_name, mime, size FROM fund_attachments WHERE fund_id IN (${ph}) ORDER BY id`).all(...ids)) {
+      (attsBy[a.fund_id] ||= []).push({ id: a.id, orig_name: a.orig_name, mime: a.mime, size: a.size });
+    }
+  }
+  return {
+    total,
+    items: rows.map((r) => ({ ...fundView(r), attachments: attsBy[r.id] || [] })),
+    summary: { income: sum.income / 100, expense: sum.expense / 100, balance: (sum.income - sum.expense) / 100, count: total },
+  };
+});
+
+route('POST', '/api/funds', (ctx) => {
+  const b = ctx.body || {};
+  const type = FUND_TYPES.includes(b.type) ? b.type : '';
+  if (!type) throw new HttpError(400, '请选择收支类型（收入 / 支出）');
+  const fen = fundAmountFen(b.amount);
+  if (fen == null) throw new HttpError(400, '金额需为大于 0 的数字（最多两位小数）');
+  const note = sField(b.note, 200);
+  const happened = cleanDT(b.happened_at) || nowStr().slice(0, 10);
+  const info = db.prepare(`INSERT INTO funds (type, amount, note, happened_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(type, fen, note, happened, nowStr(), nowStr());
+  return fundView(db.prepare('SELECT * FROM funds WHERE id = ?').get(Number(info.lastInsertRowid)));
+});
+
+route('PUT', '/api/funds/:id', (ctx) => {
+  const id = Number(ctx.params.id);
+  if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
+  const old = db.prepare('SELECT * FROM funds WHERE id = ?').get(id);
+  if (!old) throw new HttpError(404, '记录不存在');
+  const b = ctx.body || {};
+  const type = 'type' in b ? (FUND_TYPES.includes(b.type) ? b.type : old.type) : old.type;
+  let fen = old.amount;
+  if ('amount' in b) {
+    const v = fundAmountFen(b.amount);
+    if (v == null) throw new HttpError(400, '金额需为大于 0 的数字（最多两位小数）');
+    fen = v;
+  }
+  const v = {
+    note: 'note' in b ? sField(b.note, 200) : old.note,
+    happened_at: 'happened_at' in b ? (cleanDT(b.happened_at) || old.happened_at) : old.happened_at,
+  };
+  db.prepare(`UPDATE funds SET type = ?, amount = ?, note = ?, happened_at = ?, updated_at = ? WHERE id = ?`)
+    .run(type, fen, v.note, v.happened_at, nowStr(), id);
+  return fundView(db.prepare('SELECT * FROM funds WHERE id = ?').get(id));
+});
+
+route('DELETE', '/api/funds/:id', (ctx) => {
+  const id = Number(ctx.params.id);
+  if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
+  const info = db.prepare('DELETE FROM funds WHERE id = ?').run(id);
+  if (!info.changes) throw new HttpError(404, '记录不存在');
+  // 级联删除该记录的凭证附件（磁盘文件 + 记录），不留孤儿
+  for (const a of db.prepare('SELECT stored_name FROM fund_attachments WHERE fund_id = ?').all(id)) {
+    const fp = path.resolve(UPLOAD_DIR, a.stored_name);
+    try { if (fp.startsWith(UPLOAD_DIR + path.sep) && fs.existsSync(fp)) fs.unlinkSync(fp); } catch (e) { /* 忽略 */ }
+  }
+  db.prepare('DELETE FROM fund_attachments WHERE fund_id = ?').run(id);
+  audit(ctx, '删除班费记录', 'id=' + id);
+  return { ok: true };
+});
+
+/* ---------- 班费凭证附件（支出证明等）：复用附件存储与类型白名单，独立表按 fund_id 关联 ---------- */
+route('POST', '/api/funds/:id/attachment', async (ctx) => {
+  const fid = Number(ctx.params.id);
+  if (!Number.isInteger(fid)) throw new HttpError(400, '参数错误');
+  if (!db.prepare('SELECT id FROM funds WHERE id = ?').get(fid)) throw new HttpError(404, '记录不存在');
+  if (!ctx.raw) throw new HttpError(400, '需要 multipart 表单');
+  const { files } = parseMultipart(ctx.raw, ctx.req.headers['content-type'] || '');
+  if (!files.length) throw new HttpError(400, '请选择文件');
+  const saved = [];
+  const written = [];
+  try {
+    for (const f of files) {
+      const orig = sanitizeName(f.filename);
+      const ext = (orig.match(/\.[A-Za-z0-9]{1,9}$/) || [''])[0].toLowerCase();
+      const month = nowStr().slice(0, 7).replace('-', '');
+      const dir = path.join(UPLOAD_DIR, month);
+      fs.mkdirSync(dir, { recursive: true });
+      const stored = crypto.randomBytes(8).toString('hex') + ext;
+      const fp0 = path.join(dir, stored);
+      fs.writeFileSync(fp0, f.data);
+      written.push(fp0);
+      const rel = path.relative(UPLOAD_DIR, fp0).replace(/\\/g, '/');
+      const info = db.prepare(`INSERT INTO fund_attachments (fund_id, orig_name, stored_name, size, mime, created_at)
+          VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(fid, orig, rel, f.data.length, sField(f.contentType, 100), nowStr());
+      saved.push(Number(info.lastInsertRowid));
+    }
+  } catch (e) {
+    for (const id of saved) { try { db.prepare('DELETE FROM fund_attachments WHERE id = ?').run(id); } catch (e2) { /* 忽略 */ } }
+    for (const fp0 of written) { try { fs.unlinkSync(fp0); } catch (e2) { /* 留给清扫任务 */ } }
+    throw e;
+  }
+  return { ok: true, ids: saved };
+});
+
+// 打开 / 下载凭证：仅位图与 PDF 内联预览，其余强制下载（与消息附件同一白名单，防同源脚本）
+route('GET', '/api/fund-attachments/:id/file', (ctx) => {
+  const id = Number(ctx.params.id);
+  if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
+  const a = db.prepare('SELECT * FROM fund_attachments WHERE id = ?').get(id);
+  if (!a) throw new HttpError(404, '附件不存在');
+  const previewable = PREVIEWABLE_RE.test(a.mime || '');
+  serveAttachment(ctx, a, { inline: previewable, cache: previewable });
+});
+
+route('DELETE', '/api/fund-attachments/:id', (ctx) => {
+  const id = Number(ctx.params.id);
+  if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
+  const a = db.prepare('SELECT * FROM fund_attachments WHERE id = ?').get(id);
+  if (!a) throw new HttpError(404, '附件不存在');
+  const fp = path.resolve(UPLOAD_DIR, a.stored_name);
+  try { if (fp.startsWith(UPLOAD_DIR + path.sep) && fs.existsSync(fp)) fs.unlinkSync(fp); } catch (e) { /* 忽略 */ }
+  db.prepare('DELETE FROM fund_attachments WHERE id = ?').run(id);
+  return { ok: true };
+});
+
+// 导出 CSV（带 BOM，Excel 直接打开不乱码；沿用当前筛选口径）
+route('GET', '/api/funds/export', (ctx) => {
+  const { whereSql, args } = fundWhere(ctx.query);
+  const rows = db.prepare(`SELECT * FROM funds ${whereSql} ORDER BY happened_at DESC, id DESC LIMIT 5000`).all(...args);
+  const escCell = (val) => {
+    const s = String(val == null ? '' : val);
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const yuan = (fen) => (fen / 100).toFixed(2);
+  const lines = ['日期,类型,金额(元),备注'];
+  let income = 0, expense = 0;
+  for (const r of rows) {
+    if (r.type === 'income') income += r.amount; else expense += r.amount;
+    lines.push([r.happened_at, r.type === 'income' ? '收入' : '支出', yuan(r.amount), r.note].map(escCell).join(','));
+  }
+  lines.push('', ['合计', '收入', yuan(income), ''].map(escCell).join(','));
+  lines.push(['', '支出', yuan(expense), ''].map(escCell).join(','));
+  lines.push(['', '结余', yuan(income - expense), ''].map(escCell).join(','));
+  const body = '﻿' + lines.join('\r\n') + '\r\n';
+  const res = ctx.res;
+  res.wrote = true;
+  res.writeHead(200, {
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename="fund.csv"; filename*=UTF-8''${encodeURIComponent('班费收支.csv')}`,
+  });
+  res.end(body);
+});
+
 /* ---------- 班徽背景（生日页可自定义水印，可选） ---------- */
 const BADGE_FILE = path.join(DATA_DIR, 'class-badge');
 function sniffImage(buf) {
@@ -1759,7 +1978,7 @@ route('POST', '/api/import', (ctx) => {
     throw new HttpError(400, '备份文件格式不对（缺少 groups / messages）');
   }
   // 非空库一律拒绝（force=1 除外）：检查全部业务表，防止只有名单/生日等数据时被误判为空库而重复导入
-  const exist = ['messages', 'groups', 'attachments', 'inbox', 'jielongs', 'jielong_entries', 'draws', 'draw_rounds', 'rosters', 'birthdays', 'votes', 'vote_ballots']
+  const exist = ['messages', 'groups', 'attachments', 'inbox', 'jielongs', 'jielong_entries', 'draws', 'draw_rounds', 'rosters', 'birthdays', 'votes', 'vote_ballots', 'funds']
     .reduce((sum, t) => sum + db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get().c, 0);
   if (exist > 0 && ctx.query.get('force') !== '1') {
     throw new HttpError(400, '当前已有数据，为防止重复导入被拒绝。请先用空数据文件夹再导入');
@@ -1767,7 +1986,7 @@ route('POST', '/api/import', (ctx) => {
   // force=1 为合并导入：接龙/抽签按原 id 替换（记录先清后插，保证重导同一份备份结果一致），
   // 群按 ext_key 合并，名单同名覆盖，生日同名同生日跳过——否则固定主键撞唯一索引必然整体回滚
   const force = ctx.query.get('force') === '1';
-  let n = 0, nAtt = 0, nGroups = 0, nJl = 0, nJlE = 0, nDw = 0, nDwR = 0, nRs = 0, nBd = 0, nV = 0, nVB = 0;
+  let n = 0, nAtt = 0, nGroups = 0, nJl = 0, nJlE = 0, nDw = 0, nDwR = 0, nRs = 0, nBd = 0, nV = 0, nVB = 0, nFn = 0, nFA = 0;
   db.exec('BEGIN'); // 整体导入：任何一步失败就整体回滚，不残留半截数据
   try {
     const insG = db.prepare('INSERT INTO groups (name, platform, color, remark, ext_key, created_at) VALUES (?, ?, ?, ?, ?, ?)');
@@ -1925,14 +2144,49 @@ route('POST', '/api/import', (ctx) => {
       nRs++;
     }
   }
-  // 恢复生日成员
+  // 恢复生日成员（与创建路径同一口径：校验月日合法性）
   if (Array.isArray(b.birthdays)) {
     const insB = db.prepare('INSERT INTO birthdays (name, month, day, year, note, created_at) VALUES (?, ?, ?, ?, ?, ?)');
     for (const g of b.birthdays) {
-      const nm = sField(g.name, 60) || '未命名成员', mo = Math.max(0, Number(g.month) || 0), dy = Math.max(0, Number(g.day) || 0);
+      const nm = sField(g.name, 60) || '未命名成员';
+      const mo = Math.max(0, Number(g.month) || 0);
+      const dy = Math.max(0, Number(g.day) || 0);
+      // 跳过非法日期：bdayValid 要求月 1-12、日合法（2 月允许 29 日）
+      if (!bdayValid(mo, dy)) continue;
       if (force && db.prepare('SELECT id FROM birthdays WHERE name = ? AND month = ? AND day = ?').get(nm, mo, dy)) continue; // 重导幂等
       insB.run(nm, mo, dy, Math.max(0, Number(g.year) || 0), sField(g.note, 200), cleanDT(g.created_at) || nowStr());
       nBd++;
+    }
+  }
+  // 恢复班费收支（金额以「分」存整数，直接取备份值；类型非法或金额 ≤ 0 跳过）
+  const fMap = {}; // 备份里的旧 fund_id → 新库自增 id，供凭证附件挂回
+  if (Array.isArray(b.funds)) {
+    const insF = db.prepare(`INSERT INTO funds (type, amount, note, happened_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)`);
+    for (const g of b.funds) {
+      const type = FUND_TYPES.includes(g.type) ? g.type : '';
+      const fen = Math.max(0, Math.min(Math.round(Number(g.amount) || 0), 10000000000));
+      if (!type || !fen) continue;
+      const note = sField(g.note, 200);
+      const happened = cleanDT(g.happened_at) || nowStr().slice(0, 10);
+      if (force && db.prepare('SELECT id FROM funds WHERE type = ? AND amount = ? AND happened_at = ? AND note = ?').get(type, fen, happened, note)) continue; // 重导幂等
+      const ins = insF.run(type, fen, note, happened, cleanDT(g.created_at) || nowStr(), cleanDT(g.updated_at) || nowStr());
+      if (g.id != null) fMap[String(g.id)] = Number(ins.lastInsertRowid);
+      nFn++;
+    }
+  }
+  // 恢复班费凭证附件（文件本身随 data/ 目录整体迁移，这里只恢复记录；stored_name 防穿越、mime 白名单）
+  if (Array.isArray(b.fundAttachments)) {
+    const insFA = db.prepare(`INSERT INTO fund_attachments (fund_id, orig_name, stored_name, size, mime, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)`);
+    for (const a of b.fundAttachments) {
+      const newFund = fMap[String(a.fund_id)];
+      if (!newFund) continue; // 对应班费记录不在本次备份中，跳过
+      const stored = sField(a.stored_name, 200).replace(/\\/g, '/');
+      if (!stored || stored.includes('..') || stored.startsWith('/')) continue;
+      const mime = /^[A-Za-z0-9][\w!#$&^_.+-]*\/[\w!#$&^_.+-]*$/.test(String(a.mime || '')) ? String(a.mime) : '';
+      insFA.run(newFund, sField(a.orig_name, 200), stored, Math.max(0, Number(a.size) || 0), mime, cleanDT(a.created_at) || nowStr());
+      nFA++;
     }
   }
   // 恢复投票与选票（id 随机字符串主键原样保留；选票按 vote_id 直接挂回）
@@ -1979,11 +2233,11 @@ route('POST', '/api/import', (ctx) => {
     db.exec('ROLLBACK');
     throw new HttpError(500, '导入失败已整体回滚（' + e.message + '），数据库未变动');
   }
-  const summary = `${nGroups} 个群、${n} 条信息、${nAtt} 条附件记录、${nJl} 个接龙、${nJlE} 条接龙记录、${nDw} 个抽签、${nDwR} 轮抽签历史、${nV} 个投票、${nVB} 张选票、${nRs} 份名单、${nBd} 位生日成员`;
+  const summary = `${nGroups} 个群、${n} 条信息、${nAtt} 条附件记录、${nJl} 个接龙、${nJlE} 条接龙记录、${nDw} 个抽签、${nDwR} 轮抽签历史、${nV} 个投票、${nVB} 张选票、${nRs} 份名单、${nBd} 位生日成员、${nFn} 条班费记录、${nFA} 个班费凭证`;
   console.log('导入备份：' + summary);
   log('导入备份：' + summary);
   audit(ctx, '导入备份', summary);
-  return { ok: true, groups: nGroups, imported: n, attachments: nAtt, jielongs: nJl, jielongEntries: nJlE, draws: nDw, drawRounds: nDwR, votes: nV, voteBallots: nVB, rosters: nRs, birthdays: nBd };
+  return { ok: true, groups: nGroups, imported: n, attachments: nAtt, jielongs: nJl, jielongEntries: nJlE, draws: nDw, drawRounds: nDwR, votes: nV, voteBallots: nVB, rosters: nRs, birthdays: nBd, funds: nFn, fundAttachments: nFA };
 });
 
 /* ---------- 导出 .ics 日历（截止时间进手机系统日历） ---------- */
@@ -2075,6 +2329,8 @@ route('GET', '/api/export', (ctx) => {
     voteBallots: db.prepare('SELECT vote_id, rid, sid, name, choices, time FROM vote_ballots ORDER BY vote_id, id').all(),
     rosters: db.prepare('SELECT * FROM rosters ORDER BY id').all(),
     birthdays: db.prepare('SELECT id, name, month, day, year, note, created_at FROM birthdays ORDER BY id').all(),
+    funds: db.prepare('SELECT id, type, amount, note, happened_at, created_at, updated_at FROM funds ORDER BY id').all(),
+    fundAttachments: db.prepare('SELECT id, fund_id, orig_name, stored_name, size, mime, created_at FROM fund_attachments ORDER BY id').all(),
   };
   const body = JSON.stringify(dump, null, 2);
   audit(ctx, '导出备份', Object.keys(dump).length + ' 类数据');
@@ -2167,7 +2423,7 @@ const server = http.createServer(async (req, res) => {
       if (res.wrote) return;
       const status = e instanceof HttpError ? e.status : 500;
       if (status >= 500) console.error(e);
-      sendJSON(res, status, { error: e.message || '服务器错误' });
+      sendJSON(res, status, { error: e instanceof HttpError ? e.message : '服务器内部错误' });
     }
     return;
   }

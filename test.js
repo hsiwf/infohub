@@ -738,11 +738,104 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
     ok('移除后班徽 404', bg404.status === 404);
   }
 
+  // 17. 班费收支（记账 / 结余 / 校验 / 筛选 / CSV 导出 / 门禁）
+  created.funds = created.funds || [];
+  const TAG = '自检班费' + Date.now();
+  r = await post('/api/funds', { type: 'income', amount: 500, note: TAG + '收缴' });
+  ok('记一笔收入', r.status === 200 && r.body.amount === 500 && r.body.type === 'income', JSON.stringify(r.body));
+  if (r.body.id) created.funds.push(r.body.id);
+  const incomeId = r.body.id;
+  r = await post('/api/funds', { type: 'expense', amount: 80.5, note: TAG + '买水笔' });
+  ok('记一笔支出（含两位小数）', r.status === 200 && r.body.amount === 80.5, JSON.stringify(r.body));
+  if (r.body.id) created.funds.push(r.body.id);
+  r = await post('/api/funds', { type: 'expense', amount: 0 });
+  ok('金额为 0 被拒（400）', r.status === 400);
+  r = await post('/api/funds', { type: 'expense', amount: -10 });
+  ok('负数金额被拒（400）', r.status === 400);
+  r = await post('/api/funds', { type: '转账', amount: 10 });
+  ok('非法类型被拒（400）', r.status === 400);
+
+  r = await j('/api/funds');
+  const fundSum = r.body.summary;
+  ok('列表返回汇总', r.status === 200 && typeof fundSum.income === 'number' && typeof fundSum.balance === 'number', JSON.stringify(fundSum));
+  ok('结余 = 收入 − 支出', Math.abs((fundSum.income - fundSum.expense) - fundSum.balance) < 0.001, JSON.stringify(fundSum));
+  ok('两笔自检记录都在明细里', r.body.items.some((x) => String(x.id) === String(incomeId)));
+
+  r = await j('/api/funds?type=expense');
+  ok('按类型筛选只看支出', r.status === 200 && r.body.items.length >= 1 && r.body.items.every((x) => x.type === 'expense'), JSON.stringify(r.body.items.map((x) => x.type)));
+  r = await j('/api/funds?q=' + encodeURIComponent(TAG));
+  ok('搜索命中本次自检记录', r.status === 200 && r.body.items.length === 2, 'count=' + (r.body.items || []).length);
+  r = await j('/api/funds?from=2000-01-01&to=2999-12-31');
+  ok('日期区间筛选包含自检记录', r.status === 200 && r.body.items.some((x) => String(x.id) === String(incomeId)));
+
+  r = await j('/api/funds/' + incomeId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: 620, note: TAG + '改后' }) });
+  ok('编辑金额生效', r.status === 200 && r.body.amount === 620, JSON.stringify(r.body));
+
+  const fundCsv = await fetch(BASE + '/api/funds/export?q=' + encodeURIComponent(TAG));
+  const fundCsvText = await fundCsv.text();
+  ok('CSV 导出为 text/csv', fundCsv.status === 200 && (fundCsv.headers.get('content-type') || '').includes('text/csv'));
+  ok('CSV 带 BOM 与表头', fundCsvText.startsWith('') && fundCsvText.includes('金额(元)'));
+  ok('CSV 含明细与结余合计行', fundCsvText.includes(TAG) && fundCsvText.includes('结余'));
+
+  // 17b. 班费凭证附件：上传 / 内联元数据 / 下载 / 删除 / 级联
+  r = await post('/api/funds', { type: 'expense', amount: 12.3, note: TAG + '凭证笔' });
+  const attFundId = r.body.id;
+  if (attFundId) created.funds.push(attFundId);
+  const pngBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const fbd = '----fund' + Date.now();
+  const fbody = Buffer.concat([
+    Buffer.from(`--${fbd}\r\nContent-Disposition: form-data; name="files"; filename="receipt.png"\r\nContent-Type: image/png\r\n\r\n`),
+    pngBytes, Buffer.from(`\r\n--${fbd}--\r\n`),
+  ]);
+  r = await j('/api/funds/' + attFundId + '/attachment', { method: 'POST', headers: { 'Content-Type': 'multipart/form-data; boundary=' + fbd }, body: new Uint8Array(fbody) });
+  ok('上传班费凭证', r.status === 200 && Array.isArray(r.body.ids) && r.body.ids.length === 1, JSON.stringify(r.body));
+  const attId = r.body.ids && r.body.ids[0];
+  r = await j('/api/funds?q=' + encodeURIComponent(TAG) + '&type=expense');
+  const attRow = (r.body.items || []).find((x) => String(x.id) === String(attFundId));
+  ok('列表内联凭证元数据', !!attRow && Array.isArray(attRow.attachments) && attRow.attachments.length === 1 && attRow.attachments[0].mime === 'image/png', JSON.stringify(attRow && attRow.attachments));
+  const attGet = await fetch(BASE + '/api/fund-attachments/' + attId + '/file');
+  const attBytes = Buffer.from(await attGet.arrayBuffer());
+  ok('下载凭证内容一致且内联', attGet.status === 200 && attBytes.length === pngBytes.length && (attGet.headers.get('content-disposition') || '').startsWith('inline'), 'len=' + attBytes.length);
+  r = await j('/api/fund-attachments/' + attId, { method: 'DELETE' });
+  ok('删除单个凭证', r.status === 200);
+  // 级联：再传一个，删整条记录后凭证应一并清除（下载 404）
+  await j('/api/funds/' + attFundId + '/attachment', { method: 'POST', headers: { 'Content-Type': 'multipart/form-data; boundary=' + fbd }, body: new Uint8Array(fbody) });
+  const attId2 = ((await j('/api/funds?q=' + encodeURIComponent(TAG) + '&type=expense')).body.items.find((x) => String(x.id) === String(attFundId)) || {}).attachments?.[0]?.id;
+  await j('/api/funds/' + attFundId, { method: 'DELETE' });
+  const attGet2 = await fetch(BASE + '/api/fund-attachments/' + attId2 + '/file');
+  ok('删除记录级联清除凭证', attId2 != null && attGet2.status === 404);
+  if (authRequired) {
+    const gAtt = await fetch(BASE + '/api/fund-attachments/' + attId + '/file');
+    ok('凭证门禁：访客可看（公示）', gAtt.status === 200 || gAtt.status === 404); // 已删则 404，未删则 200，均不应 401
+    const gAttUp = await fetch(BASE + '/api/funds/' + attFundId + '/attachment', { method: 'POST', headers: { 'Content-Type': 'multipart/form-data; boundary=' + fbd }, body: new Uint8Array(fbody) });
+    ok('凭证门禁：访客上传被拒（401）', gAttUp.status === 401);
+  }
+  const expFA = await j('/api/export');
+  ok('备份导出含 fundAttachments 字段', expFA.status === 200 && Array.isArray(expFA.body.fundAttachments));
+
+  if (authRequired) {
+    const gFundView = await fetch(BASE + '/api/funds');
+    ok('班费门禁：访客可浏览（公示）', gFundView.status === 200);
+    const gFundPost = await fetch(BASE + '/api/funds', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'expense', amount: 1 }) });
+    ok('班费门禁：访客记账被拒（401）', gFundPost.status === 401);
+  }
+  const expAll = await j('/api/export');
+  ok('备份导出含 funds 字段', expAll.status === 200 && Array.isArray(expAll.body.funds));
+
+  r = await j('/api/funds/' + incomeId, { method: 'DELETE' });
+  ok('删除班费记录', r.status === 200);
+  r = await j('/api/funds?q=' + encodeURIComponent(TAG));
+  ok('删除后只剩一笔自检记录', r.status === 200 && r.body.items.length === 1, 'count=' + (r.body.items || []).length);
+  try {
+    const auditText = require('fs').readFileSync(require('path').join(__dirname, 'data', 'logs', 'audit.log'), 'utf8');
+    ok('审计日志记录删除班费记录', auditText.includes('删除班费记录'));
+  } catch (e) { ok('审计日志记录删除班费记录', false, 'audit.log 不存在'); }
+
   // ---- 清理自检数据 ----
   for (const id of created.messages) await j('/api/messages/' + id, { method: 'DELETE' });
   for (const id of created.groups) await j('/api/groups/' + id, { method: 'DELETE' });
+  for (const id of created.funds) await j('/api/funds/' + id, { method: 'DELETE' });
   console.log(`\n（自检数据已清理：${created.messages.length} 条信息、${created.groups.length} 个群）`);
-
   console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━`);
   console.log(`结果：${passed} 通过，${failed} 失败`);
   console.log(failed === 0 ? '🎉 全部自检通过，可以放心使用/部署。' : '⚠️ 有失败项，请把上面的 ❌ 内容发给维护者排查。');
@@ -755,6 +848,7 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
     for (const id of created.messages) await j('/api/messages/' + id, { method: 'DELETE' });
     for (const id of created.groups) await j('/api/groups/' + id, { method: 'DELETE' });
     for (const id of (created.rosters || [])) await j('/api/rosters/' + id, { method: 'DELETE' });
+    for (const id of (created.funds || [])) await j('/api/funds/' + id, { method: 'DELETE' });
   } catch (e2) { /* 尽力而为 */ }
   process.exit(1);
 });

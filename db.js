@@ -142,6 +142,27 @@ CREATE TABLE IF NOT EXISTS vote_ballots (
   choices TEXT DEFAULT '[]',
   time INTEGER DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS funds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT DEFAULT 'expense',
+  amount INTEGER DEFAULT 0,
+  note TEXT DEFAULT '',
+  happened_at TEXT DEFAULT '',
+  created_at TEXT DEFAULT '',
+  updated_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS fund_attachments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  fund_id INTEGER NOT NULL,
+  orig_name TEXT DEFAULT '',
+  stored_name TEXT DEFAULT '',
+  size INTEGER DEFAULT 0,
+  mime TEXT DEFAULT '',
+  created_at TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_funds_happened ON funds(happened_at);
+CREATE INDEX IF NOT EXISTS idx_funds_type ON funds(type);
+CREATE INDEX IF NOT EXISTS idx_fatt_fund ON fund_attachments(fund_id);
 CREATE INDEX IF NOT EXISTS idx_messages_group ON messages(group_id);
 CREATE INDEX IF NOT EXISTS idx_messages_deadline ON messages(deadline);
 CREATE INDEX IF NOT EXISTS idx_att_message ON attachments(message_id);
@@ -180,5 +201,10 @@ if (!jecols.some((c) => c.name === 'seq')) db.exec('ALTER TABLE jielong_entries 
 // 轻量迁移：生日成员去掉 role 列（生日面前人人平等，不再划分身份）
 const bdcols = db.prepare('PRAGMA table_info(birthdays)').all();
 if (bdcols.length && bdcols.some((c) => c.name === 'role')) db.exec('ALTER TABLE birthdays DROP COLUMN role');
+// 轻量迁移：班费去掉 category 列（用途备注已足够表达，去掉冗余的分类字段）
+const fcols = db.prepare('PRAGMA table_info(funds)').all();
+if (fcols.length && fcols.some((c) => c.name === 'category')) db.exec('ALTER TABLE funds DROP COLUMN category');
+// 轻量迁移：班费去掉 operator（经手人）列（班费本就大家看着，谁经手意义不大，简化录入）
+if (fcols.length && fcols.some((c) => c.name === 'operator')) db.exec('ALTER TABLE funds DROP COLUMN operator');
 
 module.exports = { db, DATA_DIR, UPLOAD_DIR };

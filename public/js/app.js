@@ -16,6 +16,7 @@ const ICON_PATHS = {
   'jielong': '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="4" cy="18" r="1.6"/>',
   'draw': '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M9 3v6M15 3v6"/><path d="m9 14 2 2 4-4"/>',
   'birthday': '<path d="M4 21h16"/><path d="M6 21v-5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v5"/><path d="M12 14v-4"/><path d="M10.5 7.5C10.5 6.5 12 5 12 5s1.5 1.5 1.5 2.5a1.5 1.5 0 0 1-3 0z"/>',
+  'fund': '<path d="M3 7h15a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7V6a2 2 0 0 1 2-2h11"/><path d="M16 12v6"/><circle cx="16" cy="13" r="1.3"/>',
   'calendar': '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/><path d="M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h.01"/>',
   'file': '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
   'chart': '<path d="M4 20V10M10 20V4M16 20v-8M21 20H3"/>',
@@ -251,6 +252,7 @@ const state = {
   jlBanner: false, // 创建成功横幅（只显示一次）
   jlQuiet: false,  // 定时刷新中（不滚动）
   draw: null,      // 抽签详情的签箱 id；null = 列表
+  fund: { type: '', q: '', from: '', to: '' }, // 班费收支筛选条件
 };
 
 /* ========= 只读访客 ========= */
@@ -2744,10 +2746,172 @@ function openBdayModal(m) {
   });
 }
 
+/* ========= 班费收支 ========= */
+function fmtMoney(n) {
+  return (Number(n) || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+async function loadFunds() {
+  const seq = loadSeq;
+  const view = $('#view');
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  const p = new URLSearchParams();
+  if (state.fund.type) p.set('type', state.fund.type);
+  if (state.fund.q) p.set('q', state.fund.q);
+  if (state.fund.from) p.set('from', state.fund.from);
+  if (state.fund.to) p.set('to', state.fund.to);
+  p.set('limit', '500');
+  const data = await api('/api/funds?' + p);
+  if (seq !== loadSeq) return;
+  const s = data.summary;
+  const isImg = (m) => /^image\/(png|jpeg|gif|webp|bmp)/.test(m || '');
+  const fileChip = (r, a) => {
+    const url = '/api/fund-attachments/' + a.id + '/file';
+    const inner = isImg(a.mime)
+      ? `<a class="fund-thumb" href="${url}" target="_blank" rel="noopener" title="${esc(a.orig_name)}"><img loading="lazy" src="${url}" alt="${esc(a.orig_name)}"></a>`
+      : `<a class="fund-file" href="${url}" target="_blank" rel="noopener">${icon('paperclip')} ${esc(a.orig_name)}</a>`;
+    const del = canEdit() ? `<button class="fund-file-del" data-fatt-del="${a.id}" title="删除凭证">${icon('trash')}</button>` : '';
+    return `<span class="fund-filewrap">${inner}${del}</span>`;
+  };
+  const rows = data.items.map((r) => {
+    const files = r.attachments || [];
+    const filesHtml = (canEdit() || files.length)
+      ? `<div class="fund-files">${files.map((a) => fileChip(r, a)).join('')}${canEdit() ? `<label class="fund-upl">${icon('upload')} 上传凭证<input type="file" accept="image/*,.pdf" multiple hidden data-fund-upload="${r.id}"></label>` : ''}</div>` : '';
+    return `<div class="fund-item">
+      <div class="fund-row${canEdit() ? ' has-acts' : ''}">
+        <span class="fund-date">${esc(r.happened_at)}</span>
+        <span class="fund-tag ${r.type}">${r.type === 'income' ? '收' : '支'}</span>
+        <span class="fund-note" title="${esc(r.note || '')}">${esc(r.note || '')}${files.length ? ` <span class="fund-fcount">${icon('paperclip')}${files.length}</span>` : ''}</span>
+        <span class="fund-amt ${r.type}">${r.type === 'income' ? '+' : '−'}¥${fmtMoney(r.amount)}</span>
+        ${canEdit() ? `<span class="fund-acts"><button class="mini" data-fund-edit="${r.id}" title="编辑">${icon('edit')}</button><button class="mini danger" data-fund-del="${r.id}" title="删除">${icon('trash')}</button></span>` : ''}
+      </div>
+      ${filesHtml}
+    </div>`;
+  }).join('');
+
+  view.innerHTML = `
+    <div class="fund-page">
+      <div class="jl-head"><h2>${icon('fund')} 班费收支</h2></div>
+      <p class="hint">记录班级班费的每一笔收入与支出，结余实时汇总，随时导出对账。透明公示，人人可看；记 / 改 / 删需管理员。</p>
+      <div class="fund-sum">
+        <div class="fund-card income"><span>收入合计</span><b>¥${fmtMoney(s.income)}</b></div>
+        <div class="fund-card expense"><span>支出合计</span><b>¥${fmtMoney(s.expense)}</b></div>
+        <div class="fund-card balance${s.balance < 0 ? ' neg' : ''}"><span>当前结余</span><b>¥${fmtMoney(s.balance)}</b></div>
+      </div>
+      <div class="fund-toolbar">
+        <select id="fund-type" aria-label="按类型筛选">
+          <option value="">全部类型</option>
+          <option value="income"${state.fund.type === 'income' ? ' selected' : ''}>只看收入</option>
+          <option value="expense"${state.fund.type === 'expense' ? ' selected' : ''}>只看支出</option>
+        </select>
+        <input id="fund-q" type="search" placeholder="搜索用途…" value="${esc(state.fund.q)}" aria-label="搜索班费记录">
+        <input id="fund-from" type="date" value="${esc(state.fund.from)}" aria-label="起始日期" title="起始日期">
+        <span class="fund-dash">→</span>
+        <input id="fund-to" type="date" value="${esc(state.fund.to)}" aria-label="截止日期" title="截止日期">
+        <button class="ghost" id="fund-export">${icon('download')} 导出 CSV</button>
+        ${canEdit() ? `<button class="primary" id="btn-fund-add">${icon('plus')} 记一笔</button>` : ''}
+      </div>
+      <div class="panel">
+        <div class="jl-head" style="margin:0 0 6px"><h3 style="margin:0">${icon('fund')} 收支明细（${s.count} 笔${state.fund.type || state.fund.q || state.fund.from || state.fund.to ? '，已筛选' : ''}）</h3></div>
+        ${rows || `<div class="empty"><div class="big">${icon('fund')}</div>还没有记账记录<br>${canEdit() ? '点右上角「记一笔」，把第一笔班费收支记进来' : '管理员记录后会出现在这里'}</div>`}
+      </div>
+    </div>`;
+
+  const bind = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  bind('#fund-type', 'change', (e) => { state.fund.type = e.target.value; loadFunds().catch((x) => toast(x.message, 'error')); });
+  bind('#btn-fund-add', 'click', () => openFundModal(null));
+  bind('#fund-export', 'click', () => window.open('/api/funds/export?' + p, '_blank'));
+  let qt = null;
+  bind('#fund-q', 'input', (e) => { clearTimeout(qt); qt = setTimeout(() => { state.fund.q = e.target.value.trim(); loadFunds().catch((x) => toast(x.message, 'error')); }, 350); });
+  bind('#fund-from', 'change', (e) => { state.fund.from = e.target.value; loadFunds().catch((x) => toast(x.message, 'error')); });
+  bind('#fund-to', 'change', (e) => { state.fund.to = e.target.value; loadFunds().catch((x) => toast(x.message, 'error')); });
+  $$('[data-fund-edit]').forEach((b) => b.addEventListener('click', () => {
+    const r = data.items.find((x) => String(x.id) === b.dataset.fundEdit);
+    if (r) openFundModal(r);
+  }));
+  $$('[data-fund-del]').forEach((b) => b.addEventListener('click', async () => {
+    const r = data.items.find((x) => String(x.id) === b.dataset.fundDel);
+    if (!r || !confirm(`删除这笔${r.type === 'income' ? '收入' : '支出'}（¥${fmtMoney(r.amount)}${r.note ? '：' + r.note : ''}）？其凭证一并删除。`)) return;
+    try { await api('/api/funds/' + r.id, { method: 'DELETE' }); toast('已删除'); loadFunds(); }
+    catch (e) { toast(e.message, 'error'); }
+  }));
+  $$('[data-fund-upload]').forEach((inp) => inp.addEventListener('change', async (e) => {
+    const fid = e.target.dataset.fundUpload;
+    const files = [...e.target.files];
+    if (!files.length) return;
+    const fd = new FormData();
+    files.forEach((f) => fd.append('files', f, f.name));
+    try { await api('/api/funds/' + fid + '/attachment', { method: 'POST', body: fd }); toast('凭证已上传 ✓'); loadFunds(); }
+    catch (err) { toast(err.message, 'error'); }
+  }));
+  $$('[data-fatt-del]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('删除这个凭证文件？')) return;
+    try { await api('/api/fund-attachments/' + b.dataset.fattDel, { method: 'DELETE' }); toast('已删除'); loadFunds(); }
+    catch (e) { toast(e.message, 'error'); }
+  }));
+}
+
+function openFundModal(r) {
+  const type = r ? r.type : (state.fund.type === 'income' ? 'income' : 'expense');
+  openModal(`
+    <h2>${r ? `${icon('edit')} 编辑记录` : `${icon('fund')} 记一笔`}</h2>
+    <div class="form">
+      <div class="fund-seg">
+        <label class="${type === 'expense' ? 'on' : ''}"><input type="radio" name="fund-type" value="expense"${type === 'expense' ? ' checked' : ''}> 支出</label>
+        <label class="${type === 'income' ? 'on' : ''}"><input type="radio" name="fund-type" value="income"${type === 'income' ? ' checked' : ''}> 收入</label>
+      </div>
+      <div class="grid2">
+        <div><label>金额（元）</label><input id="fund-amount" type="number" step="0.01" min="0" value="${r ? r.amount : ''}" placeholder="0.00"></div>
+        <div><label>日期</label><input id="fund-date" type="date" value="${r ? esc(String(r.happened_at).slice(0, 10)) : ymd(new Date())}"></div>
+      </div>
+      <label>用途 / 备注</label>
+      <input id="fund-note" maxlength="200" value="${r ? esc(r.note) : ''}" placeholder="这笔钱花在哪 / 谁交的（如 36人×10元、购买晚自习手机袋）">
+      <label>凭证 / 附件（选填，支出证明等）</label>
+      <input id="fund-files" type="file" accept="image/*,.pdf" multiple>
+      <div class="fund-modal-files" id="fund-modal-files"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" id="btn-cancel">取消</button>
+      <button class="primary" id="fund-save">保存</button>
+    </div>`);
+  const segLabels = $$('#modal-root .fund-seg label');
+  segLabels.forEach((lb) => lb.addEventListener('change', () => {
+    segLabels.forEach((x) => x.classList.toggle('on', $('input', x).checked));
+  }));
+  const filesInp = $('#fund-files');
+  const preview = $('#fund-modal-files');
+  filesInp.addEventListener('change', () => {
+    const n = filesInp.files.length;
+    preview.innerHTML = n ? `<span class="ok-t">${icon('paperclip')} 已选 ${n} 个文件，保存后自动上传</span>` : '';
+  });
+  $('#fund-save').addEventListener('click', async () => {
+    const body = {
+      type: ($('#modal-root input[name="fund-type"]:checked') || {}).value || 'expense',
+      amount: Number($('#fund-amount').value),
+      note: $('#fund-note').value.trim(),
+      happened_at: $('#fund-date').value,
+    };
+    if (!(body.amount > 0)) { toast('请填写大于 0 的金额', 'error'); return; }
+    if (!body.happened_at) { toast('请选择日期', 'error'); return; }
+    try {
+      const rec = r ? await api('/api/funds/' + r.id, { method: 'PUT', body }) : await api('/api/funds', { method: 'POST', body });
+      const chosen = [...filesInp.files];
+      if (rec && rec.id && chosen.length) {
+        const fd = new FormData();
+        chosen.forEach((f) => fd.append('files', f, f.name));
+        await api('/api/funds/' + rec.id + '/attachment', { method: 'POST', body: fd });
+      }
+      closeModal();
+      toast('已保存 ✓');
+      loadFunds();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
 /* ========= 命令面板（Ctrl/⌘+K，参考 Linear 的 cmdk 交互） ========= */
 const CMDK_VIEWS = [
   ['feed', '信息中心', 'feed'], ['inbox', '等待审核', 'inbox'], ['tasks', '待办任务', 'check'],
   ['jielong', '活动接龙', 'jielong'], ['draw', '抽签点名', 'draw'], ['vote', '投票表决', 'vote'], ['birthday', '生日祝福', 'birthday'],
+  ['funds', '班费收支', 'fund'],
   ['calendar', '日历详情', 'calendar'], ['files', '文件中心', 'file'], ['stats', '统计接入', 'chart'],
   ['rosters', '班级名单', 'users'],
 ];
@@ -2883,7 +3047,7 @@ function openHelpModal() {
 /* ========= 视图切换 ========= */
 // 顶栏控件只在适用的页面显示：排序只在信息流有用；统计页不响应群筛选
 function syncTopbar() {
-  $('#group-sel').style.display = (state.view === 'stats' || state.view === 'jielong' || state.view === 'draw' || state.view === 'vote' || state.view === 'birthday' || state.view === 'rosters') ? 'none' : '';
+  $('#group-sel').style.display = (state.view === 'stats' || state.view === 'jielong' || state.view === 'draw' || state.view === 'vote' || state.view === 'birthday' || state.view === 'funds' || state.view === 'rosters') ? 'none' : '';
   $('#sortsel').style.display = state.view === 'feed' ? '' : 'none';
 }
 // 视图加载代次：renderView 每次自增并传给视图加载器。加载器的响应回来时若代次已变
@@ -2906,6 +3070,7 @@ async function renderView() {
     else if (state.view === 'draw') await loadDraw();
     else if (state.view === 'vote') await loadVotes();
     else if (state.view === 'birthday') await loadBirthdays();
+    else if (state.view === 'funds') await loadFunds();
     else if (state.view === 'calendar') await loadCalendar();
     else if (state.view === 'files') await loadFiles();
     else if (state.view === 'rosters') await loadRosters();
@@ -2934,7 +3099,7 @@ async function refresh() {
 // 所有导航按钮（侧栏 + 底栏 + 更多面板）统一同步活动态；
 // 「更多」按钮在当前视图属于低频视图时也点亮
 const NAV_SEL = '#mainnav button, #tabbar button, #tabsheet button';
-const MORE_VIEWS = ['inbox', 'calendar', 'files', 'stats', 'rosters', 'vote'];
+const MORE_VIEWS = ['inbox', 'calendar', 'files', 'stats', 'rosters', 'vote', 'funds'];
 function syncNavActive() {
   $$(NAV_SEL).forEach((b) => {
     b.classList.toggle('active', b.dataset.view === state.view);
