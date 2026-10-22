@@ -17,6 +17,7 @@ const ICON_PATHS = {
   'draw': '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M9 3v6M15 3v6"/><path d="m9 14 2 2 4-4"/>',
   'birthday': '<path d="M4 21h16"/><path d="M6 21v-5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v5"/><path d="M12 14v-4"/><path d="M10.5 7.5C10.5 6.5 12 5 12 5s1.5 1.5 1.5 2.5a1.5 1.5 0 0 1-3 0z"/>',
   'fund': '<path d="M3 7h15a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7V6a2 2 0 0 1 2-2h11"/><path d="M16 12v6"/><circle cx="16" cy="13" r="1.3"/>',
+  'guestbook': '<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.9-.9L3 20.5l1.4-4.1A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z"/><path d="M12 8.5c1-1.6 3.2-.7 3 .9-.1 1.2-1.6 2.1-3 3.1-1.4-1-2.9-1.9-3-3.1-.2-1.6 2-2.5 3-.9z"/>',
   'calendar': '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/><path d="M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h.01"/>',
   'file': '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
   'chart': '<path d="M4 20V10M10 20V4M16 20v-8M21 20H3"/>',
@@ -50,6 +51,7 @@ const ICON_PATHS = {
   'pin': '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>',
   'loader': '<path d="M21 12a9 9 0 1 1-6.2-8.6"/>',
   'star': '<path d="m12 3 3 6.2 6.9 1-5 4.9 1.2 6.9-6.1-3.2L5.9 22 7 15.1 2 10l6.9-1z"/>',
+  'heart': '<path d="M12 21s-7.5-4.9-10-9.3C.6 8.9 2 5.5 5.2 5c2-.3 3.5.8 4.3 2 .8-1.2 2.3-2.3 4.3-2 3.2.5 4.6 3.9 3.2 6.7C19.5 16.1 12 21 12 21z"/>',
   'download': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
   'upload': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/>',
   'book': '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
@@ -253,7 +255,9 @@ const state = {
   jlQuiet: false,  // 定时刷新中（不滚动）
   draw: null,      // 抽签详情的签箱 id；null = 列表
   fund: { type: '', q: '', from: '', to: '' }, // 班费收支筛选条件
+  gb: { danmaku: true, loaded: 0, total: 0, sort: 'new', topic: '', shown: new Set() },  // 留言寄语：弹幕开关 + 分页游标 + 排序（new/hot）+ 主题筛选 + 已渲染 id
 };
+let gbTimer = null; // 弹幕轮播定时器
 
 /* ========= 只读访客 ========= */
 // 管理密码开启且未登录 → 只读模式：可浏览，隐藏一切编辑入口
@@ -1101,8 +1105,10 @@ async function loadVoteDetail() {
   // 无密码部署下服务端不下发令牌，但管理本就开放（与接龙 canManage = canEdit() || 令牌 同口径）
   const canManage = canEdit() || !!token;
   const stuLink = location.origin + '/v/' + d.id;
-  const maxVotes = Math.max(1, ...d.tally.map((t) => t.votes));
-  const totalVotes = d.tally.reduce((s, t) => s + t.votes, 0);
+  // 结果可见时机：服务端在未达可见条件时不下发 tally，只给 tallyHidden
+  const showTally = Array.isArray(d.tally);
+  const maxVotes = showTally ? Math.max(1, ...d.tally.map((t) => t.votes)) : 0;
+  const totalVotes = showTally ? d.tally.reduce((s, t) => s + t.votes, 0) : 0;
   view.innerHTML = `
     <div class="jl-head"><button class="ghost" id="vote-back">← 返回投票列表</button><span class="spacer"></span>${voteStatusBadge(d)}</div>
     <div class="panel">
@@ -1117,11 +1123,11 @@ async function loadVoteDetail() {
     </div>
     <div class="panel">
       <div class="jl-head"><h2 style="font-size:15px">实时票数</h2><span class="hint">已完成 ${d.done} / ${d.rosterSize} 人</span></div>
-      ${d.tally.map((t) => {
+      ${showTally ? d.tally.map((t) => {
         const pct = Math.round(t.votes * 100 / maxVotes);
         const share = totalVotes ? Math.round(t.votes * 100 / totalVotes) : 0;
         return `<div class="tally-row"><div class="tlabel"><b>${esc(t.label)}</b><span class="hint">${t.votes} 票 · ${share}%</span></div><div class="tbar"><i style="width:${pct}%"></i></div></div>`;
-      }).join('')}
+      }).join('') : `<div class="tally-hidden">${d.reveal === 'after_vote' ? '完成投票后即可查看各选项票数' : '投票结束后可查看票数'}</div>`}
       <div class="jl-linkrow"><input readonly value="${esc(stuLink)}"><button class="ghost" id="vote-copy-stu">${icon('link')} 复制学生链接</button></div>
     </div>
     ${canManage && Array.isArray(d.missing) ? `
@@ -1198,6 +1204,13 @@ function openVoteModal() {
       <input id="vt-deadline" type="datetime-local">
       <label class="splitline"><input type="checkbox" id="vt-anon" checked> 匿名投票（同学间看不到彼此投给谁，选票明细仅发起人可查）</label>
       <label class="splitline"><input type="checkbox" id="vt-reqsid"> 需学号验证（提交时必须填写本人学号，防冒名投票）</label>
+      <div class="labrow"><label>结果可见时机</label></div>
+      <select id="vt-reveal" style="max-width:240px">
+        <option value="always">一直可见（投票中也能看到各选项票数）</option>
+        <option value="after_vote">投过票后可见</option>
+        <option value="after_close">投票结束后可见（最防跟风）</option>
+      </select>
+      <label class="splitline"><input type="checkbox" id="vt-revote" checked> 允许改票（截止前可重复提交覆盖；关闭则投过即锁定）</label>
     </div>
     <div class="modal-foot">
       <button class="ghost" id="btn-cancel">取消</button>
@@ -1206,10 +1219,20 @@ function openVoteModal() {
   const pv = () => {
     const rosterId = $('#vt-roster-lib').value;
     const raw = $('#vt-roster').value;
-    if (rosterId) { $('#vt-roster-pv').innerHTML = '<span class="ok-t">✓ 使用班级名单中的名单，提交时自动读取</span>'; return; }
+    // 需学号验证 + 名单没学号 = 那张票谁都投不了（服务端同口径拦截），在发起前就点出来
+    const sidWarn = () => {
+      if (!$('#vt-reqsid').checked) return '';
+      const p = jlParseRoster(raw, $('#vt-keepid').checked);
+      const missing = p.list.filter((m) => !m.id);
+      if (!missing.length) return '';
+      return `<div class="warn-t">已勾选需学号验证，但 ${missing.length} 人缺学号：`
+        + esc(missing.slice(0, 5).map((m) => m.name).join('、')) + (missing.length > 5 ? ' 等' : '')
+        + '——名单要写成「2023001 张三」并勾选保留学号</div>';
+    };
+    if (rosterId) { $('#vt-roster-pv').innerHTML = '<span class="ok-t">✓ 使用班级名单中的名单，提交时自动读取</span>' + sidWarn(); return; }
     const parsed = jlParseRoster(raw, $('#vt-keepid').checked);
     $('#vt-roster-pv').innerHTML = parsed.list.length
-      ? `识别到 <b>${parsed.list.length}</b> 人${$('#vt-keepid').checked ? '（含学号）' : ''}：` + parsed.list.slice(0, 50).map((m) => `<span class="jl-chip plain">${esc(jlSlotLabel(m))}</span>`).join('')
+      ? `识别到 <b>${parsed.list.length}</b> 人${$('#vt-keepid').checked ? '（含学号）' : ''}：` + parsed.list.slice(0, 50).map((m) => `<span class="jl-chip plain">${esc(jlSlotLabel(m))}</span>`).join('') + sidWarn()
       : '<span class="warn-t">尚未设置名单：请从班级名单选择，或直接粘贴</span>';
   };
   setupRosterLib('vt', (r) => {
@@ -1220,6 +1243,7 @@ function openVoteModal() {
   $('#vt-roster').addEventListener('input', pv);
   $('#vt-keepid').addEventListener('change', pv);
   $('#vt-roster-lib').addEventListener('change', pv);
+  $('#vt-reqsid').addEventListener('change', pv);
   pv();
   $('#vt-save').addEventListener('click', async () => {
     const title = $('#vt-title').value.trim();
@@ -1235,6 +1259,8 @@ function openVoteModal() {
         maxSelect: Number($('#vt-max').value) || 1,
         anonymous: $('#vt-anon').checked,
         requireSid: $('#vt-reqsid').checked,
+        reveal: $('#vt-reveal').value,
+        allowChange: $('#vt-revote').checked,
         deadline: valToDt($('#vt-deadline').value),
         rosterId: rosterId || null,
         rosterRaw,
@@ -1250,15 +1276,29 @@ function openVoteModal() {
   });
 }
 
-// 编辑投票（发起人/管理员）：标题 / 说明 / 截止时间；名单与选项发起后不可改（选票已按其校验）
+// 编辑投票（发起人/管理员）：标题/说明/截止/结果可见时机/允许改票可改；选项与名单只可「追加」，
+// 已有选项 key 与名单槽位 rid 不动，避免打乱已投票的指向。
 function openVoteEditModal(v, token) {
   const tArg = token ? '?t=' + encodeURIComponent(token) : '';
+  const curOpts = (v.options || []).map((o) => o.label).join('、');
   openModal(`
     <h2>${icon('edit')} 编辑投票</h2>
     <div class="form">
       <label>标题</label><input id="vt-e-title" maxlength="60" value="${esc(v.title)}">
       <label>说明</label><textarea id="vt-e-desc" rows="2" maxlength="1000">${esc(v.description || '')}</textarea>
       <label>截止时间（留空表示不设截止）</label><input id="vt-e-deadline" type="datetime-local" value="${dtToVal(v.deadline)}">
+      <label>结果可见时机</label>
+      <select id="vt-e-reveal">
+        <option value="always"${v.reveal === 'always' || !v.reveal ? ' selected' : ''}>一直可见</option>
+        <option value="after_vote"${v.reveal === 'after_vote' ? ' selected' : ''}>投过票后可见</option>
+        <option value="after_close"${v.reveal === 'after_close' ? ' selected' : ''}>投票结束后可见</option>
+      </select>
+      <label class="splitline"><input type="checkbox" id="vt-e-revote"${v.allowChange === false ? '' : ' checked'}> 允许改票（截止前可重复提交覆盖）</label>
+      <label>追加选项（每行一个，只增不改；已有选项：${esc(curOpts || '无')}）</label>
+      <textarea id="vt-e-optappend" rows="2" placeholder="需要新增的选项，每行一个…"></textarea>
+      <label class="splitline"><input type="checkbox" id="vt-e-roster-keepid"> 追加名单保留学号</label>
+      <label>追加投票人（每行一个，支持「学号 姓名」；只增不改，已有 ${esc(String((v.roster || []).length))} 人）</label>
+      <textarea id="vt-e-rosterappend" rows="2" placeholder="新增可投票的同学，每行一个…"></textarea>
     </div>
     <div class="modal-foot">
       <button class="ghost" id="btn-cancel">取消</button>
@@ -1266,12 +1306,19 @@ function openVoteEditModal(v, token) {
     </div>`);
   $('#vt-e-save').addEventListener('click', async () => {
     if (!$('#vt-e-title').value.trim()) { toast('标题不能为空', 'error'); return; }
+    const body = {
+      title: $('#vt-e-title').value.trim(),
+      description: $('#vt-e-desc').value,
+      deadline: valToDt($('#vt-e-deadline').value),
+      reveal: $('#vt-e-reveal').value,
+      allowChange: $('#vt-e-revote').checked,
+    };
+    const optApp = $('#vt-e-optappend').value.trim();
+    if (optApp) body.optionsAppend = optApp;
+    const rosterApp = $('#vt-e-rosterappend').value.trim();
+    if (rosterApp) { body.rosterAppendRaw = rosterApp; body.rosterAppendKeepId = $('#vt-e-roster-keepid').checked; }
     try {
-      await api(`/api/vote/${v.id}${tArg}`, { method: 'PUT', body: {
-        title: $('#vt-e-title').value.trim(),
-        description: $('#vt-e-desc').value,
-        deadline: valToDt($('#vt-e-deadline').value),
-      } });
+      await api(`/api/vote/${v.id}${tArg}`, { method: 'PUT', body });
       closeModal();
       toast('修改已保存');
       loadVoteDetail();
@@ -2817,13 +2864,13 @@ async function loadFunds() {
     </div>`;
 
   const bind = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
-  bind('#fund-type', 'change', (e) => { state.fund.type = e.target.value; loadFunds().catch((x) => toast(x.message, 'error')); });
+  bind('#fund-type', 'change', (e) => { state.fund.type = e.target.value; renderView().catch(() => {}); });
   bind('#btn-fund-add', 'click', () => openFundModal(null));
   bind('#fund-export', 'click', () => window.open('/api/funds/export?' + p, '_blank'));
   let qt = null;
   bind('#fund-q', 'input', (e) => { clearTimeout(qt); qt = setTimeout(() => { state.fund.q = e.target.value.trim(); loadFunds().catch((x) => toast(x.message, 'error')); }, 350); });
-  bind('#fund-from', 'change', (e) => { state.fund.from = e.target.value; loadFunds().catch((x) => toast(x.message, 'error')); });
-  bind('#fund-to', 'change', (e) => { state.fund.to = e.target.value; loadFunds().catch((x) => toast(x.message, 'error')); });
+  bind('#fund-from', 'change', (e) => { state.fund.from = e.target.value; renderView().catch(() => {}); });
+  bind('#fund-to', 'change', (e) => { state.fund.to = e.target.value; renderView().catch(() => {}); });
   $$('[data-fund-edit]').forEach((b) => b.addEventListener('click', () => {
     const r = data.items.find((x) => String(x.id) === b.dataset.fundEdit);
     if (r) openFundModal(r);
@@ -2831,7 +2878,7 @@ async function loadFunds() {
   $$('[data-fund-del]').forEach((b) => b.addEventListener('click', async () => {
     const r = data.items.find((x) => String(x.id) === b.dataset.fundDel);
     if (!r || !confirm(`删除这笔${r.type === 'income' ? '收入' : '支出'}（¥${fmtMoney(r.amount)}${r.note ? '：' + r.note : ''}）？其凭证一并删除。`)) return;
-    try { await api('/api/funds/' + r.id, { method: 'DELETE' }); toast('已删除'); loadFunds(); }
+    try { await api('/api/funds/' + r.id, { method: 'DELETE' }); toast('已删除'); renderView().catch(() => {}); }
     catch (e) { toast(e.message, 'error'); }
   }));
   $$('[data-fund-upload]').forEach((inp) => inp.addEventListener('change', async (e) => {
@@ -2840,12 +2887,12 @@ async function loadFunds() {
     if (!files.length) return;
     const fd = new FormData();
     files.forEach((f) => fd.append('files', f, f.name));
-    try { await api('/api/funds/' + fid + '/attachment', { method: 'POST', body: fd }); toast('凭证已上传 ✓'); loadFunds(); }
+    try { await api('/api/funds/' + fid + '/attachment', { method: 'POST', body: fd }); toast('凭证已上传 ✓'); renderView().catch(() => {}); }
     catch (err) { toast(err.message, 'error'); }
   }));
   $$('[data-fatt-del]').forEach((b) => b.addEventListener('click', async () => {
     if (!confirm('删除这个凭证文件？')) return;
-    try { await api('/api/fund-attachments/' + b.dataset.fattDel, { method: 'DELETE' }); toast('已删除'); loadFunds(); }
+    try { await api('/api/fund-attachments/' + b.dataset.fattDel, { method: 'DELETE' }); toast('已删除'); renderView().catch(() => {}); }
     catch (e) { toast(e.message, 'error'); }
   }));
 }
@@ -2902,9 +2949,189 @@ function openFundModal(r) {
       }
       closeModal();
       toast('已保存 ✓');
-      loadFunds();
+      renderView().catch(() => {});
     } catch (e) { toast(e.message, 'error'); }
   });
+}
+
+/* ========= 留言寄语（寄语墙 + 弹幕 + 点赞） ========= */
+function gbStopTimer() { if (gbTimer) { clearInterval(gbTimer); gbTimer = null; } }
+const GB_DAN_COLORS = ['rgba(79,110,242,.85)', 'rgba(7,193,96,.85)', 'rgba(249,115,22,.85)', 'rgba(139,92,246,.85)', 'rgba(239,68,68,.85)', 'rgba(14,165,233,.85)'];
+let gbDanStage = null, gbDanList = [], gbDanInited = false;
+function gbLiked() { try { return new Set(JSON.parse(localStorage.getItem('infohub-gb-liked') || '[]')); } catch (e) { return new Set(); } }
+function gbMarkLiked(id) { const s = gbLiked(); s.add(id); try { localStorage.setItem('infohub-gb-liked', JSON.stringify([...s])); } catch (e) { /* 忽略 */ } }
+function gbSpawnDan() {
+  if (!gbDanStage || !gbDanList.length) return;
+  const m = gbDanList[state.gb.idx = ((state.gb.idx || 0) + 1) % gbDanList.length];
+  const el = document.createElement('span');
+  el.className = 'gb-dan';
+  el.textContent = (m.nickname ? m.nickname + '：' : '') + m.content; // textContent：弹幕天然免疫 XSS
+  el.style.background = GB_DAN_COLORS[(state.gb.ci = ((state.gb.ci || 0) + 1) % GB_DAN_COLORS.length)];
+  el.style.top = (Math.floor(Math.random() * 4) * 28) + 'px';
+  el.style.animationDuration = (8 + Math.random() * 6).toFixed(1) + 's';
+  gbDanStage.appendChild(el);
+  el.addEventListener('animationend', () => el.remove());
+  while (gbDanStage.childElementCount > 24) gbDanStage.removeChild(gbDanStage.firstChild);
+}
+function gbApplyDanmaku() {
+  gbStopTimer();
+  const wrap = $('#gb-stage-wrap');
+  const btn = $('#gb-dan-toggle');
+  const enough = gbDanList.length >= 3; // 留言太少时整块舞台收起，不放空场
+  if (wrap) wrap.style.display = enough ? '' : 'none';
+  if (btn) btn.textContent = state.gb.danmaku ? '弹幕 开' : '弹幕 关';
+  if (gbDanStage) gbDanStage.innerHTML = '';
+  if (state.gb.danmaku && enough) {
+    for (let i = 0; i < 3; i++) gbSpawnDan();
+    gbTimer = setInterval(gbSpawnDan, 2600);
+  }
+}
+async function loadGuestbook() {
+  const seq = loadSeq;
+  const view = $('#view');
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  const gbq = (off) => '/api/guestbook?limit=30&offset=' + off + '&sort=' + state.gb.sort + (state.gb.topic ? '&topic=' + encodeURIComponent(state.gb.topic) : '');
+  const data = await api(gbq(0));
+  if (seq !== loadSeq) return;
+  state.gb.total = data.total; state.gb.loaded = data.items.length;
+  state.gb.shown = new Set(data.items.map((m) => m.id));
+  gbDanList = data.items;
+  if (!gbDanInited) { // 尊重系统「减少动态效果」偏好，仅首次决定默认开关
+    if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) state.gb.danmaku = false;
+    gbDanInited = true;
+  }
+  const liked = gbLiked();
+  const card = (m) => {
+    const tint = 'gb-t' + (m.id % 6);
+    const initial = esc(Array.from(m.nickname || '匿名')[0] || '?');
+    return `<div class="gb-card ${tint}">
+      ${canEdit() ? `<button class="gb-del" data-gb-del="${m.id}" title="删除">${icon('trash')}</button>` : ''}
+      <div class="gb-head"><span class="gb-ava">${initial}</span>
+        <div class="gb-who"><span class="gb-nick">${esc(m.nickname || '匿名')}</span><span class="gb-time">${esc(fmtReceived(m.created_at))}</span></div>
+      </div>
+      ${m.topic ? `<button class="gb-badge" data-gb-topic="${esc(m.topic)}" title="只看这个主题">#${esc(m.topic)}</button>` : ''}
+      <div class="gb-text">${esc(m.content)}</div>
+      <button class="gb-like${liked.has(m.id) ? ' on' : ''}" data-gb-like="${m.id}" ${liked.has(m.id) ? 'disabled' : ''}>${icon('heart')}<span>${m.likes || 0}</span></button>
+    </div>`;
+  };
+  const wallHtml = data.items.length
+    ? `<div class="gb-wall" id="gb-wall">${data.items.map(card).join('')}</div>`
+    : `<div class="empty"><div class="big">${icon('guestbook')}</div>还没有留言<br>写下第一句寄语，或给这堂课留个评价吧</div>`;
+  view.innerHTML = `
+    <div class="gb-page">
+      <div class="jl-head"><h2>${icon('guestbook')} 留言寄语</h2></div>
+      <p class="hint">写下给自己的寄语、课后的感想，或任何想说的话——人人可发、即时上墙，顶部弹幕飘过大家的心声。管理员可删除不当留言。</p>
+      <div class="gb-stage-wrap" id="gb-stage-wrap">
+        <div class="gb-stage" id="gb-stage" aria-hidden="true"></div>
+        <button class="mini gb-dan-toggle" id="gb-dan-toggle" title="开关弹幕">${state.gb.danmaku ? '弹幕 开' : '弹幕 关'}</button>
+      </div>
+      <div class="panel gb-composer">
+        <textarea id="gb-content" rows="4" maxlength="500" placeholder="说点什么…（最多 500 字）" aria-label="留言内容"></textarea>
+        <div class="gb-composer-foot">
+          <input id="gb-nick" maxlength="20" placeholder="昵称（选填，默认匿名）" aria-label="昵称">
+          <input id="gb-topic" list="gb-topic-list" maxlength="20" placeholder="主题（选填，如 AI课反馈 / 给张三）" aria-label="主题">
+          <datalist id="gb-topic-list">${(data.topics || []).map((t) => `<option value="${esc(t.topic)}"></option>`).join('')}</datalist>
+          <div class="gb-composer-right">
+            <span class="gb-count"><span id="gb-len">0</span>/500</span>
+            <button class="primary" id="gb-send">${icon('plus')} 发布</button>
+          </div>
+        </div>
+      </div>
+      ${(data.topics && data.topics.length) ? `<div class="gb-topics">
+        <button class="gb-topic-chip${state.gb.topic === '' ? ' on' : ''}" data-gb-topic="">全部</button>
+        ${data.topics.map((t) => `<button class="gb-topic-chip${state.gb.topic === t.topic ? ' on' : ''}" data-gb-topic="${esc(t.topic)}">#${esc(t.topic)} <b>${t.count}</b></button>`).join('')}
+      </div>` : ''}
+      <div class="gb-toolbar">
+        <div class="gb-sort">
+          <button class="${state.gb.sort === 'new' ? 'on' : ''}" data-gb-sort="new">最新</button>
+          <button class="${state.gb.sort === 'hot' ? 'on' : ''}" data-gb-sort="hot">最热</button>
+        </div>
+        <span class="gb-total">共 ${data.total} 条${state.gb.topic ? ' · 主题 #' + esc(state.gb.topic) : ''}</span>
+      </div>
+      <div id="gb-list">${wallHtml}</div>
+      ${data.total > data.items.length ? `<div class="morebar"><button class="mini" id="gb-more">加载更多</button></div>` : ''}
+    </div>`;
+  gbDanStage = $('#gb-stage');
+  gbApplyDanmaku();
+
+  const contentEl = $('#gb-content');
+  const lenEl = $('#gb-len');
+  if (contentEl) contentEl.addEventListener('input', () => { if (lenEl) lenEl.textContent = String(contentEl.value.length); });
+  const send = async () => {
+    const nickname = ($('#gb-nick').value || '').trim();
+    const topic = ($('#gb-topic').value || '').trim();
+    const content = contentEl.value.trim();
+    if (!content) { toast('写点什么再发吧', 'error'); return; }
+    const btn = $('#gb-send'); if (btn) btn.disabled = true;
+    try {
+      await api('/api/guestbook', { method: 'POST', body: { nickname, content, topic } });
+      toast('已发布 ✓');
+      renderView().catch(() => {});
+    } catch (e) { toast(e.message, 'error'); }
+    finally { if (btn) btn.disabled = false; }
+  };
+  const sendBtn = $('#gb-send'); if (sendBtn) sendBtn.addEventListener('click', send);
+  if (contentEl) contentEl.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') send(); });
+  const danBtn = $('#gb-dan-toggle'); if (danBtn) danBtn.addEventListener('click', () => { state.gb.danmaku = !state.gb.danmaku; gbApplyDanmaku(); });
+  $$('[data-gb-sort]').forEach((b) => b.addEventListener('click', () => {
+    if (state.gb.sort === b.dataset.gbSort) return;
+    state.gb.sort = b.dataset.gbSort;
+    renderView().catch(() => {});
+  }));
+  const moreBtn = $('#gb-more');
+  if (moreBtn) moreBtn.addEventListener('click', async () => {
+    moreBtn.disabled = true;
+    try {
+      const d = await api(gbq(state.gb.loaded));
+      if (seq !== loadSeq) return;
+      // 热度排序下两次请求之间有人被点赞，页边界会移动 → 同一条可能再翻出来一次；按 id 去重
+      const fresh = d.items.filter((m) => !state.gb.shown.has(m.id));
+      fresh.forEach((m) => state.gb.shown.add(m.id));
+      state.gb.loaded += d.items.length;
+      $('#gb-wall').insertAdjacentHTML('beforeend', fresh.map(card).join(''));
+      bindLike(); bindTopicBadge(); bindDel();
+      if (state.gb.loaded >= state.gb.total || !d.items.length) moreBtn.closest('.morebar').remove();
+    } catch (e) { toast(e.message, 'error'); }
+    finally { moreBtn.disabled = false; }
+  });
+  function bindTopicBadge() {
+    $$('[data-gb-topic]').forEach((b) => {
+      if (b._tbound) return; b._tbound = true;
+      b.addEventListener('click', () => {
+        const t = b.dataset.gbTopic || '';
+        if (state.gb.topic === t) return;
+        state.gb.topic = t;
+        renderView().catch(() => {});
+      });
+    });
+  }
+  function bindLike() {
+    $$('[data-gb-like]').forEach((b) => {
+      if (b._bound) return; b._bound = true;
+      b.addEventListener('click', async () => {
+        const id = Number(b.dataset.gbLike);
+        if (gbLiked().has(id)) { toast('已经赞过啦'); return; }
+        b.disabled = true; // 先禁用防双击连发两次 POST（服务端仅 IP 频控，不去重）
+        try {
+          const r = await api('/api/guestbook/' + id + '/like', { method: 'POST' });
+          gbMarkLiked(id);
+          b.classList.add('on');
+          const sp = b.querySelector('span'); if (sp) sp.textContent = r.likes;
+        } catch (e) { b.disabled = false; toast(e.message, 'error'); }
+      });
+    });
+  }
+  function bindDel() {
+    $$('[data-gb-del]').forEach((b) => {
+      if (b._dbound) return; b._dbound = true;
+      b.addEventListener('click', async () => {
+        if (!confirm('删除这条留言？')) return;
+        try { await api('/api/guestbook/' + b.dataset.gbDel, { method: 'DELETE' }); toast('已删除'); renderView().catch(() => {}); }
+        catch (e) { toast(e.message, 'error'); }
+      });
+    });
+  }
+  bindTopicBadge(); bindLike(); bindDel();
 }
 
 /* ========= 命令面板（Ctrl/⌘+K，参考 Linear 的 cmdk 交互） ========= */
@@ -2912,6 +3139,7 @@ const CMDK_VIEWS = [
   ['feed', '信息中心', 'feed'], ['inbox', '等待审核', 'inbox'], ['tasks', '待办任务', 'check'],
   ['jielong', '活动接龙', 'jielong'], ['draw', '抽签点名', 'draw'], ['vote', '投票表决', 'vote'], ['birthday', '生日祝福', 'birthday'],
   ['funds', '班费收支', 'fund'],
+  ['guestbook', '留言寄语', 'guestbook'],
   ['calendar', '日历详情', 'calendar'], ['files', '文件中心', 'file'], ['stats', '统计接入', 'chart'],
   ['rosters', '班级名单', 'users'],
 ];
@@ -3047,7 +3275,7 @@ function openHelpModal() {
 /* ========= 视图切换 ========= */
 // 顶栏控件只在适用的页面显示：排序只在信息流有用；统计页不响应群筛选
 function syncTopbar() {
-  $('#group-sel').style.display = (state.view === 'stats' || state.view === 'jielong' || state.view === 'draw' || state.view === 'vote' || state.view === 'birthday' || state.view === 'funds' || state.view === 'rosters') ? 'none' : '';
+  $('#group-sel').style.display = (state.view === 'stats' || state.view === 'jielong' || state.view === 'draw' || state.view === 'vote' || state.view === 'birthday' || state.view === 'funds' || state.view === 'guestbook' || state.view === 'rosters') ? 'none' : '';
   $('#sortsel').style.display = state.view === 'feed' ? '' : 'none';
 }
 // 视图加载代次：renderView 每次自增并传给视图加载器。加载器的响应回来时若代次已变
@@ -3056,6 +3284,7 @@ let loadSeq = 0;
 async function renderView() {
   jlStopTimer();
   vStopTimer();
+  gbStopTimer();
   const seq = ++loadSeq;
   saveFilters();
   syncNavActive();
@@ -3071,6 +3300,7 @@ async function renderView() {
     else if (state.view === 'vote') await loadVotes();
     else if (state.view === 'birthday') await loadBirthdays();
     else if (state.view === 'funds') await loadFunds();
+    else if (state.view === 'guestbook') await loadGuestbook();
     else if (state.view === 'calendar') await loadCalendar();
     else if (state.view === 'files') await loadFiles();
     else if (state.view === 'rosters') await loadRosters();
@@ -3099,7 +3329,7 @@ async function refresh() {
 // 所有导航按钮（侧栏 + 底栏 + 更多面板）统一同步活动态；
 // 「更多」按钮在当前视图属于低频视图时也点亮
 const NAV_SEL = '#mainnav button, #tabbar button, #tabsheet button';
-const MORE_VIEWS = ['inbox', 'calendar', 'files', 'stats', 'rosters', 'vote', 'funds'];
+const MORE_VIEWS = ['inbox', 'calendar', 'files', 'stats', 'rosters', 'vote', 'funds', 'guestbook'];
 function syncNavActive() {
   $$(NAV_SEL).forEach((b) => {
     b.classList.toggle('active', b.dataset.view === state.view);

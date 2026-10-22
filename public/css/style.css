@@ -662,3 +662,77 @@ html{scrollbar-width:thin;scrollbar-color:rgba(100,116,139,.4) transparent}
   .fund-acts{grid-row:2;grid-column:3;justify-self:end}
   .fund-files{padding-left:36px}
 }
+
+/* ---------- 投票票数条（管理台投票详情） ---------- */
+.tally-row{margin:10px 0}
+.tally-row .tlabel{display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px}
+.tally-row .tlabel b{word-break:break-word;margin-right:8px}
+.tally-row .tbar{height:9px;background:var(--line);border-radius:99px;overflow:hidden}
+.tally-row .tbar i{display:block;height:100%;background:var(--primary);border-radius:99px;transition:width .4s}
+.tally-hidden{padding:14px;text-align:center;color:var(--muted);font-size:14px;background:rgba(127,127,127,.08);border-radius:var(--radius-sm)}
+
+/* ---------- 留言寄语 + 弹幕 + 卡片墙 ---------- */
+.gb-stage-wrap{position:relative;margin:14px 0}
+.gb-stage{position:relative;height:112px;overflow:hidden;background:linear-gradient(180deg,rgba(79,110,242,.08),transparent);border:1px solid var(--line);border-radius:var(--radius-md)}
+.gb-dan{position:absolute;left:100%;white-space:nowrap;font-size:15px;font-weight:600;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.35);padding:3px 12px;border-radius:999px;will-change:transform;animation:gb-fly linear forwards;max-width:none}
+@keyframes gb-fly{from{transform:translateX(0)}to{transform:translateX(-120vw)}}
+.gb-dan-toggle{position:absolute;top:8px;right:8px;z-index:2;background:var(--card)}
+/* composer */
+.gb-composer{padding:14px 16px}
+.gb-composer textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);outline:none;resize:vertical;line-height:1.6;min-height:64px;font-family:inherit;font-size:14px}
+.gb-composer textarea:focus{border-color:var(--primary);background:var(--card)}
+.gb-composer-foot{display:flex;align-items:center;gap:10px;margin-top:10px}
+.gb-composer-foot input{flex:0 1 220px;padding:8px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--card);color:var(--text);outline:none;font-size:13px}
+.gb-composer-foot input:focus{border-color:var(--primary)}
+.gb-composer-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.gb-count{font-size:12px;color:var(--muted)}
+/* 排序工具条 */
+.gb-toolbar{display:flex;align-items:center;gap:12px;margin:18px 0 12px}
+.gb-sort{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.gb-sort button{border:0;background:var(--card);color:var(--muted);padding:6px 16px;font-size:13px;cursor:pointer}
+.gb-sort button.on{background:var(--primary);color:#fff}
+.gb-total{font-size:13px;color:var(--muted)}
+/* 主题筛选 chips 与卡片主题徽标 */
+.gb-topics{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 2px}
+.gb-topic-chip{border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:999px;padding:5px 13px;font-size:13px;cursor:pointer;transition:all .15s}
+.gb-topic-chip b{font-weight:600;opacity:.7;margin-left:2px}
+.gb-topic-chip:hover{border-color:var(--primary);color:var(--primary)}
+.gb-topic-chip.on{background:var(--primary);border-color:var(--primary);color:#fff}
+.gb-topic-chip.on b{opacity:.85}
+.gb-badge{display:inline-block;margin:2px 0 6px;border:0;background:rgba(79,110,242,.12);color:var(--primary);border-radius:7px;padding:2px 8px;font-size:12px;font-weight:600;cursor:pointer}
+:root[data-theme="dark"] .gb-badge{background:rgba(91,120,255,.18)}
+.gb-badge:hover{text-decoration:underline}
+/* 卡片墙（CSS 多列瀑布流） */
+.gb-wall{column-gap:14px}
+@media(min-width:640px){.gb-wall{column-count:2}}
+@media(min-width:1100px){.gb-wall{column-count:3}}
+.gb-card{position:relative;break-inside:avoid;margin:0 0 14px;padding:16px;border-radius:var(--radius-md);border:1px solid var(--line);box-shadow:var(--shadow);transition:transform .15s,box-shadow .15s}
+.gb-card:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(30,40,70,.12)}
+/* 卡片底色：把色相混进 --card，浅色=柔和粉彩、深色=暗调染色，两套主题文字都清晰 */
+.gb-t0{background:linear-gradient(135deg,color-mix(in srgb,#6366f1 13%,var(--card)),color-mix(in srgb,#3b82f6 9%,var(--card)))}
+.gb-t1{background:linear-gradient(135deg,color-mix(in srgb,#10b981 13%,var(--card)),color-mix(in srgb,#22c55e 9%,var(--card)))}
+.gb-t2{background:linear-gradient(135deg,color-mix(in srgb,#f59e0b 14%,var(--card)),color-mix(in srgb,#f97316 9%,var(--card)))}
+.gb-t3{background:linear-gradient(135deg,color-mix(in srgb,#a855f7 13%,var(--card)),color-mix(in srgb,#8b5cf6 9%,var(--card)))}
+.gb-t4{background:linear-gradient(135deg,color-mix(in srgb,#ef4444 12%,var(--card)),color-mix(in srgb,#f43f5e 8%,var(--card)))}
+.gb-t5{background:linear-gradient(135deg,color-mix(in srgb,#0ea5e9 13%,var(--card)),color-mix(in srgb,#06b6d4 9%,var(--card)))}
+.gb-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.gb-ava{width:34px;height:34px;border-radius:50%;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:#fff;background:var(--primary);font-size:15px}
+.gb-who{display:flex;flex-direction:column;min-width:0}
+.gb-nick{font-size:14px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gb-time{font-size:12px;color:var(--muted)}
+.gb-text{font-size:14px;color:var(--text);line-height:1.65;white-space:pre-wrap;word-break:break-word}
+.gb-like{margin-top:10px;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:color-mix(in srgb,var(--card) 55%,transparent);color:var(--muted);border-radius:999px;padding:4px 12px;font-size:13px;cursor:pointer;transition:all .15s}
+.gb-like .icon{width:15px;height:15px}
+.gb-like:hover{border-color:var(--danger);color:var(--danger)}
+.gb-like.on{color:var(--danger);border-color:var(--danger);background:rgba(239,68,68,.1)}
+.gb-like.on .icon{fill:var(--danger)}
+.gb-like:disabled{cursor:default}
+.gb-del{position:absolute;top:10px;right:10px;width:26px;height:26px;border-radius:50%;border:1px solid var(--line);background:color-mix(in srgb,var(--card) 72%,transparent);color:var(--danger);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;opacity:0;transition:opacity .15s}
+.gb-del .icon{width:14px;height:14px}
+.gb-card:hover .gb-del{opacity:1}
+@media(max-width:760px){
+  .gb-composer-foot{flex-wrap:wrap}
+  .gb-composer-foot input{flex:1;min-width:0}
+  .gb-del{opacity:1}
+}
+@media(prefers-reduced-motion:reduce){.gb-card{transition:none}.gb-card:hover{transform:none}}

@@ -149,6 +149,26 @@ setInterval(sweepOrphanUploads, 24 * 60 * 60 * 1000);
 const SESSION_TTL = 30 * 24 * 60 * 60 * 1000; // 与 Cookie Max-Age 一致（30 天）
 const sessions = new Map();         // 内存会话：token -> 登录时间，重启后需重新登录
 const loginFails = new Map();       // 登录失败限速：ip -> {n, t}
+/* ---------- 留言板发布限速（访客可写的公开接口，防刷屏）：ip -> 最近发布时间戳数组 ---------- */
+const gbPosts = new Map();
+function guestbookRateOk(ip) {
+  const now = Date.now();
+  const arr = (gbPosts.get(ip) || []).filter((t) => now - t < 60000); // 只看最近 60 秒
+  if (arr.length >= 6) { gbPosts.set(ip, arr); return false; }       // 每分钟最多 6 条
+  arr.push(now);
+  gbPosts.set(ip, arr);
+  return true;
+}
+// 点赞限速（比发帖宽松）：ip -> 最近点赞时间戳数组，每分钟最多 40 次
+const gbLikes = new Map();
+function guestbookLikeRateOk(ip) {
+  const now = Date.now();
+  const arr = (gbLikes.get(ip) || []).filter((t) => now - t < 60000);
+  if (arr.length >= 40) { gbLikes.set(ip, arr); return false; }
+  arr.push(now);
+  gbLikes.set(ip, arr);
+  return true;
+}
 function hasSession(req) {
   const m = /(?:^|;\s*)infohub_session=([a-f0-9]{32,})/.exec(req.headers.cookie || '');
   const t = m && sessions.get(m[1]);
@@ -231,8 +251,11 @@ function fundWhere(query) {
   if (type === 'income' || type === 'expense') { where.push('type = ?'); args.push(type); }
   const from = cleanDT(query.get('from'));
   const to = cleanDT(query.get('to'));
-  if (from) { where.push('happened_at >= ?'); args.push(from.length === 10 ? from + ' 00:00' : from); }
-  if (to) { where.push('happened_at <= ?'); args.push(to.length === 10 ? to + ' 23:59' : to); }
+  // 按天粒度比较：happened_at 可能是纯日期或带时分，两侧都截取日期部分再比，
+  // 否则字符串比较下 '2026-10-19' < '2026-10-19 00:00' 会把起始日当天的账目整批漏掉。
+  // 调用方传了带时分的时间点（页面只发日期，机器人/API 会发完整时间）时保持精确比较，不放宽到整天
+  if (from) { where.push(from.length === 10 ? 'substr(happened_at, 1, 10) >= ?' : 'happened_at >= ?'); args.push(from); }
+  if (to) { where.push(to.length === 10 ? 'substr(happened_at, 1, 10) <= ?' : 'happened_at <= ?'); args.push(to); }
   const search = (query.get('q') || '').trim();
   if (search) {
     where.push(`note LIKE ? ESCAPE '\\'`);
@@ -1519,6 +1542,15 @@ function voteTally(v, rows) {
   }));
 }
 
+// 需学号验证的投票要求名单每人都有学号：没学号的槽位，学生填任何学号都过不了 ballot 的校验，
+// 等于往班群发一张谁都投不了的死票——所以拦在发起/追加名单这一步，而不是等学生撞错误
+function missingSidHint(list) {
+  const missing = list.filter((r) => !r.id).map((r) => r.name);
+  if (!missing.length) return '';
+  return missing.length + ' 人缺学号：' + missing.slice(0, 5).join('、') + (missing.length > 5 ? ' 等' : '')
+    + '（名单写成「2023001 张三」并勾选保留学号）';
+}
+
 // 创建投票（管理操作）：资格名单必选——只有名单内的同学可以投票
 route('POST', '/api/vote', (ctx) => {
   if (!authOk(ctx.req)) throw new HttpError(401, '需要管理员登录');
@@ -1535,19 +1567,26 @@ route('POST', '/api/vote', (ctx) => {
   }
   if (!roster.length) throw new HttpError(400, '请设置投票名单（只有名单内的同学可以投票）');
   if (roster.length > 500) throw new HttpError(400, '名单最多 500 人');
+  if (b.requireSid === true) {
+    const miss = missingSidHint(roster);
+    if (miss) throw new HttpError(400, '本次投票需学号验证，但名单' + miss);
+  }
   const lines = String(b.optionsRaw || '').split(/[\n\r]+/).map((s) => s.trim()).filter(Boolean);
   if (lines.length < 2) throw new HttpError(400, '请至少填写 2 个选项（每行一个候选人或选项）');
   if (lines.length > 50) throw new HttpError(400, '选项最多 50 个');
   const options = lines.map((label, i) => ({ key: 'o' + i, label: sField(label, 60) }));
   const maxSelect = Math.max(1, Math.min(Number(b.maxSelect) || 1, options.length));
+  const REVEALS = ['always', 'after_vote', 'after_close'];
+  const reveal = REVEALS.includes(b.reveal) ? b.reveal : 'always';
+  const allowChange = b.allowChange === false ? 0 : 1;
   const token = JL.genToken();
   const vid = JL.genId(7);
-  db.prepare(`INSERT INTO votes (id, title, description, deadline, closed, anonymous, require_sid, roster, options, max_select, admin_token, created_at)
-      VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`)
+  db.prepare(`INSERT INTO votes (id, title, description, deadline, closed, anonymous, require_sid, roster, options, max_select, reveal, allow_change, admin_token, created_at)
+      VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(vid, title, sField(b.description, 1000), cleanDT(b.deadline) || '',
       b.anonymous === false ? 0 : 1,
       b.requireSid === true ? 1 : 0,
-      JSON.stringify(roster), JSON.stringify(options), maxSelect, token, Date.now());
+      JSON.stringify(roster), JSON.stringify(options), maxSelect, reveal, allowChange, token, Date.now());
   return { ok: true, id: vid, adminToken: token };
 });
 
@@ -1574,15 +1613,24 @@ route('GET', '/api/vote/:id', (ctx) => {
   // 匿名投票的选票明细（谁投给了谁）只有发起人能看；非匿名对所有人公开。
   // 资格名单是公示名单，对所有人可见——学生页的联想与专属链接锁定身份依赖它。
   const showBallots = canManage || !v.anonymous;
+  const closed = voteIsClosed(v);
+  const reveal = v.reveal || 'always';
+  // 结果可见时机：always 一直可见；after_close 截止后可见；after_vote 投过票后可见。
+  // 发起人始终可见；投票结束后对所有人可见。after_vote 靠前端回传「我投的 rid」软校验（懂技术者可绕过，非安全边界）。
+  const votedRid = Number(ctx.query.get('voted_rid'));
+  const viewerVoted = Number.isInteger(votedRid) && rows.some((b) => b.rid === votedRid);
+  const showTally = canManage || closed || reveal === 'always' || (reveal === 'after_vote' && viewerVoted);
   const base = {
     id: v.id, title: v.title, description: v.description, deadline: v.deadline,
-    closed: voteIsClosed(v), closedByAdmin: !!v.closed, anonymous: !!v.anonymous,
+    closed, closedByAdmin: !!v.closed, anonymous: !!v.anonymous,
     requireSid: !!v.require_sid,
+    reveal, allowChange: v.allow_change !== 0,
     options, maxSelect: v.max_select, rosterSize: roster.length, done: rows.length,
     // 需学号验证的投票不下发学号：防止「从详情读学号 → 回填 sid」绕过验证；发起人不遮蔽
     roster: canManage || !v.require_sid ? roster : roster.map((r) => ({ name: r.name })),
-    tally: voteTally(v, rows),
+    tallyHidden: !showTally,
   };
+  if (showTally) base.tally = voteTally(v, rows);
   // 发起人管理令牌仅在设密码部署且已登录时下发（未设密码时管理本就开放，无需下发）
   if (CONFIG.password && authOk(ctx.req)) base.adminToken = v.admin_token;
   if (canManage) {
@@ -1591,9 +1639,12 @@ route('GET', '/api/vote/:id', (ctx) => {
       .map((r, i) => ({ i, id: r.id, name: r.name }))
       .filter((r) => !rows.some((b) => b.rid === r.i));
   }
-  if (showBallots) {
+  if (showBallots && showTally) {
+    // 选票明细：学号只在发起人视角下发——记名投票的明细对访客也公开，带上 sid 等于把
+    // 名单打码本想藏起来的学号整份发出去（还会反过来喂给「填本人学号」这道验证）
     base.ballots = rows.map((b) => ({
-      rid: b.rid, name: b.name, sid: b.sid, time: b.time,
+      rid: b.rid, name: b.name, time: b.time,
+      ...(canManage ? { sid: b.sid } : {}),
       choices: safeJson(b.choices, []).map((k) => (options.find((o) => o.key === k) || {}).label || k),
     }));
   }
@@ -1610,6 +1661,7 @@ route('POST', '/api/vote/:id/ballot', (ctx) => {
   const b = ctx.body || {};
   const rawName = String(b.name || '').trim();
   if (!rawName) throw new HttpError(400, '请填写你的姓名或学号');
+  const typedSid = String(b.sid || '').trim();
   let rid = null, id = null, name = rawName;
   if (Number.isInteger(b.rid) && b.rid >= 0 && b.rid < roster.length) {
     const r0 = roster[b.rid];
@@ -1627,17 +1679,22 @@ route('POST', '/api/vote/:id/ballot', (ctx) => {
       roster.forEach((r, i) => { if (words.includes(r.name) || (r.id && words.includes(r.id))) hits.push(i); });
     }
     if (!hits.length) throw new HttpError(403, '你不在本次投票名单中，无法投票');
-    if (hits.length > 1) throw new HttpError(409, '名单中有重名，请输入学号确认身份');
-    rid = hits[0]; id = roster[rid].id; name = roster[rid].name;
+    // 同名且需学号验证：按学号在同名槽位里定位本人（姓名页面上分不出，学号能）
+    if (hits.length > 1 && v.require_sid && typedSid) {
+      const bySid = hits.filter((i) => String(roster[i].id || '') === typedSid);
+      if (bySid.length === 1) { rid = bySid[0]; id = roster[rid].id; name = roster[rid].name; }
+      else throw new HttpError(409, '名单中有重名且学号对不上，请核对本人学号后再提交');
+    } else if (hits.length > 1) throw new HttpError(409, '名单中有重名，请输入学号确认身份');
+    else { rid = hits[0]; id = roster[rid].id; name = roster[rid].name; }
   }
   // 学号强验证（发起时勾选）：槽位必须有学号，且提交内容里必须含有该学号。
   // 姓名可能是别人代填的，学号必须本人输入——冒用门槛从"知道姓名"提高到"知道学号"。
   // 整串「学号 姓名」经姓名分段匹配后仍要求 rawName 含该学号，等同于在 sid 字段证明知悉学号，
   // 访客页 roster 已对学号打码，能打出正确学号即通过验证，非绕过。
-  // 专属链接 ?u= 视作已验证（链接一对一私发即凭证）
-  if (v.require_sid && !(b.via === 'u' && rid != null)) {
+  // 专属链接 ?u= 不再豁免学号：via 是客户端自报字段，而姓名本来就对访客公开，
+  // 豁免等于任何知道同学姓名的人都能顶替其投票，「需学号验证」就形同虚设。
+  if (v.require_sid) {
     if (!id) throw new HttpError(400, '本次投票需学号验证，但名单中该成员没有学号，请联系发起人');
-    const typedSid = String(b.sid || '').trim();
     if (typedSid !== String(id) && !rawName.includes(String(id))) {
       throw new HttpError(400, '学号验证未通过：请输入你的学号后再提交');
     }
@@ -1648,15 +1705,18 @@ route('POST', '/api/vote/:id/ballot', (ctx) => {
   if (chosen.length > v.max_select) throw new HttpError(400, `最多选择 ${v.max_select} 项`);
   const exist = db.prepare('SELECT id FROM vote_ballots WHERE vote_id = ? AND rid = ?').get(v.id, rid);
   if (exist) {
+    // 关闭改票时，已投过的人再次提交直接拒绝（防"看到票数后改投热门"）；管理员/委托令牌不受此限
+    if (v.allow_change === 0 && !voteCanManage(ctx, v)) throw new HttpError(409, '本次投票不允许改票，你已投过票');
     db.prepare('UPDATE vote_ballots SET choices = ?, time = ? WHERE id = ?').run(JSON.stringify(chosen), Date.now(), exist.id);
-    return { ok: true, updated: true };
+    return { ok: true, updated: true, rid };
   }
   db.prepare('INSERT INTO vote_ballots (vote_id, rid, sid, name, choices, time) VALUES (?, ?, ?, ?, ?, ?)')
     .run(v.id, rid, id || '', name, JSON.stringify(chosen), Date.now());
-  return { ok: true };
+  return { ok: true, rid };
 });
 
-// 编辑（标题/说明/截止）：字段显式传入才修改，说明与截止传空串即清空
+// 编辑投票：标题/说明/截止/结果可见时机/允许改票直接改；选项与名单只允许「追加」（只增不改，
+// 保护已有选票指向的 option key 与名单槽位 rid 不错位）。字段显式传入才修改。
 route('PUT', '/api/vote/:id', (ctx) => {
   const v = db.prepare('SELECT * FROM votes WHERE id = ?').get(ctx.params.id);
   if (!v) throw new HttpError(404, '投票不存在');
@@ -1666,8 +1726,35 @@ route('PUT', '/api/vote/:id', (ctx) => {
   if (!title) throw new HttpError(400, '标题不能为空');
   const description = b.description !== undefined ? sField(b.description, 1000) : v.description;
   const deadline = b.deadline !== undefined ? (cleanDT(b.deadline) || '') : (v.deadline || '');
-  db.prepare('UPDATE votes SET title = ?, description = ?, deadline = ? WHERE id = ?')
-    .run(title, description, deadline, v.id);
+  const REVEALS = ['always', 'after_vote', 'after_close'];
+  const reveal = (b.reveal !== undefined && REVEALS.includes(b.reveal)) ? b.reveal : (v.reveal || 'always');
+  const allowChange = b.allowChange !== undefined ? (b.allowChange === false ? 0 : 1) : v.allow_change;
+  let options = safeJson(v.options, []);
+  let roster = safeJson(v.roster, []);
+  if (b.optionsAppend !== undefined) {
+    const lines = (Array.isArray(b.optionsAppend) ? b.optionsAppend : String(b.optionsAppend || '').split(/[\n\r]+/))
+      .map((s) => String(s).trim()).filter(Boolean);
+    if (lines.length) {
+      if (options.length + lines.length > 50) throw new HttpError(400, '选项最多 50 个');
+      let n = options.reduce((m, o) => { const x = /^o(\d+)$/.exec(o.key || ''); return x ? Math.max(m, +x[1]) : m; }, -1);
+      const exist = new Set(options.map((o) => o.label));
+      for (const label of lines) { const lb = sField(label, 60); if (!lb || exist.has(lb)) continue; options.push({ key: 'o' + (++n), label: lb }); }
+    }
+  }
+  if (b.rosterAppendRaw !== undefined) {
+    const add = JL.parseRoster(String(b.rosterAppendRaw || ''), b.rosterAppendKeepId === true).list;
+    if (add.length) {
+      if (v.require_sid) {
+        const miss = missingSidHint(add);
+        if (miss) throw new HttpError(400, '本次投票需学号验证，追加的成员要带学号（' + miss + '）');
+      }
+      const seen = new Set(roster.map((r) => (r.id || '') + '|' + r.name));
+      for (const r of add) { const k = (r.id || '') + '|' + r.name; if (seen.has(k)) continue; seen.add(k); roster.push(r); }
+      if (roster.length > 500) throw new HttpError(400, '名单最多 500 人');
+    }
+  }
+  db.prepare('UPDATE votes SET title = ?, description = ?, deadline = ?, reveal = ?, allow_change = ?, options = ?, roster = ? WHERE id = ?')
+    .run(title, description, deadline, reveal, allowChange, JSON.stringify(options), JSON.stringify(roster), v.id);
   audit(ctx, '编辑投票', '「' + title + '」');
   return { ok: true };
 });
@@ -1835,14 +1922,18 @@ route('PUT', '/api/funds/:id', (ctx) => {
 route('DELETE', '/api/funds/:id', (ctx) => {
   const id = Number(ctx.params.id);
   if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
-  const info = db.prepare('DELETE FROM funds WHERE id = ?').run(id);
-  if (!info.changes) throw new HttpError(404, '记录不存在');
-  // 级联删除该记录的凭证附件（磁盘文件 + 记录），不留孤儿
-  for (const a of db.prepare('SELECT stored_name FROM fund_attachments WHERE fund_id = ?').all(id)) {
-    const fp = path.resolve(UPLOAD_DIR, a.stored_name);
+  // 两条 DELETE 同事务，避免中途失败留下悬空凭证记录；磁盘文件在提交后删（残留交给清扫任务）
+  const files = transact(() => {
+    const info = db.prepare('DELETE FROM funds WHERE id = ?').run(id);
+    if (!info.changes) throw new HttpError(404, '记录不存在');
+    const names = db.prepare('SELECT stored_name FROM fund_attachments WHERE fund_id = ?').all(id).map((a) => a.stored_name);
+    db.prepare('DELETE FROM fund_attachments WHERE fund_id = ?').run(id);
+    return names;
+  });
+  for (const name of files) {
+    const fp = path.resolve(UPLOAD_DIR, name);
     try { if (fp.startsWith(UPLOAD_DIR + path.sep) && fs.existsSync(fp)) fs.unlinkSync(fp); } catch (e) { /* 忽略 */ }
   }
-  db.prepare('DELETE FROM fund_attachments WHERE fund_id = ?').run(id);
   audit(ctx, '删除班费记录', 'id=' + id);
   return { ok: true };
 });
@@ -1907,16 +1998,20 @@ route('DELETE', '/api/fund-attachments/:id', (ctx) => {
 route('GET', '/api/funds/export', (ctx) => {
   const { whereSql, args } = fundWhere(ctx.query);
   const rows = db.prepare(`SELECT * FROM funds ${whereSql} ORDER BY happened_at DESC, id DESC LIMIT 5000`).all(...args);
-  const escCell = (val) => {
+  const quote = (s) => (/[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s);
+  const escCell = (val) => quote(String(val == null ? '' : val));
+  // Excel 公式注入只可能来自用户可控的文本（备注、日期由 cleanDT 规整过）；
+  // 不能顺手作用到金额列——按「支出」筛选时结余必为负数，加前缀会把数值格成文本
+  const escText = (val) => {
     const s = String(val == null ? '' : val);
-    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    return quote(/^[=+\-@\t\r]/.test(s) ? "'" + s : s);
   };
   const yuan = (fen) => (fen / 100).toFixed(2);
   const lines = ['日期,类型,金额(元),备注'];
   let income = 0, expense = 0;
   for (const r of rows) {
     if (r.type === 'income') income += r.amount; else expense += r.amount;
-    lines.push([r.happened_at, r.type === 'income' ? '收入' : '支出', yuan(r.amount), r.note].map(escCell).join(','));
+    lines.push([escText(r.happened_at), escCell(r.type === 'income' ? '收入' : '支出'), escCell(yuan(r.amount)), escText(r.note)].join(','));
   }
   lines.push('', ['合计', '收入', yuan(income), ''].map(escCell).join(','));
   lines.push(['', '支出', yuan(expense), ''].map(escCell).join(','));
@@ -1929,6 +2024,60 @@ route('GET', '/api/funds/export', (ctx) => {
     'Content-Disposition': `attachment; filename="fund.csv"; filename*=UTF-8''${encodeURIComponent('班费收支.csv')}`,
   });
   res.end(body);
+});
+
+/* ---------- 留言寄语（大家畅所欲言的留言板 + 弹幕；访客可发可赞，删除仅管理员） ----------
+ * 浏览与发布 / 点赞公开（站内少数几个开放写入的接口之一，与接龙 / 投票同一门禁白名单，接口内各自校验）；
+ * 发布与点赞按 IP 限速、内容长度上限防刷屏；渲染侧（列表与弹幕）一律前端转义，杜绝 XSS。 */
+route('GET', '/api/guestbook', (ctx) => {
+  const limit = Math.min(Math.max(Number(ctx.query.get('limit')) || 50, 1), 200);
+  const offset = Math.max(Number(ctx.query.get('offset')) || 0, 0);
+  const topic = sField(ctx.query.get('topic'), 20);
+  const where = topic ? 'WHERE topic = ?' : '';
+  const args = topic ? [topic] : [];
+  const total = db.prepare(`SELECT COUNT(*) AS c FROM guestbook ${where}`).get(...args).c;
+  const order = ctx.query.get('sort') === 'hot' ? 'ORDER BY likes DESC, id DESC' : 'ORDER BY id DESC';
+  const items = db.prepare(`SELECT id, nickname, content, likes, topic, created_at FROM guestbook ${where} ${order} LIMIT ? OFFSET ?`)
+    .all(...args, limit, offset);
+  // 主题聚合（全局，不随筛选变）：供前端渲染主题筛选 chips。
+  // 主题由访客自由填写，不限条数的话一次 GET 的响应体和前端 chips 都会被「每人一个新主题」刷爆
+  const topics = db.prepare(`SELECT topic, COUNT(*) AS c FROM guestbook WHERE topic <> '' GROUP BY topic ORDER BY c DESC, MAX(id) DESC LIMIT 30`)
+    .all().map((t) => ({ topic: t.topic, count: t.c }));
+  return { total, items, topics };
+});
+
+route('POST', '/api/guestbook', (ctx) => {
+  const ip = (ctx.req.socket && ctx.req.socket.remoteAddress) || '?';
+  if (!guestbookRateOk(ip)) throw new HttpError(429, '发言太快了，歇一会儿再发');
+  const b = ctx.body || {};
+  const content = sField(b.content, 500);
+  if (!content) throw new HttpError(400, '留言内容不能为空');
+  const nickname = sField(b.nickname, 20) || '匿名';
+  const topic = sField(b.topic, 20);
+  const info = db.prepare('INSERT INTO guestbook (nickname, content, topic, created_at) VALUES (?, ?, ?, ?)')
+    .run(nickname, content, topic, nowStr());
+  return db.prepare('SELECT id, nickname, content, likes, topic, created_at FROM guestbook WHERE id = ?').get(Number(info.lastInsertRowid));
+});
+
+// 点赞：访客可点，按 IP 限速（比发帖宽松）；无身份体系，服务端只做频控，防刷同浏览器去重在前端 localStorage
+route('POST', '/api/guestbook/:id/like', (ctx) => {
+  const ip = (ctx.req.socket && ctx.req.socket.remoteAddress) || '?';
+  if (!guestbookLikeRateOk(ip)) throw new HttpError(429, '点赞太频繁，稍后再说');
+  const id = Number(ctx.params.id);
+  if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
+  const info = db.prepare('UPDATE guestbook SET likes = likes + 1 WHERE id = ?').run(id);
+  if (!info.changes) throw new HttpError(404, '留言不存在');
+  return { ok: true, likes: db.prepare('SELECT likes FROM guestbook WHERE id = ?').get(id).likes };
+});
+
+route('DELETE', '/api/guestbook/:id', (ctx) => {
+  if (!authOk(ctx.req)) throw new HttpError(401, '需要管理员登录');
+  const id = Number(ctx.params.id);
+  if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
+  const info = db.prepare('DELETE FROM guestbook WHERE id = ?').run(id);
+  if (!info.changes) throw new HttpError(404, '留言不存在');
+  audit(ctx, '删除留言', 'id=' + id);
+  return { ok: true };
 });
 
 /* ---------- 班徽背景（生日页可自定义水印，可选） ---------- */
@@ -1978,7 +2127,7 @@ route('POST', '/api/import', (ctx) => {
     throw new HttpError(400, '备份文件格式不对（缺少 groups / messages）');
   }
   // 非空库一律拒绝（force=1 除外）：检查全部业务表，防止只有名单/生日等数据时被误判为空库而重复导入
-  const exist = ['messages', 'groups', 'attachments', 'inbox', 'jielongs', 'jielong_entries', 'draws', 'draw_rounds', 'rosters', 'birthdays', 'votes', 'vote_ballots', 'funds']
+  const exist = ['messages', 'groups', 'attachments', 'inbox', 'jielongs', 'jielong_entries', 'draws', 'draw_rounds', 'rosters', 'birthdays', 'votes', 'vote_ballots', 'funds', 'guestbook']
     .reduce((sum, t) => sum + db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get().c, 0);
   if (exist > 0 && ctx.query.get('force') !== '1') {
     throw new HttpError(400, '当前已有数据，为防止重复导入被拒绝。请先用空数据文件夹再导入');
@@ -1986,7 +2135,7 @@ route('POST', '/api/import', (ctx) => {
   // force=1 为合并导入：接龙/抽签按原 id 替换（记录先清后插，保证重导同一份备份结果一致），
   // 群按 ext_key 合并，名单同名覆盖，生日同名同生日跳过——否则固定主键撞唯一索引必然整体回滚
   const force = ctx.query.get('force') === '1';
-  let n = 0, nAtt = 0, nGroups = 0, nJl = 0, nJlE = 0, nDw = 0, nDwR = 0, nRs = 0, nBd = 0, nV = 0, nVB = 0, nFn = 0, nFA = 0;
+  let n = 0, nAtt = 0, nGroups = 0, nJl = 0, nJlE = 0, nDw = 0, nDwR = 0, nRs = 0, nBd = 0, nV = 0, nVB = 0, nFn = 0, nFA = 0, nGb = 0;
   db.exec('BEGIN'); // 整体导入：任何一步失败就整体回滚，不残留半截数据
   try {
     const insG = db.prepare('INSERT INTO groups (name, platform, color, remark, ext_key, created_at) VALUES (?, ?, ?, ?, ?, ?)');
@@ -2169,7 +2318,10 @@ route('POST', '/api/import', (ctx) => {
       if (!type || !fen) continue;
       const note = sField(g.note, 200);
       const happened = cleanDT(g.happened_at) || nowStr().slice(0, 10);
-      if (force && db.prepare('SELECT id FROM funds WHERE type = ? AND amount = ? AND happened_at = ? AND note = ?').get(type, fen, happened, note)) continue; // 重导幂等
+      if (force) {
+        const dup = db.prepare('SELECT id FROM funds WHERE type = ? AND amount = ? AND happened_at = ? AND note = ?').get(type, fen, happened, note);
+        if (dup) { if (g.id != null) fMap[String(g.id)] = dup.id; continue; } // 重导幂等；仍登记 id 映射，其凭证才能挂回
+      }
       const ins = insF.run(type, fen, note, happened, cleanDT(g.created_at) || nowStr(), cleanDT(g.updated_at) || nowStr());
       if (g.id != null) fMap[String(g.id)] = Number(ins.lastInsertRowid);
       nFn++;
@@ -2189,11 +2341,25 @@ route('POST', '/api/import', (ctx) => {
       nFA++;
     }
   }
+  // 恢复留言寄语（内容为空的跳过；昵称与正文按当前口径截断；点赞数与主题取备份值）
+  if (Array.isArray(b.guestbook)) {
+    const insGB = db.prepare('INSERT INTO guestbook (nickname, content, likes, topic, created_at) VALUES (?, ?, ?, ?, ?)');
+    for (const g of b.guestbook) {
+      const content = sField(g.content, 500);
+      if (!content) continue;
+      const nickname = sField(g.nickname, 20) || '匿名';
+      const created = cleanDT(g.created_at) || nowStr();
+      if (force && db.prepare('SELECT id FROM guestbook WHERE nickname = ? AND content = ? AND created_at = ?').get(nickname, content, created)) continue; // 重导幂等
+      insGB.run(nickname, content, Math.max(0, Number(g.likes) || 0), sField(g.topic, 20), created);
+      nGb++;
+    }
+  }
   // 恢复投票与选票（id 随机字符串主键原样保留；选票按 vote_id 直接挂回）
   if (Array.isArray(b.votes)) {
-    const insV = db.prepare(`${force ? 'INSERT OR REPLACE' : 'INSERT'} INTO votes (id, title, description, deadline, closed, anonymous, require_sid, roster, options, max_select, admin_token, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const insV = db.prepare(`${force ? 'INSERT OR REPLACE' : 'INSERT'} INTO votes (id, title, description, deadline, closed, anonymous, require_sid, roster, options, max_select, reveal, allow_change, admin_token, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const vIds = new Set();
+    const REVEALS = ['always', 'after_vote', 'after_close'];
     for (const g of b.votes) {
       const id = /^[a-z0-9]{3,32}$/.test(String(g.id || '')) ? String(g.id) : JL.genId(7);
       if (vIds.has(id)) throw new Error('备份中存在重复的投票 id：' + id);
@@ -2207,6 +2373,8 @@ route('POST', '/api/import', (ctx) => {
         asJsonText(g.roster, '[]'),
         asJsonText(g.options, '[]'),
         Math.max(1, Number(g.max_select) || 1),
+        REVEALS.includes(g.reveal) ? g.reveal : 'always',
+        g.allow_change === 0 || g.allowChange === false ? 0 : 1,
         sField(g.admin_token, 64),
         Math.max(0, Number(g.created_at) || Date.now()));
       vIds.add(id);
@@ -2233,11 +2401,11 @@ route('POST', '/api/import', (ctx) => {
     db.exec('ROLLBACK');
     throw new HttpError(500, '导入失败已整体回滚（' + e.message + '），数据库未变动');
   }
-  const summary = `${nGroups} 个群、${n} 条信息、${nAtt} 条附件记录、${nJl} 个接龙、${nJlE} 条接龙记录、${nDw} 个抽签、${nDwR} 轮抽签历史、${nV} 个投票、${nVB} 张选票、${nRs} 份名单、${nBd} 位生日成员、${nFn} 条班费记录、${nFA} 个班费凭证`;
+  const summary = `${nGroups} 个群、${n} 条信息、${nAtt} 条附件记录、${nJl} 个接龙、${nJlE} 条接龙记录、${nDw} 个抽签、${nDwR} 轮抽签历史、${nV} 个投票、${nVB} 张选票、${nRs} 份名单、${nBd} 位生日成员、${nFn} 条班费记录、${nFA} 个班费凭证、${nGb} 条留言`;
   console.log('导入备份：' + summary);
   log('导入备份：' + summary);
   audit(ctx, '导入备份', summary);
-  return { ok: true, groups: nGroups, imported: n, attachments: nAtt, jielongs: nJl, jielongEntries: nJlE, draws: nDw, drawRounds: nDwR, votes: nV, voteBallots: nVB, rosters: nRs, birthdays: nBd, funds: nFn, fundAttachments: nFA };
+  return { ok: true, groups: nGroups, imported: n, attachments: nAtt, jielongs: nJl, jielongEntries: nJlE, draws: nDw, drawRounds: nDwR, votes: nV, voteBallots: nVB, rosters: nRs, birthdays: nBd, funds: nFn, fundAttachments: nFA, guestbook: nGb };
 });
 
 /* ---------- 导出 .ics 日历（截止时间进手机系统日历） ---------- */
@@ -2325,12 +2493,13 @@ route('GET', '/api/export', (ctx) => {
     draws: db.prepare('SELECT id, title, roster, per_draw, created_at FROM draws ORDER BY created_at, id').all(),
     drawRounds: db.prepare('SELECT draw_id, picked, count, time FROM draw_rounds ORDER BY draw_id, id').all(),
     // 投票：id 随机字符串主键原样保留，选票按 vote_id 直接挂回
-    votes: db.prepare('SELECT id, title, description, deadline, closed, anonymous, require_sid, roster, options, max_select, admin_token, created_at FROM votes ORDER BY created_at, id').all(),
+    votes: db.prepare('SELECT id, title, description, deadline, closed, anonymous, require_sid, roster, options, max_select, reveal, allow_change, admin_token, created_at FROM votes ORDER BY created_at, id').all(),
     voteBallots: db.prepare('SELECT vote_id, rid, sid, name, choices, time FROM vote_ballots ORDER BY vote_id, id').all(),
     rosters: db.prepare('SELECT * FROM rosters ORDER BY id').all(),
     birthdays: db.prepare('SELECT id, name, month, day, year, note, created_at FROM birthdays ORDER BY id').all(),
     funds: db.prepare('SELECT id, type, amount, note, happened_at, created_at, updated_at FROM funds ORDER BY id').all(),
     fundAttachments: db.prepare('SELECT id, fund_id, orig_name, stored_name, size, mime, created_at FROM fund_attachments ORDER BY id').all(),
+    guestbook: db.prepare('SELECT id, nickname, content, likes, topic, created_at FROM guestbook ORDER BY id').all(),
   };
   const body = JSON.stringify(dump, null, 2);
   audit(ctx, '导出备份', Object.keys(dump).length + ' 类数据');
@@ -2397,6 +2566,7 @@ const server = http.createServer(async (req, res) => {
     if (CONFIG.password && !authOk(req)
       && !norm.startsWith('/api/jielong')
       && !norm.startsWith('/api/vote')
+      && !norm.startsWith('/api/guestbook')
       && !['/api/login', '/api/logout', '/api/me', '/api/health', '/api/ingest', '/api/parse',
         '/api/onebot/report', '/api/onebot'].includes(norm)
       && (req.method !== 'GET' || ['/api/config', '/api/export', '/api/inbox', '/api/rosters'].includes(norm))) {
@@ -2458,6 +2628,8 @@ setInterval(() => {
   const now = Date.now();
   for (const [k, t] of sessions) if (now - t > SESSION_TTL) sessions.delete(k);
   for (const [ip, rec] of loginFails) if (now - rec.t > 10 * 60 * 1000) loginFails.delete(ip); // 10 分钟无新失败即清
+  for (const [ip, arr] of gbPosts) { const kept = arr.filter((t) => now - t < 60000); if (kept.length) gbPosts.set(ip, kept); else gbPosts.delete(ip); }
+  for (const [ip, arr] of gbLikes) { const kept = arr.filter((t) => now - t < 60000); if (kept.length) gbLikes.set(ip, kept); else gbLikes.delete(ip); }
 }, 60 * 60 * 1000);
 // systemd / Docker 停止时优雅关闭：先停接新连接，3 秒后强制退出兜底
 process.on('SIGTERM', () => {

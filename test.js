@@ -146,6 +146,28 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   const fa0 = r.body.items[0] || {};
   ok('附件下载计数（强制下载 2 次，缩略图不计）', fa0.downloads === 2 && fa0.views === 0, JSON.stringify(fa0));
 
+  // 6.6 multipart 边界与字段名解析（RFC 的分隔符是「行首 + --boundary」，正文「行中」恰好出现
+  //     "--boundary" 字符串时不能被误认成边界；Content-Disposition 里 filename 排在 name 之前也要取对字段名；
+  //     首边界前只用 \n 换行的客户端不能整份解析不出来）
+  for (const [label, lead] of [['CRLF 起始', Buffer.alloc(0)], ['前导裸 LF', Buffer.from('\n')]]) {
+    const bd = '----infoboundary' + Date.now();
+    const edgeBody = Buffer.from(`第一行\r\n这一行中段有--${bd}--结尾，不是边界\r\n第三行 保留\r\n`, 'utf8');
+    const mp3 = Buffer.concat([lead,
+      Buffer.from(`--${bd}\r\nContent-Disposition: form-data; name="message_id"\r\n\r\n${mid}\r\n`),
+      Buffer.from(`--${bd}\r\nContent-Disposition: form-data; filename="自检边界.txt"; name="files"\r\nContent-Type: text/plain\r\n\r\n`),
+      edgeBody, Buffer.from(`\r\n--${bd}--\r\n`),
+    ]);
+    const rr = await j('/api/upload', { method: 'POST', headers: { 'Content-Type': 'multipart/form-data; boundary=' + bd }, body: new Uint8Array(mp3) });
+    const eid = rr.body.ids && rr.body.ids[0];
+    ok(`multipart ${label}：正确识别字段（filename 在 name 前）`, rr.status === 200 && eid > 0, JSON.stringify(rr.body));
+    if (eid) {
+      const ed = await fetch(`${BASE}/api/attachments/${eid}/download`);
+      const eb = Buffer.from(await ed.arrayBuffer());
+      ok(`multipart ${label}：文件逐字节完整（未被行中伪边界截断）`, eb.equals(edgeBody), JSON.stringify({ got: eb.length, want: edgeBody.length }));
+      await j('/api/attachments/' + eid, { method: 'DELETE' });
+    }
+  }
+
   // 图片：打开（Sec-Fetch-Dest: document）计阅读，内嵌渲染（image）不计
   const http = require('http');
   const fetchWithDest = (path2, dest) => new Promise((resolve, reject) => {
@@ -209,6 +231,11 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   ok('智能解析保留分钟（16:30）', r.status === 200 && (r.body.parsed.deadline || '').endsWith('16:30'), JSON.stringify(r.body.parsed));
   r = await post('/api/parse', { text: '明天下午4点半前交回执' });
   ok('智能解析「点半」（16:30）', r.status === 200 && (r.body.parsed.deadline || '').endsWith('16:30'), JSON.stringify(r.body.parsed));
+  // 带显式年份的数字日期：年份照用（不顺延），且不能被「月/日」弱匹配抢先解析成别的月份
+  for (const [txt, want] of [['2027/3/5 前交回执', '2027-03-05'], ['截止 2027-3-5', '2027-03-05'], ['2025/1/5 前完成', '2025-01-05']]) {
+    r = await post('/api/parse', { text: txt });
+    ok('智能解析显式年份日期 ' + txt, r.status === 200 && (r.body.parsed.deadline || '').startsWith(want), JSON.stringify(r.body.parsed));
+  }
 
   // 7.5 相似检测与 .ics 日历
   r = await post('/api/similar', { text: '自检信息的内容包含唯一标记' });
@@ -646,6 +673,56 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   ok('删除后详情 404', r.status === 404);
   await j('/api/rosters/' + voteRosterId, { method: 'DELETE' });
 
+  // 15.55 结果可见时机（always/after_vote/after_close）+ 是否允许改票
+  r = await post('/api/vote', { title: '可见性投票', optionsRaw: '赞成\n反对\n弃权', rosterRaw: '张三\n李四', reveal: 'after_close', allowChange: false });
+  const vidV = r.body.id, tokV = r.body.adminToken;
+  ok('创建投票带可见性/改票设置', r.status === 200 && !!vidV && !!tokV, JSON.stringify(r.body));
+  r = await j(`/api/vote/${vidV}?t=${encodeURIComponent(tokV)}`);
+  ok('发起人始终可见票数且返回 reveal/allowChange', r.status === 200 && Array.isArray(r.body.tally) && r.body.reveal === 'after_close' && r.body.allowChange === false, JSON.stringify({ reveal: r.body.reveal, allowChange: r.body.allowChange }));
+  {
+    const g = await (await fetch(`${BASE}/api/vote/${vidV}`)).json();
+    if (authRequired) ok('after_close：投票中访客看不到各选项票数', g.tallyHidden === true && g.tally === undefined, JSON.stringify(g));
+    else ok('after_close：无密码部署访客即管理员，票数可见', Array.isArray(g.tally));
+  }
+  {
+    const b1 = await fetch(`${BASE}/api/vote/${vidV}/ballot`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '张三', choices: ['o0'] }) });
+    const j1 = await b1.json().catch(() => ({}));
+    ok('首次投票成功并返回本人 rid', b1.status === 200 && Number.isInteger(j1.rid), JSON.stringify(j1));
+    const b2 = await fetch(`${BASE}/api/vote/${vidV}/ballot`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '张三', choices: ['o1'] }) });
+    if (authRequired) ok('禁止改票：已投者重复提交被拒（409）', b2.status === 409, 'status=' + b2.status);
+    else ok('无密码部署：访客即管理员可改票', b2.status === 200);
+  }
+  r = await post('/api/vote', { title: '投票后可见', optionsRaw: 'A\nB', rosterRaw: '张三\n李四', reveal: 'after_vote' });
+  const vidW = r.body.id, tokW = r.body.adminToken;
+  {
+    const g0 = await (await fetch(`${BASE}/api/vote/${vidW}`)).json();
+    if (authRequired) ok('after_vote：未投时访客看不到票数', g0.tallyHidden === true, JSON.stringify(g0));
+    const bv = await fetch(`${BASE}/api/vote/${vidW}/ballot`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '张三', choices: ['o0'] }) });
+    const jv = await bv.json().catch(() => ({}));
+    const g1 = await (await fetch(`${BASE}/api/vote/${vidW}?voted_rid=${jv.rid}`)).json();
+    ok('after_vote：投过票凭 voted_rid 解锁各选项票数', Array.isArray(g1.tally) && g1.tallyHidden !== true, JSON.stringify({ hidden: g1.tallyHidden, tally: g1.tally }));
+  }
+  await j(`/api/vote/${vidV}?t=${encodeURIComponent(tokV)}`, { method: 'DELETE' });
+  await j(`/api/vote/${vidW}?t=${encodeURIComponent(tokW)}`, { method: 'DELETE' });
+
+  // 15.56 编辑：追加选项 / 追加名单 / 改可见性（只增不改，不动已有选票指向）
+  r = await post('/api/vote', { title: '追加测试', optionsRaw: 'A\nB', rosterRaw: '张三\n李四' });
+  const vidA = r.body.id, tokA = r.body.adminToken;
+  await post(`/api/vote/${vidA}/ballot`, { name: '张三', choices: ['o0'] });
+  r = await j(`/api/vote/${vidA}?t=${encodeURIComponent(tokA)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ optionsAppend: 'C\nD', rosterAppendRaw: '王五', reveal: 'after_close', allowChange: false }) });
+  ok('编辑追加选项/名单/改可见性', r.status === 200 && r.body.ok === true, JSON.stringify(r.body));
+  r = await j(`/api/vote/${vidA}?t=${encodeURIComponent(tokA)}`);
+  ok('追加后选项含新 key 且旧票不丢', r.body.options.length === 4 && r.body.options[2].key === 'o2' && r.body.options[3].key === 'o3'
+    && r.body.done === 1 && r.body.tally.find((t) => t.key === 'o0').votes === 1, JSON.stringify({ opts: r.body.options.map((o) => o.key), done: r.body.done }));
+  ok('追加后名单 3 人、未投名单 2 人', r.body.roster.length === 3 && (r.body.missing || []).length === 2, JSON.stringify({ roster: r.body.roster.length, missing: (r.body.missing || []).length }));
+  ok('编辑改了 reveal/allow_change', r.body.reveal === 'after_close' && r.body.allowChange === false);
+  r = await post(`/api/vote/${vidA}/ballot`, { name: '王五', choices: ['o2'] });
+  ok('追加的名单成员可投票（新选项也生效）', r.status === 200 && r.body.ok === true);
+  await j(`/api/vote/${vidA}?t=${encodeURIComponent(tokA)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rosterAppendRaw: '王五' }) });
+  r = await j(`/api/vote/${vidA}?t=${encodeURIComponent(tokA)}`);
+  ok('重复追加名单去重', r.body.roster.length === 3, 'roster=' + r.body.roster.length);
+  await j(`/api/vote/${vidA}?t=${encodeURIComponent(tokA)}`, { method: 'DELETE' });
+
   // 15.6 需学号验证的投票（防冒名）
   r = await post('/api/rosters', { name: '自检学号名单', rosterRaw: '2023001 张三\n2023002 李四', keepId: true });
   const sidRosterId = r.body.id;
@@ -672,11 +749,71 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   r = await post(`/api/vote/${vid2}/ballot`, { name: '张三', choices: ['o1'] });
   ok('裸姓名改票被拒（400）', r.status === 400);
   r = await post(`/api/vote/${vid2}/ballot`, { rid: 1, name: '李四', via: 'u', choices: ['o1'] });
-  ok('专属链接 ?u= 豁免学号验证', r.status === 200);
-  // 回归：学生页提交选票必须携带 via:'u'，否则「需学号验证」投票的专属链接打不开票
-  // （服务端豁免依赖该字段；学生页是静态 HTML，这里做源码金丝雀防止前后端契约回退）
+  ok('专属链接不再豁免学号验证（自报 via:"u" 被忽略，仍 400）', r.status === 400, 'status=' + r.status);
+  r = await post(`/api/vote/${vid2}/ballot`, { rid: 1, name: '李四', sid: '2023002', choices: ['o1'] });
+  ok('专属链接槽位 + 本人学号可投票', r.status === 200 && r.body.rid === 1, JSON.stringify(r.body));
+  // 回归：学生页不得再携带豁免标记——历史上 via:'u' 是客户端自报字段，
+  // 而姓名对访客公开，等于任何知道同学姓名的人都能顶替其投票
   const votePageSrc = await (await fetch(BASE + '/v/smoke')).text();
-  ok('学生页投票提交携带 via:\'u\'（专属链接豁免回归）', /via\s*:[^,}]*['"]u['"]/.test(votePageSrc));
+  ok('学生页不再携带 via 豁免字段', !/\bvia\s*:/.test(votePageSrc));
+  // 回归：需学号验证时姓名格与学号格分开提交（学生页只拿到打码名单，学号必须由 sid 字段单独送）
+  ok('学生页有独立的学号输入格并提交 sid', /<input[^>]*id="sid"/.test(votePageSrc)
+    && /\$\('#sid'\)\.value/.test(votePageSrc) && /body:JSON\.stringify\(\{[^}]*\bsid\b/.test(votePageSrc));
+
+  // 15.57 需学号验证 + 名单重名：姓名分不出人，服务端按学号在同名槽位里定位本人
+  r = await post('/api/vote', { title: '自检重名学号投票', optionsRaw: '赞成\n反对', anonymous: false, requireSid: true, keepId: true, rosterRaw: '2023001 王坤\n2023002 王坤' });
+  const vidTwin = r.body.id, tokTwin = r.body.adminToken;
+  r = await post(`/api/vote/${vidTwin}/ballot`, { name: '王坤', choices: ['o0'] });
+  ok('重名且未填学号 → 409 要求学号', r.status === 409, 'status=' + r.status);
+  r = await post(`/api/vote/${vidTwin}/ballot`, { name: '王坤', sid: '9999', choices: ['o0'] });
+  ok('重名且学号对不上被拒（409）', r.status === 409, 'status=' + r.status);
+  r = await post(`/api/vote/${vidTwin}/ballot`, { name: '王坤', sid: '2023002', choices: ['o0'] });
+  ok('重名时按学号定位到本人槽位', r.status === 200 && r.body.rid === 1, JSON.stringify(r.body));
+  r = await post(`/api/vote/${vidTwin}/ballot`, { name: '王坤', sid: '2023001', choices: ['o1'] });
+  ok('同名另一人凭自己学号各投一票', r.status === 200 && r.body.rid === 0, JSON.stringify(r.body));
+  r = await j(`/api/vote/${vidTwin}?t=${encodeURIComponent(tokTwin)}`);
+  ok('两张选票分别落在两个槽位', r.body.done === 2 && (r.body.ballots || []).length === 2
+    && r.body.ballots.some((x) => x.rid === 0 && x.sid === '2023001') && r.body.ballots.some((x) => x.rid === 1 && x.sid === '2023002'), JSON.stringify(r.body.ballots));
+  await j(`/api/vote/${vidTwin}?t=${encodeURIComponent(tokTwin)}`, { method: 'DELETE' });
+
+  // 15.60 记名投票的选票明细：不得把学号发给访客；结果未到可见时机时明细整体不下发
+  r = await post('/api/vote', { title: '自检明细学号泄露', optionsRaw: '赞成\n反对', anonymous: false, requireSid: true, keepId: true, rosterRaw: '2023001 张三\n2023002 李四', reveal: 'after_close' });
+  const vidLeak = r.body.id, tokLeak = r.body.adminToken;
+  await post(`/api/vote/${vidLeak}/ballot`, { name: '张三', sid: '2023001', choices: ['o0'] });
+  {
+    const g = await (await fetch(`${BASE}/api/vote/${vidLeak}`)).json();
+    ok('结果未可见时访客拿不到选票明细', g.tallyHidden === true && g.ballots === undefined, JSON.stringify(Object.keys(g)));
+    const gm = await (await fetch(`${BASE}/api/vote/${vidLeak}?t=${encodeURIComponent(tokLeak)}`)).json();
+    ok('发起人视角明细含学号（核对冒票用）', Array.isArray(gm.ballots) && gm.ballots[0] && gm.ballots[0].sid === '2023001', JSON.stringify(gm.ballots));
+    await post(`/api/vote/${vidLeak}/stop?t=${encodeURIComponent(tokLeak)}`, {});
+    const g2 = await (await fetch(`${BASE}/api/vote/${vidLeak}`)).json();
+    ok('结束后访客可见明细，但明细里不含学号', Array.isArray(g2.ballots) && g2.ballots.length === 1 && !('sid' in g2.ballots[0]), JSON.stringify(g2.ballots));
+    const g2r = await (await fetch(`${BASE}/api/vote/${vidLeak}`)).json();
+    ok('结束后访客仍拿不到名单学号', (g2r.roster || []).every((x) => !x.id), JSON.stringify(g2r.roster));
+  }
+  await j(`/api/vote/${vidLeak}?t=${encodeURIComponent(tokLeak)}`, { method: 'DELETE' });
+
+  // 15.61 需学号验证但名单里没学号 = 死票（学生填任何学号都过不了校验），发起与追加名单时就要拦住
+  r = await post('/api/vote', { title: '自检死票拦截', optionsRaw: '赞成\n反对', requireSid: true, rosterRaw: '张三\n李四' });
+  ok('需学号验证 + 名单无学号 → 拒绝发起（400）', r.status === 400, JSON.stringify(r.body));
+  if (r.body && r.body.id) await j('/api/vote/' + r.body.id, { method: 'DELETE' });
+  r = await post('/api/rosters', { name: '自检无学号名单', rosterRaw: '张三\n李四', keepId: false });
+  const noIdRosterId = r.body.id;
+  created.rosters.push(noIdRosterId);
+  r = await post('/api/vote', { title: '自检死票拦截2', optionsRaw: '赞成\n反对', requireSid: true, rosterId: noIdRosterId });
+  ok('选了未勾选「保留学号」的名单 → 拒绝发起（400）', r.status === 400, JSON.stringify(r.body));
+  if (r.body && r.body.id) await j('/api/vote/' + r.body.id, { method: 'DELETE' });
+  await j('/api/rosters/' + noIdRosterId, { method: 'DELETE' });
+  r = await post('/api/vote', { title: '自检死票拦截3', optionsRaw: '赞成\n反对', requireSid: true, keepId: true, rosterRaw: '2023001 张三\n2023002 李四' });
+  const vidNoId = r.body.id, tokNoId = r.body.adminToken;
+  ok('名单带学号时可正常发起', r.status === 200 && !!vidNoId, JSON.stringify(r.body));
+  r = await j(`/api/vote/${vidNoId}?t=${encodeURIComponent(tokNoId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rosterAppendRaw: '王五' }) });
+  ok('给需学号验证的投票追加无学号成员 → 拒绝（400）', r.status === 400, JSON.stringify(r.body));
+  r = await j(`/api/vote/${vidNoId}?t=${encodeURIComponent(tokNoId)}`);
+  ok('被拒绝的追加没有改动名单', r.status === 200 && r.body.roster.length === 2, JSON.stringify(r.body.roster));
+  r = await j(`/api/vote/${vidNoId}?t=${encodeURIComponent(tokNoId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rosterAppendRaw: '2023003 王五', rosterAppendKeepId: true }) });
+  ok('带学号且声明保留学号时可追加', r.status === 200, JSON.stringify(r.body));
+  await j(`/api/vote/${vidNoId}?t=${encodeURIComponent(tokNoId)}`, { method: 'DELETE' });
   // 编辑投票：说明与截止传空串即清空（显式字段语义）
   r = await post('/api/vote', { title: '自检编辑投票', optionsRaw: '赞成\n反对', rosterRaw: '张三\n李四', deadline: '2030-01-01 10:00' });
   const vidEdit = r.body.id;
@@ -767,6 +904,14 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   ok('搜索命中本次自检记录', r.status === 200 && r.body.items.length === 2, 'count=' + (r.body.items || []).length);
   r = await j('/api/funds?from=2000-01-01&to=2999-12-31');
   ok('日期区间筛选包含自检记录', r.status === 200 && r.body.items.some((x) => String(x.id) === String(incomeId)));
+  // 回归：纯日期账目在「起止同一天」的区间里不能被漏掉（曾因 'YYYY-MM-DD' < 'YYYY-MM-DD 00:00' 字符串比较而丢当天数据）
+  {
+    const day = new Date().toISOString().slice(0, 10);
+    const rd = await post('/api/funds', { type: 'expense', amount: 5.5, note: '当天账目', happened_at: day });
+    if (rd.body && rd.body.id) created.funds.push(rd.body.id);
+    const rf = await j('/api/funds?from=' + day + '&to=' + day);
+    ok('起止同一天含当天纯日期账目', rf.status === 200 && rf.body.items.some((x) => String(x.id) === String(rd.body.id)), JSON.stringify(rf.body.items.map((x) => x.id)));
+  }
 
   r = await j('/api/funds/' + incomeId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: 620, note: TAG + '改后' }) });
   ok('编辑金额生效', r.status === 200 && r.body.amount === 620, JSON.stringify(r.body));
@@ -776,6 +921,19 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
   ok('CSV 导出为 text/csv', fundCsv.status === 200 && (fundCsv.headers.get('content-type') || '').includes('text/csv'));
   ok('CSV 带 BOM 与表头', fundCsvText.startsWith('') && fundCsvText.includes('金额(元)'));
   ok('CSV 含明细与结余合计行', fundCsvText.includes(TAG) && fundCsvText.includes('结余'));
+  // 负结余必须仍是数值格：公式注入的中和一度把 '-' 开头一律加前缀，按「支出」筛选时结余必为负，
+  // 结果导出成文本 '-xx.xx'，Excel 里不能参与求和
+  {
+    const csvExp = await (await fetch(BASE + '/api/funds/export?type=expense&q=' + encodeURIComponent(TAG))).text();
+    const bal = (csvExp.match(/结余,(-?[\d.]+)/) || [])[1];
+    ok('按支出筛选时负结余仍是数值（没被加单引号成文本）', /^-\d+\.\d{2}$/.test(String(bal)), '结余=' + bal);
+  }
+  {
+    const rn = await post('/api/funds', { type: 'expense', amount: 100, note: '=1+3 自检公式' });
+    if (rn.body && rn.body.id) created.funds.push(rn.body.id);
+    const csvInj = await (await fetch(BASE + '/api/funds/export?q=' + encodeURIComponent('=1+3 自检公式'))).text();
+    ok('备注以 = 开头仍被加前缀中和（Excel 公式注入）', csvInj.includes("'=1+3 自检公式"), JSON.stringify(csvInj.split('\r\n').slice(0, 2)));
+  }
 
   // 17b. 班费凭证附件：上传 / 内联元数据 / 下载 / 删除 / 级联
   r = await post('/api/funds', { type: 'expense', amount: 12.3, note: TAG + '凭证笔' });
@@ -831,10 +989,77 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
     ok('审计日志记录删除班费记录', auditText.includes('删除班费记录'));
   } catch (e) { ok('审计日志记录删除班费记录', false, 'audit.log 不存在'); }
 
+  // 18. 留言寄语（访客可写的公开留言板）
+  created.guestbook = created.guestbook || [];
+  const GB_TAG = '自检留言' + Date.now();
+  // 发布按 IP 限速 6 条/分钟：紧接上一轮自检再跑会撞上窗口，撞上就等窗口滑过去再试一次
+  const gbPost = async (body, anon) => {
+    for (let i = 0; i < 6; i++) {
+      const rr = await fetch(BASE + '/api/guestbook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(anon || !cookie ? {} : { Cookie: cookie }) },
+        body: JSON.stringify(body),
+      });
+      if (rr.status !== 429) return { status: rr.status, body: await rr.json().catch(() => ({})) };
+      await new Promise((res) => setTimeout(res, 12000));
+    }
+    return { status: 429, body: {} };
+  };
+  r = await gbPost({ nickname: '同学甲', content: GB_TAG + '第一句' });
+  ok('发布留言', r.status === 200 && r.body.id && r.body.nickname === '同学甲', JSON.stringify(r.body));
+  const gbId = r.body && r.body.id;
+  if (gbId) created.guestbook.push(gbId);
+  r = await gbPost({ content: '   ' });
+  ok('空内容被拒（400）', r.status === 400);
+  r = await j('/api/guestbook');
+  ok('留言列表可见', r.status === 200 && r.body.items.some((x) => String(x.id) === String(gbId)), JSON.stringify(r.body.items && r.body.items[0]));
+  r = await j('/api/guestbook?limit=1');
+  ok('留言分页 limit 生效', r.status === 200 && r.body.items.length === 1 && r.body.total >= 1, 'total=' + (r.body && r.body.total));
+  const gbAnon = await gbPost({ content: GB_TAG + '访客句' }, true);
+  const gbAnonBody = gbAnon.body;
+  ok('访客可发布（开放写入）', gbAnon.status === 200, 'status=' + gbAnon.status);
+  if (gbAnonBody && gbAnonBody.id) created.guestbook.push(gbAnonBody.id);
+  // 点赞（访客可写的公开接口）+ 热度排序
+  r = await post('/api/guestbook/' + gbId + '/like', {});
+  ok('点赞计数递增', r.status === 200 && r.body.likes >= 1, JSON.stringify(r.body));
+  const gbAnonLike = await fetch(BASE + '/api/guestbook/' + gbId + '/like', { method: 'POST' });
+  ok('访客可点赞（开放写入）', gbAnonLike.status === 200, 'status=' + gbAnonLike.status);
+  r = await j('/api/guestbook?sort=hot');
+  ok('列表返回 likes 字段', r.status === 200 && r.body.items.every((x) => typeof x.likes === 'number'));
+  ok('最热排序按点赞降序（赞过的排第一）', r.status === 200 && r.body.items[0] && String(r.body.items[0].id) === String(gbId), JSON.stringify(r.body.items.slice(0, 3).map((x) => [x.id, x.likes])));
+  r = await j('/api/guestbook/99999999/like', { method: 'POST' });
+  ok('给不存在的留言点赞被拒（404）', r.status === 404);
+  // 主题（一面墙按主题筛选：如「AI课反馈」「给张三」）——放在限速用例前，避免额度被刷爆
+  const GB_TOPIC = '自检主题' + Date.now();
+  r = await gbPost({ nickname: '同学乙', content: GB_TAG + '主题句', topic: GB_TOPIC });
+  ok('带主题发布', r.status === 200 && r.body.topic === GB_TOPIC, JSON.stringify(r.body));
+  const gbTopicId = r.body && r.body.id;
+  if (gbTopicId) created.guestbook.push(gbTopicId);
+  r = await j('/api/guestbook?topic=' + encodeURIComponent(GB_TOPIC));
+  ok('按主题筛选只含该主题', r.status === 200 && r.body.items.length === 1 && String(r.body.items[0].id) === String(gbTopicId), JSON.stringify(r.body.items));
+  ok('topics 聚合含该主题计数', (r.body.topics || []).some((t) => t.topic === GB_TOPIC && t.count === 1), JSON.stringify(r.body.topics));
+  if (authRequired) {
+    const gbAnonDel = await fetch(BASE + '/api/guestbook/' + gbId, { method: 'DELETE' });
+    ok('访客删除留言被拒（401）', gbAnonDel.status === 401);
+  }
+  // 限速：6 条/分钟，快速连发应触发 429
+  let got429 = false;
+  for (let i = 0; i < 8 && !got429; i++) {
+    const rr = await fetch(BASE + '/api/guestbook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: GB_TAG + '限' + i }) });
+    if (rr.status === 429) { got429 = true; break; }
+    const bb = await rr.json().catch(() => ({})); if (bb && bb.id) created.guestbook.push(bb.id);
+  }
+  ok('发布限速触发 429', got429);
+  r = await j('/api/guestbook/' + gbId, { method: 'DELETE' });
+  ok('管理员删除留言', r.status === 200);
+  const expGB = await j('/api/export');
+  ok('备份导出含 guestbook 字段', expGB.status === 200 && Array.isArray(expGB.body.guestbook) && expGB.body.guestbook.every((g) => 'likes' in g && 'topic' in g));
+
   // ---- 清理自检数据 ----
   for (const id of created.messages) await j('/api/messages/' + id, { method: 'DELETE' });
   for (const id of created.groups) await j('/api/groups/' + id, { method: 'DELETE' });
   for (const id of created.funds) await j('/api/funds/' + id, { method: 'DELETE' });
+  for (const id of created.guestbook) await j('/api/guestbook/' + id, { method: 'DELETE' });
   console.log(`\n（自检数据已清理：${created.messages.length} 条信息、${created.groups.length} 个群）`);
   console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━`);
   console.log(`结果：${passed} 通过，${failed} 失败`);
@@ -849,6 +1074,7 @@ const post = (path, body) => j(path, { method: 'POST', headers: { 'Content-Type'
     for (const id of created.groups) await j('/api/groups/' + id, { method: 'DELETE' });
     for (const id of (created.rosters || [])) await j('/api/rosters/' + id, { method: 'DELETE' });
     for (const id of (created.funds || [])) await j('/api/funds/' + id, { method: 'DELETE' });
+    for (const id of (created.guestbook || [])) await j('/api/guestbook/' + id, { method: 'DELETE' });
   } catch (e2) { /* 尽力而为 */ }
   process.exit(1);
 });
