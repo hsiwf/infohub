@@ -130,6 +130,8 @@ CREATE TABLE IF NOT EXISTS votes (
   roster TEXT DEFAULT '[]',
   options TEXT DEFAULT '[]',
   max_select INTEGER DEFAULT 1,
+  reveal TEXT DEFAULT 'always',
+  allow_change INTEGER DEFAULT 1,
   admin_token TEXT DEFAULT '',
   created_at INTEGER DEFAULT 0
 );
@@ -160,6 +162,14 @@ CREATE TABLE IF NOT EXISTS fund_attachments (
   mime TEXT DEFAULT '',
   created_at TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS guestbook (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nickname TEXT DEFAULT '',
+  content TEXT NOT NULL,
+  likes INTEGER DEFAULT 0,
+  topic TEXT DEFAULT '',
+  created_at TEXT DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS idx_funds_happened ON funds(happened_at);
 CREATE INDEX IF NOT EXISTS idx_funds_type ON funds(type);
 CREATE INDEX IF NOT EXISTS idx_fatt_fund ON fund_attachments(fund_id);
@@ -184,6 +194,13 @@ const voteCols = db.prepare('PRAGMA table_info(votes)').all();
 if (voteCols.length && !voteCols.some((c) => c.name === 'require_sid')) {
   db.exec('ALTER TABLE votes ADD COLUMN require_sid INTEGER DEFAULT 0');
 }
+// 轻量迁移：投票表补 reveal（结果可见时机 always/after_vote/after_close）与 allow_change（是否允许改票）
+if (voteCols.length && !voteCols.some((c) => c.name === 'reveal')) {
+  db.exec("ALTER TABLE votes ADD COLUMN reveal TEXT DEFAULT 'always'");
+}
+if (voteCols.length && !voteCols.some((c) => c.name === 'allow_change')) {
+  db.exec('ALTER TABLE votes ADD COLUMN allow_change INTEGER DEFAULT 1');
+}
 
 // 轻量迁移：老库补 ext_key 列（QQ 群号等外部标识，机器人上报自动归群用）
 const gcols = db.prepare('PRAGMA table_info(groups)').all();
@@ -206,5 +223,13 @@ const fcols = db.prepare('PRAGMA table_info(funds)').all();
 if (fcols.length && fcols.some((c) => c.name === 'category')) db.exec('ALTER TABLE funds DROP COLUMN category');
 // 轻量迁移：班费去掉 operator（经手人）列（班费本就大家看着，谁经手意义不大，简化录入）
 if (fcols.length && fcols.some((c) => c.name === 'operator')) db.exec('ALTER TABLE funds DROP COLUMN operator');
+// 轻量迁移：留言板补 likes 列（点赞热度；新库建表已含，老库 ALTER 补上）
+const gbcols = db.prepare('PRAGMA table_info(guestbook)').all();
+if (gbcols.length && !gbcols.some((c) => c.name === 'likes')) db.exec('ALTER TABLE guestbook ADD COLUMN likes INTEGER DEFAULT 0');
+// 轻量迁移：留言板补 topic 列（主题/标签，如「AI课反馈」「给张三」，一面墙按主题筛选）
+if (gbcols.length && !gbcols.some((c) => c.name === 'topic')) db.exec("ALTER TABLE guestbook ADD COLUMN topic TEXT DEFAULT ''");
+// 轻量迁移：删掉留言板早先建的 idx_gb_created——guestbook.id 就是 rowid 主键，
+// ORDER BY id DESC 直接走主键，这个索引只多付写入成本
+db.exec('DROP INDEX IF EXISTS idx_gb_created');
 
 module.exports = { db, DATA_DIR, UPLOAD_DIR };

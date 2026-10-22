@@ -49,6 +49,7 @@
   .tally-row .tlabel b{word-break:break-word;margin-right:8px}
   .tally-row .tbar{height:9px;background:var(--bd);border-radius:99px;overflow:hidden}
   .tally-row .tbar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#4f6ef2,#7c5cf5);border-radius:99px;transition:width .4s}
+  .tally-hidden{padding:14px;text-align:center;color:var(--mut,#8a94a6);font-size:14px;background:rgba(127,127,127,.08);border-radius:10px}
   .fl{display:block;font-size:13px;color:var(--tx2);margin:14px 0 6px}
   .req{color:var(--danger)}
   input[type=text],textarea,select{width:100%;padding:10px 12px;border:1px solid var(--bd);border-radius:10px;font-size:15px;font-family:inherit;background:var(--card);color:var(--tx)}
@@ -62,6 +63,7 @@
   .locked-hint{font-size:13px;background:rgba(13,150,104,.08);border:1px solid rgba(13,150,104,.3);border-radius:10px;padding:8px 12px;margin-top:8px}
   .locked-hint a{color:var(--pri);cursor:pointer}
   .ok-banner{background:rgba(13,150,104,.08);border:1px solid rgba(13,150,104,.3);color:var(--ok);border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:6px}
+  .ok-banner a{color:var(--pri);cursor:pointer;text-decoration:underline}
   .warn-banner{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.35);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:6px}
   .btn{display:inline-flex;align-items:center;justify-content:center;background:var(--pri);color:#fff;border:none;border-radius:10px;padding:12px 18px;font-size:15.5px;font-weight:600;cursor:pointer;width:100%;margin-top:16px}
   .btn:disabled{opacity:.55;cursor:default}
@@ -115,6 +117,10 @@
           <div class="sugg" id="sugg" style="display:none"></div>
         </div>
         <div class="match-hint" id="matchHint"></div>
+        <div id="sidRow" style="display:none">
+          <label class="fl">你的学号 <span class="req">*</span></label>
+          <input type="text" id="sid" maxlength="32" placeholder="填写本人学号，仅用于和名单核对" autocomplete="off">
+        </div>
         <div class="locked-hint" id="lockedHint" style="display:none"></div>
         <div id="optBox"></div>
         <button class="btn" id="submitBtn" type="button">投出选票</button>
@@ -150,18 +156,22 @@ async function api(url,opt){
 const VOTE_ID=((location.pathname.match(/\/v\/([a-z0-9]+)/i)||[])[1]||'').toLowerCase();
 let act=null;
 let pickedRid=null;   // 锁定的名单槽位
-let lockedFromUrl=false; // 身份是否仍由专属链接 ?u= 锁定（服务端据此豁免学号验证，解锁后必须重新验证）
 const urlRid=(()=>{
   const raw=new URLSearchParams(location.search).get('u');
   if(raw==null||raw==='')return null;
   const n=Number(raw);
   return Number.isInteger(n)&&n>=0?n:null;
 })();
+// 记住"我投过的名单槽位"（按投票 id 存本地），刷新后凭它向服务端证明已投票以解锁结果可见
+const VOTED_KEY='infohub-voted-'+VOTE_ID;
+function getMyRid(){const s=localStorage.getItem(VOTED_KEY);if(s==null||s==='')return null;const n=Number(s);return Number.isInteger(n)&&n>=0?n:null;}
+function setMyRid(rid){try{if(rid!=null)localStorage.setItem(VOTED_KEY,String(rid));}catch(_){}}
 
 init();
+function myQs(){const my=getMyRid();return my!=null?('?voted_rid='+my):'';}
 async function init(){
   if(!VOTE_ID)return showError('投票不存在或链接有误');
-  try{act=await api('/api/vote/'+VOTE_ID);}
+  try{act=await api('/api/vote/'+VOTE_ID+myQs());}
   catch(e){return showError(e.message);}
   document.title=act.title+' · 投票';
   $('#main').style.display='';
@@ -199,6 +209,11 @@ function renderProgress(){
 }
 
 function renderTally(){
+  if(!Array.isArray(act.tally)){
+    $('#resultCard').style.display='';
+    $('#tallyBox').innerHTML='<div class="tally-hidden">'+(act.reveal==='after_vote'?'完成投票后即可查看各选项票数':'投票结束后可查看票数')+'（当前已 '+act.done+' 人投票）</div>';
+    return;
+  }
   $('#resultCard').style.display='';
   const max=Math.max(1,...act.tally.map((t)=>t.votes));
   const totalVotes=act.tally.reduce((s,t)=>s+t.votes,0);
@@ -218,10 +233,22 @@ function renderBallot(){
     $('#formTitle').textContent='投票结果';
     return;
   }
+  // 关闭改票且本机已投过：锁定表单，不能再改（结果按 reveal 规则展示）
+  if(act.allowChange===false && getMyRid()!=null){
+    $('#formBody').style.display='none';
+    // 「本机记录」按投票 id 存在 localStorage，共用一台设备（班里传着手机填）时会把后来的人挡在门外，
+    // 所以给一个清除入口——真正的去重在服务端按槽位判定，清掉记录不会让人多投
+    $('#okBanner').innerHTML='✓ 你已投票，本次投票不允许修改 <a id="clearVoted">不是本人？清除本机记录</a>';
+    $('#okBanner').style.display='';
+    $('#clearVoted').addEventListener('click',()=>{
+      try{localStorage.removeItem(VOTED_KEY);}catch(_){}
+      location.reload();
+    });
+    return;
+  }
   // 专属链接 ?u= 序号锁定身份
   if(urlRid!=null&&act.roster[urlRid]){
     pickedRid=urlRid;
-    lockedFromUrl=true;
     $('#nameLabel').textContent='投票身份';
     $('#name').value=slotLabel(act.roster[urlRid]);
     $('#name').readOnly=true;
@@ -229,15 +256,17 @@ function renderBallot(){
     $('#lockedHint').style.display='';
     $('#unlockBtn').addEventListener('click',()=>{
       pickedRid=null;
-      lockedFromUrl=false;
       $('#name').readOnly=false;$('#name').value='';
       $('#lockedHint').style.display='none';
       updateMatchHint();
     });
   }
+  // 需学号验证：姓名格按名单联想，学号单独一格（名单里的学号不下发到浏览器，只能由本人填写、服务端核对）。
+  // 专属链接只锁定身份、不豁免学号：服务端要证明的是「本人知道学号」，链接外泄也不能代替
   if(act.requireSid){
-    $('#nameLabel').textContent='你的学号（需学号验证）';
-    $('#name').placeholder='输入你的学号进行投票';
+    $('#nameLabel').textContent='你的姓名';
+    $('#name').placeholder='输入姓名，从名单中选择';
+    $('#sidRow').style.display='';
   }
   renderOptions();
   const nameInput=$('#name');
@@ -267,9 +296,16 @@ function updateSugg(){
   const q=$('#name').value.trim();
   const sugg=$('#sugg');
   if(!q||!act.roster.length){sugg.style.display='none';return;}
-  const m=act.roster.map((r,i)=>({r,i}))
-    .filter((x)=>slotLabel(x.r).includes(q)||x.r.name.includes(q)||(x.r.id&&x.r.id.includes(q)))
-    .slice(0,8);
+  let m=act.roster.map((r,i)=>({r,i}))
+    .filter((x)=>slotLabel(x.r).includes(q)||x.r.name.includes(q)||(x.r.id&&x.r.id.includes(q)));
+  // 需学号验证时名单不下发学号，同名同学在页面上长得一模一样——让他选等于抛硬币。
+  // 只把同名条目摘出候选（不牵连其他唯一姓名的人），本人由服务端按填写的学号在同名槽位里定位
+  if(act.requireSid){
+    const dup=new Set(), seen=new Set();
+    for(const x of m){ if(seen.has(x.r.name)) dup.add(x.r.name); else seen.add(x.r.name); }
+    m=m.filter((x)=>!dup.has(x.r.name));
+  }
+  m=m.slice(0,8);
   if(!m.length){sugg.style.display='none';return;}
   sugg.innerHTML=m.map((x)=>'<div data-i="'+x.i+'">'+esc(slotLabel(x.r))+'</div>').join('');
   sugg.style.display='';
@@ -288,23 +324,29 @@ function updateMatchHint(){
   const q=$('#name').value.trim();
   const h=$('#matchHint');
   if(!q||!act.roster.length){h.innerHTML='';return;}
+  const okMsg=(r)=>'<span class="ok-t">✓ 与名单匹配：'+esc(slotLabel(r))+(act.requireSid?'，再填学号':'')+'</span>';
   if(pickedRid!=null&&act.roster[pickedRid]){
-    h.innerHTML='<span class="ok-t">✓ 与名单匹配：'+esc(slotLabel(act.roster[pickedRid]))+'</span>';
+    h.innerHTML=okMsg(act.roster[pickedRid]);
     return;
   }
   const hits=findHits(q);
   if(hits.length===1){
     pickedRid=hits[0].i;
-    h.innerHTML='<span class="ok-t">✓ 与名单匹配：'+esc(slotLabel(hits[0].r))+'</span>';
+    h.innerHTML=okMsg(hits[0].r);
     return;
   }
-  if(hits.length>1){h.innerHTML='<span class="warn-t">名单中有重名，请输入学号确认身份</span>';return;}
-  h.innerHTML='<span class="warn-t">「'+esc(q)+'」不在投票名单中</span>';
+  if(hits.length>1){
+    h.innerHTML=act.requireSid
+      ? '<span class="warn-t">名单中有同名同学，填写学号即可自动区分</span>'
+      : '<span class="warn-t">名单中有重名，请输入学号确认身份</span>';
+    return;
+  }
+  h.innerHTML='<span class="warn-t">「'+esc(q)+'」不是名单里的姓名'+(act.requireSid?'（学号请填在下面的「学号」栏）':'')+'</span>';
 }
 
 $('#submitBtn').addEventListener('click',async()=>{
   const name=$('#name').value.trim();
-  if(!name){toast('请填写你的姓名或学号');$('#name').focus();return;}
+  if(!name){toast(act.requireSid?'请填写你的姓名':'请填写你的姓名或学号');$('#name').focus();return;}
   const choices=[...document.querySelectorAll('#optBox input:checked')].map((el)=>el.value);
   // 需学号验证的投票：资格名单已对客户端打码（不含学号），名单与学号校验交给服务端
   if(!act.requireSid){
@@ -316,12 +358,17 @@ $('#submitBtn').addEventListener('click',async()=>{
     }
   }
   let sid='';
-  if(!act.requireSid&&pickedRid!=null&&act.roster[pickedRid]&&act.roster[pickedRid].id){sid=act.roster[pickedRid].id;}
+  if(act.requireSid){
+    sid=$('#sid').value.trim();
+    // 专属链接已豁免学号；其余情况学号必须本人填
+    if(!sid){toast('请填写你的学号');$('#sid').focus();return;}
+  }else if(pickedRid!=null&&act.roster[pickedRid]&&act.roster[pickedRid].id){sid=act.roster[pickedRid].id;}
   const btn=$('#submitBtn');
   btn.disabled=true;btn.textContent='提交中…';
   try{
-    // 专属链接锁定的身份视作已验证（服务端豁免字段；解锁后不带，联想选中的姓名仍需学号验证）
-    const r=await api('/api/vote/'+VOTE_ID+'/ballot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rid:pickedRid,name,choices,sid,via:lockedFromUrl?'u':undefined})});
+    // 身份由 rid/姓名 定位，学号靠 sid 字段证明本人（专属链接不再豁免学号验证）
+    const r=await api('/api/vote/'+VOTE_ID+'/ballot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rid:pickedRid,name,choices,sid})});
+    if(r && r.rid!=null)setMyRid(r.rid); // 记住本人槽位，刷新后据此解锁结果
     $('#okBanner').textContent=r.updated?'✓ 已更新你的选票':'✓ 投票成功，感谢参与';
     $('#okBanner').style.display='';
     toast(r.updated?'选票已更新':'投票成功');
@@ -336,7 +383,7 @@ $('#submitBtn').addEventListener('click',async()=>{
 let lastClosed=null; // 用于在轮询中发现投票刚截止/被停止，及时把表单切换成结果态
 async function refresh(){
   let a2;
-  try{a2=await api('/api/vote/'+VOTE_ID);}catch(_){return;}
+  try{a2=await api('/api/vote/'+VOTE_ID+myQs());}catch(_){return;}
   act=a2;
   renderHead();
   renderProgress();
