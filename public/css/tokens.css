@@ -1,0 +1,80 @@
+/* 设计令牌：颜色、表面分层、高度阶梯、圆角、间距、动效、焦点环。
+   单独成文件，是为了让自带样式的独立页（投票 /vote/:id、接龙 /j/:id）也吃到同一套色板，
+   又不用去引整份 style.css——那边的 .card/.badge/.chip/.icon 与本页语义完全不同，并进来会互相盖掉。 */
+:root{
+  /* 品牌色：--primary 保持原值（meta theme-color、图标与若干 rgba 字面量都引用它），
+     渐变两端另立令牌，主按钮 / 选中态 / 进度条统一用同一支，不再各处手写色标 */
+  --primary:#4f6ef2; --primary-dark:#3d5bd9; --brand-a:#6d86ff; --brand-b:#3f57e6;
+  /* 完成度条的终点绿（全站原先在 3 处各写一遍 #3ddc84），以及两支复用渐变 */
+  --done:#3ddc84;
+  --brand-grad:linear-gradient(90deg,var(--brand-a),var(--brand-b));
+  --progress-grad:linear-gradient(90deg,var(--brand-a),var(--done));
+  --bg:#eef1f8; --card:#fff;
+  --text:#1f2937; --muted:#6b7280; --line:#e5e9f2;
+  --danger:#ef4444; --warn:#f59e0b; --success:#0a9f56;
+  --hover:#f1f4fb; --active:#e8edff; --topbar:rgba(238,241,248,.82); --pinned:#fffdf5;
+  --text-2:#4b5563; --faint:#9aa3b2; --line-strong:#c9d2e5; --backdrop:rgba(15,23,42,.45);
+  /* 表面分层：页面底 → 卡片 → 卡内嵌 → 卡内嵌再悬停。原来只有 --bg/--card 两层，
+     所以嵌套容器（卡里的附件条、输入框、结果框）只能靠描边区分，是「平」的主因 */
+  --surface:var(--card); --surface-2:#f6f8fd; --surface-3:#eef2fb; --sunken:#f8fafd;
+  /* 圆角阶梯：小 = 输入框/按钮，中 = 卡片/面板，大 = 弹窗 */
+  --radius-sm:10px; --radius-md:14px; --radius-lg:18px; --radius-xl:24px;
+  /* 高度阶梯：每级都是「近距投影 + 远距环境投影」两层，单层投影在浅底上会发灰 */
+  --elev-1:0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.07);
+  --elev-2:0 2px 4px rgba(16,24,40,.05), 0 10px 20px rgba(16,24,40,.08);
+  --elev-3:0 3px 6px rgba(16,24,40,.06), 0 16px 34px rgba(16,24,40,.12);
+  --elev-4:0 4px 12px rgba(15,23,42,.12), 0 26px 64px rgba(15,23,42,.24);
+  --shadow:var(--elev-1);
+  /* 焦点环：控件聚焦从「只换描边色」改成描边 + 同色光晕，键盘操作才看得出落在哪 */
+  --ring:rgba(79,110,242,.28); --ring-w:0 0 0 3px var(--ring);
+  /* 间距与动效：把散落的 4/8/12/16/20 收到一支阶梯上，节奏才一致 */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:22px; --sp-6:28px; --sp-7:36px;
+  --ease:cubic-bezier(.2,.7,.3,1); --ease-out:cubic-bezier(.16,1,.3,1); --spring:cubic-bezier(.34,1.56,.64,1);
+  --dur-1:120ms; --dur-2:200ms; --dur-3:320ms;
+  /* 页面底的两团极淡色雾：只负责让大面积留白不再死平，透明度压到看不出来「有颜色」的程度 */
+  --bg-fog-1:rgba(79,110,242,.07); --bg-fog-2:rgba(139,92,246,.05);
+  /* 分类色（降饱和）：badge、彩条与卡片导轨共用，只参与小面积渲染 */
+  --cat-notice-bg:#eef3fe; --cat-notice-fg:#3d6fd6;
+  --cat-task-bg:#fdf2e7; --cat-task-fg:#c96a2a;
+  --cat-activity-bg:#e9f7f0; --cat-activity-fg:#1f8a5f;
+  --cat-file-bg:#f2eefc; --cat-file-fg:#6d55b8;
+  --cat-other-bg:#eef1f5; --cat-other-fg:#64748b;
+  --dl-overdue-bg:#fee9e9; --dl-overdue-fg:#c53f3f;
+  --dl-today-bg:#fdf3d7; --dl-today-fg:#a8690f;
+  --dl-soon-bg:#e7effd; --dl-soon-fg:#3d6fd6;
+  --dl-ok-bg:#f1f5f9; --dl-ok-fg:#64748b;
+  --wx-bg:#e9f6ef; --wx-fg:#2f8f5b; --qq-bg:#e9f3fc; --qq-fg:#2f77ad;
+  --tag-bg:#eef1ff;
+}
+:root[data-theme="dark"]{
+  --primary:#5b78ff; --primary-dark:#4a66e8; --brand-a:#7a91ff; --brand-b:#4257d8;
+  --done:#4ade80;
+  --bg:#11161f; --card:#1d2430;
+  --text:#e6eaf2; --muted:#8a94a6; --line:#2b3442;
+  /* --danger/#ef4444 与 --warn/#f59e0b 本身够亮，深色沿用；浅底的 #0a9f56 在深底上对比只有 4.5，
+     拉到与本文件深色「已完成」同档的亮绿 */
+  --success:#4ade80;
+  --hover:#242e3c; --active:#2a3550; --topbar:rgba(17,22,31,.78); --pinned:#262417;
+  --text-2:#b8c1d1; --faint:#7e8899; --line-strong:#3d4759; --backdrop:rgba(0,0,0,.6);
+  --surface:var(--card); --surface-2:#232c3a; --surface-3:#2a3444; --sunken:#181f2a;
+  /* 深色下不能用彩色投影撑层次（会显脏），靠更长的近距黑投影 + 描边分离表面 */
+  --elev-1:0 1px 2px rgba(0,0,0,.40), 0 1px 3px rgba(0,0,0,.30);
+  --elev-2:0 3px 6px rgba(0,0,0,.40), 0 10px 22px rgba(0,0,0,.38);
+  --elev-3:0 4px 10px rgba(0,0,0,.45), 0 18px 38px rgba(0,0,0,.48);
+  --elev-4:0 6px 18px rgba(0,0,0,.50), 0 28px 70px rgba(0,0,0,.60);
+  --shadow:var(--elev-1);
+  --ring:rgba(91,120,255,.36);
+  --bg-fog-1:rgba(91,120,255,.10); --bg-fog-2:rgba(139,92,246,.07);
+  --cat-notice-bg:rgba(96,144,255,.14); --cat-notice-fg:#8ab0ff;
+  --cat-task-bg:rgba(249,115,22,.14); --cat-task-fg:#f0a86e;
+  --cat-activity-bg:rgba(16,185,129,.14); --cat-activity-fg:#5ccba0;
+  --cat-file-bg:rgba(139,92,246,.18); --cat-file-fg:#c4b5fd;
+  --cat-other-bg:rgba(148,163,184,.14); --cat-other-fg:#9aa8ba;
+  --dl-overdue-bg:rgba(239,68,68,.16); --dl-overdue-fg:#fca5a5;
+  --dl-today-bg:rgba(245,158,11,.14); --dl-today-fg:#f0c06a;
+  --dl-soon-bg:rgba(59,130,246,.16); --dl-soon-fg:#93b4ff;
+  --dl-ok-bg:rgba(148,163,184,.14); --dl-ok-fg:#9aa8ba;
+  --wx-bg:rgba(7,194,96,.14); --wx-fg:#6fcb9b; --qq-bg:rgba(13,143,217,.16); --qq-fg:#7dd3fc;
+  --tag-bg:rgba(91,120,255,.18);
+  color-scheme:dark;
+}

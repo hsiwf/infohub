@@ -25,15 +25,34 @@ jobs:
           node --check server.js
           node --check db.js
           node --check test.js
+          node --check selftest.js
+          node --check lib/auth.js
           node --check lib/smartparse.js
           node --check lib/jielong.js
           node --check lib/multipart.js
           node --check public/js/app.js
 
+      # 不写管理密码时服务以"未启用访问控制"启动，全站登录门槛、三级身份、操作记录这一整套
+      # 用例会被整段跳过（本地几百项里约一半依赖登录）。给个测试密码，让 CI 每次都真跑一遍鉴权链路。
+      - name: 准备测试配置（启用登录门槛）
+        run: |
+          mkdir -p data
+          printf '%s' '{"password":"ci-test-password"}' > data/config.json
+
       - name: 启动服务
+        env:
+          INFOHUB_SELFTEST: '1'   # 自检写出的操作记录带标记，跑完按标记自清
         run: |
           node server.js &
-          sleep 3
+          for i in $(seq 1 20); do
+            if curl -fsS http://localhost:5757/api/health; then exit 0; fi
+            sleep 1
+          done
+          echo "服务 20 秒内没起来" >&2
+          exit 1
 
       - name: 端到端自检
+        env:
+          # 服务启动时会把 config.json 里的明文密码升级成散列落盘，测试改从这里拿明文登录
+          TEST_PASSWORD: ci-test-password
         run: node test.js

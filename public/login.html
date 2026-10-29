@@ -7,66 +7,105 @@
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#4f6ef2">
+<link rel="stylesheet" href="/css/tokens.css">
+<script>
+// 主题必须在首屏绘制前定好，否则会先闪一下错的配色。
+// 判定与主站、投票页、接龙页同一条规则：读 localStorage 的 infohub-theme，
+// auto 档按时间（19:00–次日 7:00 深色）。原先这页用的是 @media (prefers-color-scheme)，
+// 于是晚上用浅色系统的同学会看到「登录页浅色 → 一进主站就变深色」。
+(function () {
+  var v = localStorage.getItem('infohub-theme') || 'auto';
+  var t = v !== 'auto' ? v : (new Date().getHours() >= 19 || new Date().getHours() < 7 ? 'dark' : 'light');
+  document.documentElement.dataset.theme = t;
+})();
+</script>
 <style>
   *{box-sizing:border-box}
-  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#eef1fb,#f7f5ff);font-family:system-ui,-apple-system,"Microsoft YaHei",sans-serif;padding:20px}
-  .card{background:#fff;border-radius:18px;box-shadow:0 12px 40px rgba(30,41,80,.14);padding:34px 30px;width:100%;max-width:360px;text-align:center;animation:l-in .45s ease both}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
+    font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","HarmonyOS Sans SC","Microsoft YaHei",sans-serif;
+    background-color:var(--bg);
+    background-image:radial-gradient(1100px 460px at 8% -6%,var(--bg-fog-1),transparent 70%),radial-gradient(900px 420px at 100% -4%,var(--bg-fog-2),transparent 68%);
+    background-repeat:no-repeat;color:var(--text)}
+  .card{background:var(--card);border-radius:var(--radius-lg);box-shadow:var(--elev-3);padding:34px 30px;width:100%;max-width:360px;text-align:center;animation:l-in .45s var(--ease-out) both}
   @keyframes l-in{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}
-  .logo{font-size:26px;font-weight:700;margin-bottom:4px}
-  .sub{color:#6b7280;font-size:13px;margin:0 0 22px}
-  input{width:100%;padding:12px 14px;font-size:16px;border:1px solid #dde3ee;border-radius:12px;outline:none;text-align:center}
-  input:focus{border-color:#4f6ef2}
-  button{width:100%;margin-top:14px;padding:12px;font-size:16px;font-weight:600;border:0;border-radius:12px;background:linear-gradient(135deg,#4f6ef2,#6a86f5);color:#fff;cursor:pointer;box-shadow:0 4px 14px rgba(79,110,242,.30);transition:filter .15s,transform .12s}
+  .logo{font-size:26px;font-weight:700;margin-bottom:4px;color:var(--text)}
+  .logo svg{color:var(--primary)}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 22px}
+  input{width:100%;padding:12px 14px;font-size:16px;border:1px solid var(--line);border-radius:var(--radius-sm);outline:none;text-align:center;background:var(--sunken);color:var(--text);transition:border-color var(--dur-1),box-shadow var(--dur-1),background var(--dur-1)}
+  input:hover{border-color:var(--line-strong)}
+  input:focus{border-color:var(--primary);background:var(--card);box-shadow:var(--ring-w)}
+  button{width:100%;margin-top:14px;padding:12px;font-size:16px;font-weight:600;border:0;border-radius:var(--radius-sm);background:linear-gradient(135deg,var(--brand-a),var(--brand-b));color:#fff;cursor:pointer;box-shadow:0 4px 14px rgba(79,110,242,.30),inset 0 1px 0 rgba(255,255,255,.24);transition:filter var(--dur-1),transform var(--dur-1) var(--ease)}
   button:hover{filter:brightness(1.06)}
   button:active{transform:translateY(1px)}
   button:disabled{opacity:.6}
-  .msg{color:#ef4444;font-size:13px;min-height:18px;margin:12px 0 0}
-  .hint{color:#9aa3b2;font-size:11px;margin-top:18px;line-height:1.6}
-  @media (prefers-color-scheme:dark){
-    body{background:linear-gradient(135deg,#141922,#1b1726)}
-    .card{background:#1d2430;box-shadow:0 12px 40px rgba(0,0,0,.5)}
-    .logo{color:#e6eaf2}
-    .sub{color:#8a94a6}
-    input{background:#141922;border-color:#2b3442;color:#e6eaf2}
-    input:focus{border-color:#5b78ff}
-    .hint{color:#6b7280}
-  }
+  .msg{color:var(--danger);font-size:13px;min-height:18px;margin:12px 0 0}
+  .hint{color:var(--faint);font-size:11px;margin-top:18px;line-height:1.6}
+  .adm{margin-top:14px;font-size:12px}
+  .adm a{color:var(--muted);cursor:pointer;text-decoration:underline}
 </style>
 </head>
 <body>
   <div class="card">
-    <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#4f6ef2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:24px;height:24px;vertical-align:-5px" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="m2 7 10 7L22 7"/></svg> 信息汇总</div>
-    <p class="sub">管理员登录</p>
-    <input id="pw" type="password" placeholder="请输入管理员密码" autofocus
+    <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:24px;height:24px;vertical-align:-5px" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="m2 7 10 7L22 7"/></svg> 信息汇总</div>
+    <p class="sub" id="subTitle">班级同学登录</p>
+    <input id="sid" type="text" inputmode="numeric" autocomplete="username" placeholder="学号" maxlength="32" autofocus
+           onkeydown="if(event.key==='Enter')document.getElementById('pw').focus()">
+    <input id="pw" type="password" autocomplete="current-password" placeholder="密码（初始为学号后 6 位）" maxlength="64" style="margin-top:10px"
            onkeydown="if(event.key==='Enter')go()">
-    <button id="btn" onclick="go()">进 入</button>
+    <button id="btn" onclick="go()">登 录</button>
     <p class="msg" id="msg"></p>
-    <p class="hint">学生/家长无需密码即可浏览<br>此密码仅用于发布、修改内容（管理员）<br>由部署者在 data/config.json 的 password 字段设置</p>
+    <p class="hint" id="hint">初始密码是本人学号的后 6 位，登录后请尽快改成自己的<br>账号由管理员按班级名单开通</p>
+    <p class="adm"><a id="admToggle">管理员登录</a></p>
   </div>
 <script>
-// 已登录的管理员访问登录页时直接回主界面
+'use strict';
+let adminMode = false;
+// 只接受站内路径，防止 ?next= 把登录成功的人带到外站。
+// 光看"首字符是 /、第二个不是 /"不够：/\evil.com 会被浏览器按协议相对解析成 //evil.com，
+// 所以拿 URL 解析后的 origin 与本站比对，对不上就回首页。
+const NEXT = (() => {
+  const n = new URLSearchParams(location.search).get('next') || '';
+  if (n[0] !== '/' || n[1] === '/' || n[1] === '\\') return '/';
+  try {
+    const u = new URL(n, location.origin);
+    if (u.origin !== location.origin) return '/';
+    return u.pathname + u.search;
+  } catch (e) { return '/'; }
+})();
+// 已登录的人打开登录页直接回原处
 fetch('/api/me').then((r) => r.json()).then((me) => {
-  if (me && me.authRequired && me.loggedIn) location.replace('/');
+  if (me && me.authRequired && me.loggedIn) location.replace(NEXT);
 }).catch(() => {});
+document.getElementById('admToggle').addEventListener('click', () => {
+  adminMode = !adminMode;
+  document.getElementById('sid').style.display = adminMode ? 'none' : '';
+  document.getElementById('pw').placeholder = adminMode ? '请输入管理密码' : '密码（初始为学号后 6 位）';
+  document.getElementById('subTitle').textContent = adminMode ? '管理员登录' : '班级同学登录';
+  document.getElementById('hint').style.display = adminMode ? 'none' : '';
+  document.getElementById('admToggle').textContent = adminMode ? '返回同学登录' : '管理员登录';
+  document.getElementById('pw').focus();
+});
 async function go() {
   const pw = document.getElementById('pw').value;
+  const sid = document.getElementById('sid').value.trim();
   const msg = document.getElementById('msg');
   const btn = document.getElementById('btn');
+  if (!adminMode && !sid) { msg.textContent = '请输入学号'; return; }
   if (!pw) { msg.textContent = '请输入密码'; return; }
   btn.disabled = true; btn.textContent = '验证中…'; msg.textContent = '';
   try {
     const r = await fetch('/api/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: pw })
+      body: JSON.stringify(adminMode ? { password: pw } : { sid, password: pw })
     });
-    if (r.ok) { location.href = '/'; return; }
+    if (r.ok) { location.replace(NEXT); return; }
     const j = await r.json().catch(() => ({}));
-    msg.textContent = j.error || '密码不对';
+    msg.textContent = j.error || '登录失败';
   } catch (e) {
     msg.textContent = '网络错误，请重试';
   }
-  btn.disabled = false; btn.textContent = '进 入';
+  btn.disabled = false; btn.textContent = '登 录';
 }
 </script>
 </body>

@@ -12,12 +12,14 @@ const ICON_PATHS = {
   'check': '<path d="M20 6 9 17l-5-5"/>',
   'chev-down': '<path d="m6 9 6 6 6-6"/>',
   'vote': '<rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V5h8v5"/><path d="m9.5 14 2 2 3.5-3.5"/>',
+  'survey': '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>',
   'dots': '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   'jielong': '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="4" cy="18" r="1.6"/>',
   'draw': '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M9 3v6M15 3v6"/><path d="m9 14 2 2 4-4"/>',
   'birthday': '<path d="M4 21h16"/><path d="M6 21v-5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v5"/><path d="M12 14v-4"/><path d="M10.5 7.5C10.5 6.5 12 5 12 5s1.5 1.5 1.5 2.5a1.5 1.5 0 0 1-3 0z"/>',
   'fund': '<path d="M3 7h15a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7V6a2 2 0 0 1 2-2h11"/><path d="M16 12v6"/><circle cx="16" cy="13" r="1.3"/>',
   'guestbook': '<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.9-.9L3 20.5l1.4-4.1A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z"/><path d="M12 8.5c1-1.6 3.2-.7 3 .9-.1 1.2-1.6 2.1-3 3.1-1.4-1-2.9-1.9-3-3.1-.2-1.6 2-2.5 3-.9z"/>',
+  'bulb': '<path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-4 10.5c.6.6 1 1.4 1 2.5h6c0-1.1.4-1.9 1-2.5A6 6 0 0 0 12 3z"/>',
   'calendar': '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/><path d="M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h.01"/>',
   'file': '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
   'chart': '<path d="M4 20V10M10 20V4M16 20v-8M21 20H3"/>',
@@ -54,6 +56,8 @@ const ICON_PATHS = {
   'heart': '<path d="M12 21s-7.5-4.9-10-9.3C.6 8.9 2 5.5 5.2 5c2-.3 3.5.8 4.3 2 .8-1.2 2.3-2.3 4.3-2 3.2.5 4.6 3.9 3.2 6.7C19.5 16.1 12 21 12 21z"/>',
   'download': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
   'upload': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/>',
+  'stop': '<circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" fill="currentColor"/>',
+  'arrow-left': '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
   'book': '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
   'sparkles': '<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/>',
   'undo': '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/>',
@@ -241,32 +245,52 @@ const state = {
   sort: 'time',
   showDone: false,
   total: 0,
+  inboxTotal: 0,   // 待审核条数（信息中心的「待审核」标签上显示）
   groups: [],
   editingId: null,
   pendingFiles: [],
   existingAtts: [],
   vote: null,
-  me: { authRequired: false, loggedIn: true, readOnly: false }, // 会话状态（启动时从 /api/me 拉取）
-  cal: { y: new Date().getFullYear(), m: new Date().getMonth() + 1 },
-  calByDay: {},
+  survey: null,    // 问卷详情状态 {id}；null = 列表
+  me: { authRequired: false, loggedIn: true, role: 'admin', name: '', sid: '', mustChange: false }, // 会话状态（启动时从 /api/me 拉取；默认按开放部署的乐观值，避免首屏闪一下）
   dividerShown: false,
-  jl: null,        // 接龙详情状态 {id, token}；null = 列表
+  jl: null,        // 接龙详情状态 {id}；null = 列表
   jlBanner: false, // 创建成功横幅（只显示一次）
   jlQuiet: false,  // 定时刷新中（不滚动）
   draw: null,      // 抽签详情的签箱 id；null = 列表
   fund: { type: '', q: '', from: '', to: '' }, // 班费收支筛选条件
-  gb: { danmaku: true, loaded: 0, total: 0, sort: 'new', topic: '', shown: new Set() },  // 留言寄语：弹幕开关 + 分页游标 + 排序（new/hot）+ 主题筛选 + 已渲染 id
+  gb: { tab: 'campaign', campaign: null, status: '', danmaku: true, files: [], loaded: 0, total: 0, sort: 'new', topic: '', shown: new Set() },  // 思维碰撞：征集列表/留言墙两个标签、当前征集、状态筛选、待传附件、弹幕
+  audit: { offset: 0, who: '', action: '', from: '', to: '' },  // 操作记录筛选与分页
 };
 let gbTimer = null; // 弹幕轮播定时器
 
-/* ========= 只读访客 ========= */
-// 管理密码开启且未登录 → 只读模式：可浏览，隐藏一切编辑入口
-function canEdit() { return !state.me.authRequired || state.me.loggedIn; }
+/* ========= 身份与权限 ========= */
+// 角色由 /api/me 给出：admin=管理员（管理密码登录）/ officer=班委 / student=同学 / guest=未登录
+function isSysAdmin() { return state.me.role === 'admin'; }
+function isOfficer() { return state.me.role === 'officer'; }
+const ME_ROLE = { admin: '管理员', officer: '班委', student: '同学' };
+function canPost() { return isSysAdmin() || isOfficer(); }
 async function loadMe() {
-  try { state.me = await api('/api/me'); } catch (e) { /* 拉取失败按可编辑处理 */ }
-  document.body.classList.toggle('readonly', !canEdit());
+  try { state.me = await api('/api/me'); } catch (e) { /* 拉取失败沿用默认值 */ }
+  document.body.classList.toggle('readonly', !canPost());
   const lb = $('#btn-login');
-  if (lb) lb.style.display = canEdit() ? 'none' : '';
+  if (lb) lb.style.display = state.me.loggedIn ? 'none' : '';
+  const out = $('#btn-logout');
+  if (out) {
+    out.style.display = state.me.loggedIn && state.me.authRequired ? '' : 'none';
+    if (!out.bound) { out.bound = true; out.addEventListener('click', doLogout); }
+  }
+  const idc = $('#me-chip');
+  if (idc) {
+    idc.style.display = state.me.role === 'guest' ? 'none' : '';
+    idc.innerHTML = (ME_ROLE[state.me.role] || state.me.role) + (state.me.name ? ' · ' + esc(state.me.name) : '')
+      + (state.me.mustChange ? ' <b class="me-warn">改密码</b>' : '');
+    idc.title = state.me.mustChange ? '你仍在用初始密码，点这里改成自己的' : '账号与退出登录';
+    idc.onclick = openAccountModal;
+  }
+  // 账号名单只归管理员；等待审核归管理员与班委
+  document.querySelectorAll('.admin-only').forEach((el) => { el.style.display = isSysAdmin() ? '' : 'none'; });
+  document.querySelectorAll('.post-only').forEach((el) => { el.style.display = canPost() ? '' : 'none'; });
 }
 
 /* ========= 弹窗 ========= */
@@ -389,11 +413,11 @@ function cardHTML(it) {
     <div>${dlChip(it.deadline)}</div>
     ${tags.length ? `<div class="tags">${tags.map((t) => `<span class="tag">#${esc(t)}</span>`).join('')}</div>` : ''}
     ${atts ? `<div class="atts">${atts}</div>` : ''}
-    ${canEdit() ? `<div class="card-actions">
+    ${canPost() ? `<div class="card-actions">
       <button data-act="toggle" class="ghost">${done ? icon('undo') + ' 取消完成' : icon('check') + ' 完成'}</button>
       <button data-act="pin" class="ghost">${icon('pin')} ${it.pinned ? '取消置顶' : '置顶'}</button>
-      <button data-act="edit" class="ghost">${icon('edit')} 编辑</button>
-      <button data-act="del" class="ghost danger">${icon('trash')} 删除</button>
+      ${isSysAdmin() ? `<button data-act="edit" class="ghost">${icon('edit')} 编辑</button>
+      <button data-act="del" class="ghost danger">${icon('trash')} 删除</button>` : ''}
     </div>` : ''}
   </article>`;
 }
@@ -445,7 +469,7 @@ async function loadFeed(append = false) {
     view.innerHTML = filtered
       ? `<div class="empty"><div class="big">${icon('search')}</div>当前筛选条件下没有信息<br>
          <button id="btn-clear-filter" class="ghost" style="margin-top:12px">✕ 清除筛选，查看全部信息</button></div>`
-      : canEdit()
+      : canPost()
         ? `<div class="empty"><div class="big">${icon('inbox')}</div>还没有记录<br>点右上角「＋ 添加信息」，把老师发的通知粘贴进来试试</div>`
         : `<div class="empty"><div class="big">${icon('inbox')}</div>还没有记录<br>老师发布通知后会出现在这里</div>`;
     if (doneSection) {
@@ -584,7 +608,8 @@ async function loadInbox() {
   view.innerHTML = '<div class="loading">加载中…</div>';
   const data = await api('/api/inbox');
   if (seq !== loadSeq) return;
-  setNavBadge('inbox', data.total);
+  state.inboxTotal = data.total;
+  renderHubBar();   // 角标长在「待审核」标签上
   const items = !state.q ? data.items : data.items.filter((it) =>
     ((it.content || '') + (it.sender_name || '') + (it.group_name || '')).toLowerCase().includes(state.q.toLowerCase()));
   if (!data.items.length) {
@@ -636,9 +661,9 @@ function taskRow(it) {
   const plat = it.group_platform ? (PLATS[it.group_platform] || PLATS.other) : null;
   const attN = (it.attachments || []).length;
   return `<div class="trow" data-id="${it.id}">
-    ${canEdit() ? '<button class="tcheck" data-act="toggle" title="标记完成">' + icon('check') + '</button>' : ''}
+    ${canPost() ? '<button class="tcheck" data-act="toggle" title="标记完成">' + icon('check') + '</button>' : ''}
     <div class="tmain">
-      <div class="ttitle"${canEdit() ? ' data-act="edit"' : ''}>${hl(it.title || (it.content || '').slice(0, 30), state.q)}</div>
+      <div class="ttitle"${isSysAdmin() ? ' data-act="edit"' : ''}>${hl(it.title || (it.content || '').slice(0, 30), state.q)}</div>
       <div class="tmeta">
         ${it.group_name ? `<span class="chip ${plat ? plat.cls : ''}">${plat ? plat.icon : ''}${plat ? plat.label : ''}·${esc(it.group_name)}</span>` : ''}
         ${it.sender_name ? `<span>${icon('users')} ${esc(it.sender_name)}</span>` : ''}
@@ -704,105 +729,6 @@ async function loadTasks() {
     sec('later', `${icon('clock')} 以后 / 无截止`, buckets.later);
   $('#btn-ics').addEventListener('click', () => window.open('/api/calendar.ics'));
   $('#btn-print').addEventListener('click', () => window.print());
-}
-
-/* ========= 日历视图 ========= */
-async function loadCalendar() {
-  const seq = loadSeq;
-  const view = $('#view');
-  view.innerHTML = '<div class="loading">加载中…</div>';
-  // 只取未逾期事项（due=after）。服务端单页上限 200，事项更多时按 offset 分页取全，
-  // 否则往后翻的月份会整体无数据且无提示（上限 1000 条兜底，正常班级远到不了）
-  const base = new URLSearchParams({ status: 'open', sort: 'deadline', due: 'after' });
-  if (state.group) base.set('group_id', state.group);
-  const items = [];
-  let total = Infinity;
-  while (items.length < total && items.length < 1000) {
-    const p = new URLSearchParams(base);
-    p.set('limit', '200');
-    p.set('offset', String(items.length));
-    const data = await api('/api/messages?' + p);
-    if (seq !== loadSeq) return;
-    total = data.total;
-    items.push(...data.items);
-    if (!data.items.length) break;
-  }
-  state.calByDay = {};
-  for (const it of items) {
-    if (!it.deadline) continue;
-    (state.calByDay[it.deadline.slice(0, 10)] ||= []).push(it);
-  }
-  renderCalendar();
-}
-
-function renderCalendar() {
-  const view = $('#view');
-  const { y, m } = state.cal;
-  const firstDow = (new Date(y, m - 1, 1).getDay() + 6) % 7; // 周一开头
-  const daysInMonth = new Date(y, m, 0).getDate();
-  const today = ymd(new Date());
-  const prefix = `${y}-${pad(m)}-`;
-  let cells = '';
-  for (let i = 0; i < firstDow; i++) cells += '<div class="calcell blank"></div>';
-  for (let d = 1; d <= daysInMonth; d++) {
-    const ds = prefix + pad(d);
-    const list = state.calByDay[ds] || [];
-    const chips = list.slice(0, 2).map((it) =>
-      `<button class="calchip cat-${it.category}" data-cal="${it.id}" title="${esc(it.title || '')}">${esc(Array.from(it.title || '无标题').slice(0, 9).join(''))}</button>`).join('');
-    const more = list.length > 2 ? `<span class="calmore">还有 ${list.length - 2} 项</span>` : '';
-    const count = list.length ? `<span class="calcount">${list.length}</span>` : '';
-    cells += `<div class="calcell${ds === today ? ' today' : ''}" data-day="${ds}">
-      <div class="calday">${d}${count}</div>${chips}${more}</div>`;
-  }
-  view.innerHTML = `
-    <div class="calhead">
-      <button class="ghost" id="cal-prev">← 上月</button>
-      <h3>${y} 年 ${m} 月</h3>
-      <button class="ghost" id="cal-next">下月 →</button>
-      <button class="ghost" id="cal-today">回到本月</button>
-      <span class="spacer"></span>
-      <button class="ghost" id="btn-ics-cal">${icon('calendar')} 导出到手机日历</button>
-    </div>
-    <div class="calgrid calweekrow">
-      ${['周一', '周二', '周三', '周四', '周五', '周六', '周日'].map((d) => `<div class="calwlabel">${d}</div>`).join('')}
-    </div>
-    <div class="calgrid">${cells}</div>
-    <div id="cal-panel"></div>
-    <p class="hint" style="text-align:center">显示未完成信息的截止时间（跟随顶部群筛选）；点日期看当天全部事项，点事项可直接编辑</p>`;
-  $('#cal-prev').addEventListener('click', () => { state.cal.m--; if (state.cal.m < 1) { state.cal.m = 12; state.cal.y--; } renderCalendar(); });
-  $('#cal-next').addEventListener('click', () => { state.cal.m++; if (state.cal.m > 12) { state.cal.m = 1; state.cal.y++; } renderCalendar(); });
-  $('#cal-today').addEventListener('click', () => { const n = new Date(); state.cal = { y: n.getFullYear(), m: n.getMonth() + 1 }; renderCalendar(); });
-  $('#btn-ics-cal').addEventListener('click', () => window.open('/api/calendar.ics'));
-  $$('.calcell[data-day]').forEach((cell) => cell.addEventListener('click', (e) => {
-    if (e.target.closest('[data-cal]')) return;
-    showDayPanel(cell.dataset.day);
-  }));
-  $$('[data-cal]').forEach((chip) => chip.addEventListener('click', async () => {
-    if (!canEdit()) return;
-    const it = await api('/api/messages/' + chip.dataset.cal);
-    openMessageModal(it);
-  }));
-}
-
-function showDayPanel(ds) {
-  const list = state.calByDay[ds] || [];
-  const panel = $('#cal-panel');
-  if (!panel) return;
-  if (!list.length) { panel.innerHTML = ''; return; }
-  panel.innerHTML = `<div class="panel"><h3>${icon('calendar')} ${esc(friendlyDate(ds))} 截止（${list.length}）</h3>
-    ${list.map((it) => `
-      <div class="uprow" data-day-id="${it.id}">
-        <span class="badge cat-${it.category}">${(CATS[it.category] || CATS.other).label}</span>
-        <b>${esc(it.title || (it.content || '').slice(0, 24))}</b>
-        ${it.deadline.length > 10 ? `<span class="time">${esc(it.deadline.slice(11))}</span>` : ''}
-        <span class="spacer"></span>${dlChip(it.deadline)}
-      </div>`).join('')}
-  </div>`;
-  $$('#cal-panel [data-day-id]').forEach((row) => row.addEventListener('click', async () => {
-    if (!canEdit()) return;
-    const it = await api('/api/messages/' + row.dataset.dayId);
-    openMessageModal(it);
-  }));
 }
 
 /* ========= 文件中心 ========= */
@@ -956,13 +882,44 @@ async function loadMoreDoneFiles() {
   }
 }
 
-/* ========= 班级名单（独立视图：随时新建 / 编辑 / 删除，接龙、抽签、生日导处复用） ========= */
-function rosterPreviewChips(raw, keepId) {
-  const parsed = jlParseRoster(raw, keepId);
+/* ========= 账号名单（名单是一份份的列表，账号按学号全局唯一，这里并成一屏） ========= */
+const US_ROLE = { admin: '管理员', officer: '班委', student: '同学' };
+// 一行一个人：账号信息按学号 join 进来（u 为空即"没开号"）
+function usRow(name, sid, u) {
+  // 变量别叫 state：会遮住全局的 state 对象
+  const status = !sid ? '<span class="hint">缺学号，无法开号</span>'
+    : !u ? '<span class="hint">未开号</span>'
+    : `${u.disabled ? '<span class="jl-badge off">已停用</span>' : ''}${u.must_change ? '<span class="jl-badge off">未修改初始密码</span>' : ''}${(!u.disabled && !u.must_change) ? '<span class="hint">正常</span>' : ''}`;
+  const acts = !u ? '' : `<span class="us-acts">
+      <button class="mini" data-us-role="${esc(sid)}" data-to="${u.role === 'officer' ? 'student' : 'officer'}">${u.role === 'officer' ? '降为同学' : '设为班委'}</button>
+      <button class="mini" data-us-reset="${esc(sid)}" data-name="${esc(name)}">重置密码</button>
+      <button class="mini ${u.disabled ? '' : 'danger'}" data-us-disable="${esc(sid)}" data-off="${u.disabled ? '0' : '1'}">${u.disabled ? '恢复' : '停用'}</button></span>`;
+  return `<tr><td>${esc(name)}</td><td class="hint">${esc(sid || '—')}</td>
+      <td>${u ? esc(US_ROLE[u.role] || u.role) : '—'}</td><td>${status}</td>
+      <td class="hint">${u ? esc(u.last_login || '从未登录') : '—'}</td><td>${acts}</td></tr>`;
+}
+const US_HEAD = '<thead><tr><th>姓名</th><th>学号</th><th>身份</th><th>状态</th><th>最近登录</th><th></th></tr></thead>';
+// 成员表：只列这份名单里的人；名单改过之后残留的账号另有收口，否则那些账号在界面上管不到
+function rosterMemberTable(r, accBySid) {
+  const parsed = jlParseRoster(r.roster, r.keepId);
   if (!parsed.list.length) return '<span class="hint">（名单内容为空）</span>';
-  return `识别到 <b>${parsed.list.length}</b> 人${keepId ? '（含学号）' : ''}：` +
-    parsed.list.slice(0, 50).map((m) => `<span class="jl-chip plain">${esc(jlSlotLabel(m))}</span>`).join('') +
-    (parsed.list.length > 50 ? `<span class="jl-chip plain">…共 ${parsed.list.length} 人</span>` : '');
+  const rows = parsed.list.map((m) => usRow(m.name, m.id, m.id ? accBySid.get(String(m.id)) : null)).join('');
+  const opened = parsed.list.filter((m) => m.id && accBySid.get(String(m.id))).length;
+  const noSid = parsed.list.filter((m) => !m.id).length;
+  return `<div class="us-sum">已开号 <b>${opened}</b> / ${parsed.list.length} 人${noSid ? ` · <span class="warn-t">${noSid} 人缺学号开不出账号</span>` : ''}
+    ${isSysAdmin() ? `<button class="ghost" data-us-sync="${r.id}">${icon('plus')} 按这份名单开通账号</button>` : ''}</div>
+    <div class="ad-wrap"><table class="ad-table">${US_HEAD}<tbody>${rows}</tbody></table></div>`;
+}
+function orphanAccountsPanel(items, accBySid) {
+  if (!accBySid.size) return '';
+  const inRosters = new Set();
+  items.forEach((r) => jlParseRoster(r.roster, r.keepId).list.forEach((m) => { if (m.id) inRosters.add(String(m.id)); }));
+  const orphans = [...accBySid.values()].filter((u) => !inRosters.has(String(u.sid)));
+  if (!orphans.length) return '';
+  return `<div class="panel">
+    <div class="jl-head"><h2>不在任何名单里的账号（${orphans.length}）</h2><span class="hint">名单被改过或删掉后剩下的账号，仍可登录，在这里停用或降级</span></div>
+    <div class="ad-wrap"><table class="ad-table">${US_HEAD}<tbody>${orphans.map((u) => usRow(u.name, u.sid, u)).join('')}</tbody></table></div>
+  </div>`;
 }
 async function loadRosters() {
   const seq = loadSeq;
@@ -971,25 +928,55 @@ async function loadRosters() {
   const data = await api('/api/rosters');
   if (seq !== loadSeq) return;
   const items = data.items || [];
+  let accBySid = new Map();
+  try { accBySid = new Map(((await api('/api/users')).items || []).map((u) => [String(u.sid), u])); } catch (e) { /* 拉不到账号列表就只当没开号 */ }
+  if (seq !== loadSeq) return; // 第二个 await 之后也要复查，迟到的响应不能盖掉用户已切到的新视图
   const emptyHint = items.length ? '' : `<div class="empty"><div class="big">${icon('users')}</div>还没有保存的名单<br>点「新建名单」，或在发起接龙时勾选「保存到班级名单」</div>`;
   view.innerHTML = `
-    <div class="inboxhead"><h3>${icon('users')} 班级名单（${items.length}）</h3>
-      <span class="hint">名单存一份，发起接龙、抽签点名、生日导入时直接复用</span>
-      ${canEdit() ? `<button class="ghost" id="btn-roster-new">${icon('plus')} 新建名单</button>` : ''}</div>
+    <div class="jl-head"><h2>${icon('users')} 账号名单</h2></div>
+    <p class="hint">${items.length} 份名单 · ${accBySid.size} 个账号。名单存一份，发起接龙、抽签点名、生日导入时直接复用；学号也是登录名，初始密码是学号后 6 位</p>
+    ${isSysAdmin() ? `<div class="jl-actions"><button class="primary" id="btn-roster-new">${icon('plus')} 新建名单</button></div>` : ''}
     ${items.map((r) => `
       <div class="panel" data-rid="${r.id}">
         <div class="jl-head"><h2>${esc(r.name)}</h2><span class="hint">${r.count} 人${r.keepId ? ' · 含学号' : ''} · ${esc(fmtReceived(r.updated_at))}</span></div>
-        <div class="roster-pv" hidden>${rosterPreviewChips(r.roster, r.keepId)}</div>
+        <div class="roster-pv" hidden>${rosterMemberTable(r, accBySid)}</div>
         <div class="card-actions">
-          <button class="ghost" data-ract="toggle">${icon('eye')} 成员</button>
+          <button class="ghost" data-ract="toggle">${icon('eye')} 成员与账号</button>
           <button class="ghost" data-ract="copy">${icon('copy')} 复制全文</button>
-          ${canEdit() ? `<button class="ghost" data-ract="edit">${icon('edit')} 编辑</button>
+          ${isSysAdmin() ? `<button class="ghost" data-ract="edit">${icon('edit')} 编辑名单</button>
           <button class="ghost danger" data-ract="del">${icon('trash')} 删除</button>` : ''}
         </div>
       </div>`).join('')}
+    ${orphanAccountsPanel(items, accBySid)}
     ${emptyHint}`;
   const newBtn = $('#btn-roster-new');
   if (newBtn) newBtn.addEventListener('click', () => openRosterModal(null));
+  const reload = () => renderView().catch(() => {});
+  const putUser = async (sid, body, msg) => {
+    try { await api('/api/users/' + encodeURIComponent(sid), { method: 'PUT', body }); toast(msg); reload(); }
+    catch (e) { toast(e.message, 'error'); }
+  };
+  $$('[data-us-sync]').forEach((b) => b.addEventListener('click', async () => {
+    b.disabled = true;
+    try {
+      const r = await api('/api/users/sync', { method: 'POST', body: { rosterId: Number(b.dataset.usSync) } });
+      toast(`已开通 ${r.created} 个账号` + (r.existing ? `，${r.existing} 个已存在` : '') + (r.noSid && r.noSid.length ? `；${r.noSid.length} 人缺学号未开通` : ''));
+      reload();
+    } catch (e) { toast(e.message, 'error'); b.disabled = false; }
+  }));
+  $$('[data-us-role]').forEach((b) => b.addEventListener('click', () => {
+    const to = b.dataset.to;
+    putUser(b.dataset.usRole, { role: to }, to === 'officer' ? '已设为班委（该同学需重新登录生效）' : '已降为同学');
+  }));
+  $$('[data-us-reset]').forEach((b) => b.addEventListener('click', () => {
+    if (!confirm(`把「${b.dataset.name}」的密码重置为学号后 6 位？对方下次登录要重新改。`)) return;
+    putUser(b.dataset.usReset, { reset: true }, '密码已重置');
+  }));
+  $$('[data-us-disable]').forEach((b) => b.addEventListener('click', () => {
+    const off = b.dataset.off === '1';
+    if (off && !confirm('停用后该同学将无法登录，历史数据保留。确定停用？')) return;
+    putUser(b.dataset.usDisable, { disabled: off }, off ? '账号已停用' : '账号已恢复');
+  }));
   view.querySelectorAll('.panel[data-rid]').forEach((card) => {
     const r = items.find((x) => String(x.id) === card.dataset.rid);
     if (!r) return;
@@ -997,7 +984,7 @@ async function loadRosters() {
     const tbtn = card.querySelector('[data-ract="toggle"]');
     if (tbtn) tbtn.addEventListener('click', () => {
       pv.hidden = !pv.hidden;
-      tbtn.innerHTML = icon('eye') + (pv.hidden ? ' 成员' : ' 收起');
+      tbtn.innerHTML = icon('eye') + (pv.hidden ? ' 成员与账号' : ' 收起');
     });
     const cbtn = card.querySelector('[data-ract="copy"]');
     if (cbtn) cbtn.addEventListener('click', () => jlCopy(r.roster, '名单全文已复制，可粘贴到接龙 / 抽签'));
@@ -1018,32 +1005,142 @@ function openRosterModal(item) {
   openModal(`
     <h2>${item ? `${icon('edit')} 编辑名单` : `${icon('users')} 新建名单`}</h2>
     <div class="form">
-      <div class="labrow"><label>名单名称</label></div>
+      <label>名单名称</label>
       <input id="rs-name" maxlength="60" value="${esc(item ? item.name : '')}" placeholder="如：计科2603班">
-      <div class="labrow"><label>名单内容（每行一个，支持「学号 姓名」，Excel 整列直接粘贴）</label></div>
-      <textarea id="rs-raw" rows="10" placeholder="2023001 张三&#10;李四">${esc(item ? item.roster : '')}</textarea>
-      <label class="splitline"><input type="checkbox" id="rs-keepid" ${item && item.keepId ? 'checked' : ''}> 保留学号（重名时按学号区分）</label>
-      <div id="rs-pv" class="hint"></div>
+      ${rosterFields({ prefix: 'rs', label: '名单内容', value: item ? item.roster : '', keepId: !!(item && item.keepId), rows: 10, lib: false })}
     </div>
     <div class="modal-foot">
       <button class="ghost" id="btn-cancel">取消</button>
       <button class="primary" id="rs-save">${icon('check')} 保存</button>
     </div>`);
-  const pv = () => { $('#rs-pv').innerHTML = rosterPreviewChips($('#rs-raw').value, $('#rs-keepid').checked); };
-  $('#rs-raw').addEventListener('input', pv);
-  $('#rs-keepid').addEventListener('change', pv);
-  pv();
+  bindRosterFields({ prefix: 'rs', sidFor: '开账号' });
   $('#rs-save').addEventListener('click', async () => {
-    const body = { name: $('#rs-name').value.trim(), rosterRaw: $('#rs-raw').value, keepId: $('#rs-keepid').checked };
-    if (!body.name) { toast('请填写名单名称', 'error'); return; }
+    const r = readRoster('rs');
+    const name = $('#rs-name').value.trim();
+    if (!name) { toast('请填写名单名称', 'error'); return; }
+    const body = { name, rosterRaw: r.raw, keepId: r.keepId };
     try {
       if (item) await api('/api/rosters/' + item.id, { method: 'PUT', body });
       else await api('/api/rosters', { method: 'POST', body });
-      toast(item ? '名单已更新 ✓' : '名单已保存 ✓');
+      toast(item ? '名单已更新' : '名单已保存');
       closeModal();
       renderView().catch((e2) => toast(e2.message, 'error'));
     } catch (e) { toast(e.message, 'error'); }
   });
+}
+
+/* 退出登录：同学 / 班委 / 管理员都要能一步够到——共享设备上"忘了退"比多点两下严重 */
+async function doLogout() {
+  if (!confirm('退出后要看内容得重新输密码。确定退出？')) return;
+  try { await api('/api/logout', { method: 'POST' }); } catch (e) { /* 服务端退不掉也照样回登录页 */ }
+  location.href = '/login';
+}
+
+// 账号面板：身份说明 + 本人改密（学号账号）+ 退出登录。
+// 管理员没有学号账号（密码在 data/config.json），只给说明与退出，不再一句话把入口挡掉。
+function openAccountModal() {
+  const me = state.me;
+  const isAcct = !!me.sid;
+  openModal(`
+    <h2>${icon('lock')} 账号</h2>
+    <div class="acct-head">
+      <b>${esc(ME_ROLE[me.role] || me.role || '已登录')}</b>${me.name ? '<span>' + esc(me.name) + '</span>' : ''}
+      ${isAcct ? `<span class="hint">学号 ${esc(me.sid)}</span>` : ''}
+      ${me.mustChange ? '<span class="jl-badge off">仍在用初始密码</span>' : ''}
+    </div>
+    ${me.mustChange ? '<div class="dupwarn">初始密码是学号后 6 位，全班都猜得到。建议现在就改成自己的。</div>' : ''}
+    ${isAcct ? `<div class="form">
+      <label>原密码</label><input id="pw-old" type="password" maxlength="64" autocomplete="current-password">
+      <label>新密码（至少 6 位）</label><input id="pw-new" type="password" maxlength="64" autocomplete="new-password">
+      <label>再输一遍新密码</label><input id="pw-new2" type="password" maxlength="64" autocomplete="new-password">
+    </div>` : `<div class="hint acct-note">管理员密码写在部署时的 <code>data/config.json</code> 的 password 里，不在班级账号表中，改它要编辑那个文件并重启服务。</div>`}
+    <div class="modal-foot">
+      <button class="ghost danger" id="acct-logout">${icon('logout')} 退出登录</button>
+      <button class="ghost" id="btn-cancel">关闭</button>
+      ${isAcct ? `<button class="primary" id="pw-save">${icon('check')} 改密码</button>` : ''}
+    </div>`);
+  $('#acct-logout').addEventListener('click', () => { closeModal(); doLogout(); });
+  const save = $('#pw-save');
+  if (save) save.addEventListener('click', async () => {
+    const oldPassword = $('#pw-old').value;
+    const np = $('#pw-new').value, np2 = $('#pw-new2').value;
+    if (!oldPassword) { toast('请输入原密码', 'error'); return; }
+    if (np.length < 6) { toast('新密码至少 6 位', 'error'); return; }
+    if (np !== np2) { toast('两次输入的新密码不一致', 'error'); return; }
+    try {
+      await api('/api/password', { method: 'POST', body: { oldPassword, newPassword: np } });
+      closeModal();
+      toast('密码已修改 ✓');
+      state.me.mustChange = false;
+      loadMe().catch(() => {});
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+/* ========= 操作记录（管理员看全部，本人只看自己） ========= */
+async function loadAudit() {
+  const seq = loadSeq;
+  const view = $('#view');
+  const admin = isSysAdmin();
+  const f = state.audit;
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  // 操作记录只归系统管理员；同学与班委连自己那条链都看不到（接口同口径，这里只是不让人白跑一趟）
+  if (!admin) { view.innerHTML = '<div class="empty">只有系统管理员能查看操作记录</div>'; return; }
+  const qs = () => '/api/audit?limit=50&offset=' + f.offset
+    + (f.who ? '&who=' + encodeURIComponent(f.who) : '')
+    + (f.action ? '&action=' + encodeURIComponent(f.action) : '')
+    + (f.from ? '&from=' + encodeURIComponent(f.from) : '')
+    + (f.to ? '&to=' + encodeURIComponent(f.to) : '');
+  let data, actors = [];
+  try {
+    data = await api(qs());
+    if (!actors.length) { try { actors = (await api('/api/users')).items; } catch (e) { /* 拉不到就不给下拉 */ } }
+  } catch (e) { if (seq !== loadSeq) return; view.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  if (seq !== loadSeq) return;
+  const ROLE = { admin: '管理员', officer: '班委', student: '同学' };
+  const row = (x) => `<tr>
+      <td class="hint">${esc(x.created_at)}</td>
+      <td><b>${esc(x.name || '—')}</b>${x.sid ? `<div class="hint">${esc(x.sid)}</div>` : ''}</td>
+      <td class="hint">${esc(ROLE[x.role] || x.role || '—')}</td>
+      <td>${esc(x.action)}</td>
+      <td class="hint ad-detail">${esc(x.detail || '')}</td>
+      <td class="hint">${esc(x.ip || '')}</td>
+    </tr>`;
+  view.innerHTML = `
+    <div class="jl-head"><h2>${icon('clock')} 操作记录</h2><span class="hint">全部账号</span></div>
+    <p class="hint">记录所有写操作与登录、登录失败：谁、什么时候、对哪一条（标题 / 姓名 / 内容摘要）、来自哪个 IP；普通浏览不记录，只有系统管理员能看</p>
+    <div class="jl-actions"><button class="ghost" id="ad-export">${icon('download')} 导出 CSV</button></div>
+    <div class="panel ad-filter">
+      <label class="ad-f"><span>账号</span><select id="ad-who"><option value="">全部</option>${actors.map((u) => `<option value="${esc(u.sid)}"${f.who === u.sid ? ' selected' : ''}>${esc(u.name)} ${esc(u.sid)}</option>`).join('')}</select></label>
+      <label class="ad-f"><span>动作</span><input id="ad-action" type="text" maxlength="40" placeholder="如：删除信息、发布通知、投出选票" value="${esc(f.action)}"></label>
+      <label class="ad-f"><span>起</span><input id="ad-from" type="date" value="${esc(f.from)}"></label>
+      <label class="ad-f"><span>止</span><input id="ad-to" type="date" value="${esc(f.to)}"></label>
+      <button class="mini" id="ad-go">查询</button>
+      <span class="gb-total">共 ${data.total} 条</span>
+    </div>
+    ${data.items.length ? `<div class="panel ad-wrap"><table class="ad-table"><thead><tr><th>时间</th><th>操作者</th><th>身份</th><th>动作</th><th>详情</th><th>IP</th></tr></thead><tbody>${data.items.map(row).join('')}</tbody></table></div>`
+      : '<div class="empty">没有符合条件的记录</div>'}
+    ${f.offset + data.items.length < data.total ? `<div class="morebar"><button class="mini" id="ad-more">加载更多</button></div>` : ''}`;
+  const apply = (patch) => { Object.assign(state.audit, patch); renderView().catch(() => {}); };
+  const bindVal = (id, ev, key) => { const el = $(id); if (el) el.addEventListener(ev, (e) => apply({ [key]: e.target.value, offset: 0 })); };
+  bindVal('#ad-who', 'change', 'who');
+  bindVal('#ad-action', 'change', 'action');
+  bindVal('#ad-from', 'change', 'from');
+  bindVal('#ad-to', 'change', 'to');
+  const goBtn = $('#ad-go');
+  if (goBtn) goBtn.addEventListener('click', () => apply({
+    action: ($('#ad-action') || {}).value || '', from: ($('#ad-from') || {}).value || '', to: ($('#ad-to') || {}).value || '', offset: 0,
+  }));
+  const exp = $('#ad-export');
+  if (exp) exp.addEventListener('click', () => {
+    const p = new URLSearchParams();
+    if (f.who) p.set('who', f.who);
+    if (f.action) p.set('action', f.action);
+    if (f.from) p.set('from', f.from);
+    if (f.to) p.set('to', f.to);
+    window.open('/api/audit/export?' + p.toString(), '_blank');
+  });
+  const more = $('#ad-more');
+  if (more) more.addEventListener('click', () => apply({ offset: f.offset + 50 }));
 }
 
 /* ========= 投票表决（资格制名单 / 匿名可选 / 一人一票） ========= */
@@ -1061,34 +1158,39 @@ async function loadVotes() {
   if (seq !== loadSeq) return;
   const items = data.items || [];
   view.innerHTML = `
-    <div class="inboxhead"><h3>${icon('vote')} 投票表决（${items.length}）</h3>
-      <span class="hint">班委选举、评优表决；资格名单控制、匿名可选</span>
-      ${canEdit() ? `<button class="ghost" id="btn-vote-new">${icon('plus')} 发起投票</button>` : ''}</div>
+    <div class="jl-head"><h2>${icon('vote')} 投票表决</h2></div>
+    <p class="hint">全班一人一票，可匿名；结果可设为一直可见、投过票后才可见，或结束后才可见。</p>
+    ${canPost() ? `<div class="jl-actions"><button class="primary" id="btn-vote-new">${icon('plus')} 发起投票</button></div>` : ''}
     ${items.map((v) => `
-      <div class="panel" data-vid="${v.id}" style="cursor:pointer">
+      <div class="panel">
         <div class="jl-head"><h2>${esc(v.title)}</h2>${voteStatusBadge(v)}</div>
-        ${v.description ? `<p class="act-desc">${esc(v.description)}</p>` : ''}
-        <div class="jl-head"><span class="hint">已投 <b>${v.done}</b> / ${v.total} 人${v.deadline ? ' · 截止 ' + esc(v.deadline) : ''}${v.anonymous ? ' · 匿名' : ' · 记名'}</span></div>
+        ${v.description ? `<p class="jl-desc">${esc(v.description)}</p>` : ''}
+        <div class="jl-meta">
+          <span>已投 <b>${v.done}</b> / ${v.total} 人</span>
+          ${v.deadline ? `<span>${icon('clock')} 截止 ${esc(v.deadline)}</span>` : ''}
+          <span>${v.anonymous ? '匿名投票' : '记名投票'}</span>
+        </div>
+        <div class="jl-actions">
+          <button class="primary" data-vid-open="${v.id}">${icon('vote')} ${v.closed ? '查看投票' : '进入投票'}</button>
+          <button class="ghost" data-vid-copy="${v.id}">${icon('copy')} 复制学生链接</button>
+        </div>
       </div>`).join('')}
-    ${items.length ? '' : `<div class="empty"><div class="big">${icon('vote')}</div>还没有发起过投票<br>${canEdit() ? '点「发起投票」开始一次班级表决' : '班委发起投票后会出现在这里'}</div>`}`;
+    ${items.length ? '' : `<div class="empty"><div class="big">${icon('vote')}</div>还没有发起过投票<br>${canPost() ? '点「发起投票」开始一次班级表决' : '班委发起投票后会出现在这里'}</div>`}`;
   const newBtn = $('#btn-vote-new');
   if (newBtn) newBtn.addEventListener('click', () => openVoteModal());
-  view.querySelectorAll('.panel[data-vid]').forEach((card) => {
-    card.addEventListener('click', () => {
-      state.vote = card.dataset.vid;
-      renderView().catch((e) => toast(e.message, 'error'));
-    });
-  });
+  $$('[data-vid-open]').forEach((b) => b.addEventListener('click', () => {
+    state.vote = b.dataset.vidOpen;
+    renderView().catch((e) => toast(e.message, 'error'));
+  }));
+  $$('[data-vid-copy]').forEach((b) => b.addEventListener('click', () => jlCopy(location.origin + '/v/' + b.dataset.vidCopy, '学生链接已复制，可发到班群')));
 }
 async function loadVoteDetail() {
   if (!state.vote) return;
   const seq = loadSeq;
   const view = $('#view');
   view.innerHTML = '<div class="loading">加载中…</div>';
-  const token = voteTokenOf(state.vote);
-  const tArg = token ? '?t=' + encodeURIComponent(token) : '';
   let d;
-  try { d = await api('/api/vote/' + state.vote + tArg); }
+  try { d = await api('/api/vote/' + state.vote); }
   catch (e) {
     if (seq !== loadSeq) return;
     vStopTimer(); // 投票已不存在，别让空转的轮询定时器留在内存里
@@ -1102,35 +1204,54 @@ async function loadVoteDetail() {
     const p2 = (n) => String(n).padStart(2, '0');
     return `${dt.getFullYear()}-${p2(dt.getMonth() + 1)}-${p2(dt.getDate())} ${p2(dt.getHours())}:${p2(dt.getMinutes())}`;
   };
-  // 无密码部署下服务端不下发令牌，但管理本就开放（与接龙 canManage = canEdit() || 令牌 同口径）
-  const canManage = canEdit() || !!token;
+  const canEdit = canPost();   // 能不能改这张投票；能不能看"谁投给谁"由服务端下发决定，与这里无关
   const stuLink = location.origin + '/v/' + d.id;
   // 结果可见时机：服务端在未达可见条件时不下发 tally，只给 tallyHidden
   const showTally = Array.isArray(d.tally);
   const maxVotes = showTally ? Math.max(1, ...d.tally.map((t) => t.votes)) : 0;
   const totalVotes = showTally ? d.tally.reduce((s, t) => s + t.votes, 0) : 0;
-  view.innerHTML = `
-    <div class="jl-head"><button class="ghost" id="vote-back">← 返回投票列表</button><span class="spacer"></span>${voteStatusBadge(d)}</div>
+  // 班级账号（同学 / 班委）在管理台里就能直接投，不必再跳 /v/:id 独立页；
+  // 管理员密码没有名单槽位，服务端也拒绝其下票，所以这块只对真实账号出现
+  const myAcct = state.me.sid ? state.me : null;
+  const myLabels = myAcct && d.myVote
+    ? (d.options.filter((o) => (d.myVote.choices || []).includes(o.key)).map((o) => o.label).join('、') || '弃权（没选任何项）') : '';
+  const selfPanel = !myAcct ? '' : `
     <div class="panel">
-      <div class="jl-head"><h2>${esc(d.title)}</h2></div>
-      ${d.description ? `<p class="act-desc">${esc(d.description)}</p>` : ''}
-      <div class="act-meta">
+      <div class="jl-head"><h2 style="font-size:15px">我的投票</h2>
+        <span class="hint">以 ${esc(myAcct.name || '')}（${esc(myAcct.sid)}）的身份${d.closed ? '' : (d.allowChange ? '，截止前再提交即覆盖' : '，本次不允许改票')}</span></div>
+      ${d.voted ? `<div class="vdone">✓ 你已投：${esc(myLabels)} · ${esc(fmtTs(d.myVote.time))}</div>` : ''}
+      ${!d.inList ? '<div class="dupwarn">你不在本次投票的资格名单中，不能下票（结果可以正常查看）。</div>' : ''}
+      ${d.inList && !d.closed ? `<div id="selfBox">${d.options.map((o) => `
+        <label class="vopt"><input type="${d.maxSelect > 1 ? 'checkbox' : 'radio'}" name="selfvote" value="${esc(o.key)}"${(d.myVote || {}).choices && d.myVote.choices.includes(o.key) ? ' checked' : ''}><span>${esc(o.label)}</span></label>`).join('')}
+        <div class="card-actions"><button class="primary" id="self-vote">${icon('check')} ${d.voted ? '重新提交（覆盖上一张）' : '投出选票'}</button>
+        <span class="hint">${d.maxSelect > 1 ? `最多选 ${d.maxSelect} 项；` : ''}一项都不选即弃权</span></div>
+      </div>` : ''}
+      ${d.inList && d.closed && !d.voted ? '<div class="hint">投票已结束，你这一票没投出去。</div>' : ''}
+      <div class="hint" style="margin-top:8px">也可以用独立投票页（同一个账号、同一张票，不会重复计）：<code>${esc(stuLink)}</code>
+        <button class="mini" id="vote-copy-stu2">${icon('copy')} 复制</button></div>
+    </div>`;
+  view.innerHTML = `
+    <button class="ghost jl-back" id="vote-back">← 返回投票列表</button>
+    <div class="panel">
+      <div class="jl-head"><h2>${esc(d.title)}</h2>${voteStatusBadge(d)}</div>
+      ${d.description ? `<p class="jl-desc">${esc(d.description)}</p>` : ''}
+      <div class="jl-meta">
         ${d.deadline ? `<span>截止：${esc(d.deadline)}</span>` : ''}
-        <span>${d.anonymous ? '匿名投票（明细仅发起人可见）' : '记名投票（明细公开）'}</span>
+        <span>${d.anonymous ? '匿名投票（同学之间互不可见）' : '记名投票（明细对所有人公开）'}</span>
         <span>${d.maxSelect > 1 ? `每人最多投 ${d.maxSelect} 项` : '每人一票'}</span>
-        ${d.requireSid ? '<span>需学号验证</span>' : ''}
       </div>
     </div>
+    ${selfPanel}
     <div class="panel">
-      <div class="jl-head"><h2 style="font-size:15px">实时票数</h2><span class="hint">已完成 ${d.done} / ${d.rosterSize} 人</span></div>
+      <div class="jl-head"><h2 style="font-size:15px">${d.closed ? '最终票数' : '实时票数'}</h2><span class="hint">已完成 ${d.done} / ${d.rosterSize} 人${d.closed ? ' · 投票已结束，票数不再变动' : ''}</span></div>
       ${showTally ? d.tally.map((t) => {
         const pct = Math.round(t.votes * 100 / maxVotes);
         const share = totalVotes ? Math.round(t.votes * 100 / totalVotes) : 0;
-        return `<div class="tally-row"><div class="tlabel"><b>${esc(t.label)}</b><span class="hint">${t.votes} 票 · ${share}%</span></div><div class="tbar"><i style="width:${pct}%"></i></div></div>`;
+        return `<div class="tally-row"><div class="tlabel"><b>${esc(t.label)}</b><span class="hint">${t.votes} 票 · ${share}%</span></div><div class="bar"><i style="width:${pct}%"></i></div></div>`;
       }).join('') : `<div class="tally-hidden">${d.reveal === 'after_vote' ? '完成投票后即可查看各选项票数' : '投票结束后可查看票数'}</div>`}
       <div class="jl-linkrow"><input readonly value="${esc(stuLink)}"><button class="ghost" id="vote-copy-stu">${icon('link')} 复制学生链接</button></div>
     </div>
-    ${canManage && Array.isArray(d.missing) ? `
+    ${Array.isArray(d.missing) ? `
     <div class="panel">
       <div class="jl-head"><h2 style="font-size:15px">完成统计</h2><span class="hint">已投 ${d.done} / ${d.rosterSize} 人，未投 ${d.missing.length} 人</span></div>
       ${d.missing.length ? d.missing.map((m) => `<span class="jl-chip">${esc(m.id ? m.id + ' ' : '')}${esc(m.name)}</span>`).join('') : '<span class="hint">全部投完 ✓</span>'}
@@ -1138,10 +1259,10 @@ async function loadVoteDetail() {
     </div>` : ''}
     ${Array.isArray(d.ballots) ? `
     <div class="panel">
-      <div class="jl-head"><h2 style="font-size:15px">选票明细${d.anonymous ? '（匿名投票，仅发起人可见）' : '（记名投票，对所有人公开）'}</h2></div>
+      <div class="jl-head"><h2 style="font-size:15px">选票明细</h2><span class="hint">共 ${d.ballots.length} 张</span></div>
       ${(d.ballots || []).map((b, i) => `<div class="entry-line"><b>${i + 1}. ${esc(b.name)}</b><span class="entry-txt">投给：${esc(b.choices.join('、') || '弃权')} · ${esc(fmtTs(b.time))}</span></div>`).join('') || '<span class="hint">还没有人投票</span>'}
     </div>` : ''}
-    ${canManage ? `<div class="card-actions">
+    ${canEdit ? `<div class="card-actions">
       ${!d.closed ? '<button class="ghost" id="vote-edit">' + icon('edit') + ' 编辑</button>' : ''}
       ${!d.closed ? '<button class="ghost" id="vote-stop">停止投票</button>' : ''}
       <button class="ghost danger" id="vote-del">${icon('trash')} 删除投票</button>
@@ -1150,6 +1271,31 @@ async function loadVoteDetail() {
   if (back) back.addEventListener('click', () => { state.vote = null; renderView().catch(() => {}); });
   const copyStu = $('#vote-copy-stu');
   if (copyStu) copyStu.addEventListener('click', () => jlCopy(stuLink, '学生链接已复制，可发到班群'));
+  const copyStu2 = $('#vote-copy-stu2');
+  if (copyStu2) copyStu2.addEventListener('click', () => jlCopy(stuLink, '投票链接已复制，可发到班群'));
+  const selfBox = $('#selfBox');
+  if (selfBox) {
+    const inputs = Array.from(selfBox.querySelectorAll('input[name="selfvote"]'));
+    const sync = () => inputs.forEach((i) => { i.parentElement.classList.toggle('sel', i.checked); });
+    inputs.forEach((i) => i.addEventListener('change', () => {
+      if (d.maxSelect > 1 && inputs.filter((x) => x.checked).length > d.maxSelect) {
+        i.checked = false; toast('每人最多选 ' + d.maxSelect + ' 项');
+      }
+      sync();
+    }));
+    sync();
+    const btn = $('#self-vote');
+    btn.addEventListener('click', async () => {
+      const picked = inputs.filter((x) => x.checked).map((x) => x.value);
+      if (!picked.length && !confirm('没有勾选任何选项，这样提交算作弃权（计入已投票人数）。确定提交？')) return;
+      btn.disabled = true;
+      try {
+        const r = await api('/api/vote/' + d.id + '/ballot', { method: 'POST', body: { choices: picked } });
+        toast(r.updated ? '选票已更新 ✓' : '投票成功 ✓');
+        renderView().catch(() => {});
+      } catch (e) { toast(e.message, 'error'); btn.disabled = false; }
+    });
+  }
   const copyMiss = $('#vote-copy-miss');
   if (copyMiss) copyMiss.addEventListener('click', () => {
     const lines = (d.missing || []).map((m) => (m.id ? m.id + ' ' : '') + m.name);
@@ -1158,15 +1304,15 @@ async function loadVoteDetail() {
   const stopBtn = $('#vote-stop');
   if (stopBtn) stopBtn.addEventListener('click', async () => {
     if (!confirm('确定停止这次投票吗？停止后不能再提交。')) return;
-    try { await api('/api/vote/' + d.id + '/stop' + tArg, { method: 'POST' }); toast('投票已停止'); state.vote = null; renderView().catch(() => {}); }
+    try { await api('/api/vote/' + d.id + '/stop', { method: 'POST' }); toast('投票已停止'); state.vote = null; renderView().catch(() => {}); }
     catch (e) { toast(e.message, 'error'); }
   });
   const editBtn = $('#vote-edit');
-  if (editBtn) editBtn.addEventListener('click', () => openVoteEditModal(d, token));
+  if (editBtn) editBtn.addEventListener('click', () => openVoteEditModal(d));
   const delBtn = $('#vote-del');
   if (delBtn) delBtn.addEventListener('click', async () => {
     if (!confirm('确定删除这次投票吗？所有选票将一并删除，不可恢复。')) return;
-    try { await api('/api/vote/' + d.id + tArg, { method: 'DELETE' }); toast('投票已删除'); state.vote = null; renderView().catch(() => {}); }
+    try { await api('/api/vote/' + d.id, { method: 'DELETE' }); toast('投票已删除'); state.vote = null; renderView().catch(() => {}); }
     catch (e) { toast(e.message, 'error'); }
   });
   // 结果页定时原地刷新（管理台/访客都能看到实时票数）
@@ -1184,27 +1330,19 @@ function openVoteModal() {
   openModal(`
     <h2>${icon('vote')} 发起投票</h2>
     <div class="form">
-      <div class="labrow"><label>投票标题</label></div>
+      <label>投票标题</label>
       <input id="vt-title" maxlength="60" placeholder="如：评选入团积极分子">
-      <div class="labrow"><label>投票说明（选填）</label></div>
+      <label>投票说明（选填）</label>
       <textarea id="vt-desc" rows="2" maxlength="1000" placeholder="投票规则、候选人情况等说明…"></textarea>
-      <div class="labrow"><label>选项 / 候选人（每行一个，至少 2 个）</label></div>
+      <label>选项 / 候选人（每行一个，至少 2 个）</label>
       <textarea id="vt-options" rows="4" placeholder="张三&#10;李四&#10;王五"></textarea>
-      <div class="labrow"><label>投票资格名单（只有名单内的同学可以投票）</label></div>
-      <div style="display:flex;gap:8px;margin-bottom:8px">
-        <select id="vt-roster-lib" style="flex:1;min-width:0"><option value="">— 手动粘贴名单 —</option></select>
-        <button type="button" class="mini danger" id="vt-roster-lib-del" style="display:none;white-space:nowrap">${icon('trash')} 删除</button>
-      </div>
-      <textarea id="vt-roster" rows="4" placeholder="也可直接粘贴名单，每行一个（支持「学号 姓名」）…"></textarea>
-      <label class="splitline"><input type="checkbox" id="vt-keepid"> 保留学号（重名时按学号区分）</label>
-      <div id="vt-roster-pv" class="hint"></div>
-      <div class="labrow"><label>每人最多可选</label></div>
+      ${rosterFields({ prefix: 'vt', label: '投票资格名单（只有名单内的同学可以投票）' })}
+      <label>每人最多可选</label>
       <input id="vt-max" type="number" min="1" value="1" style="max-width:120px">
-      <div class="labrow"><label>截止时间（选填，到点自动结束）</label></div>
+      <label>截止时间（选填，到点自动结束）</label>
       <input id="vt-deadline" type="datetime-local">
-      <label class="splitline"><input type="checkbox" id="vt-anon" checked> 匿名投票（同学间看不到彼此投给谁，选票明细仅发起人可查）</label>
-      <label class="splitline"><input type="checkbox" id="vt-reqsid"> 需学号验证（提交时必须填写本人学号，防冒名投票）</label>
-      <div class="labrow"><label>结果可见时机</label></div>
+      <label class="splitline"><input type="checkbox" id="vt-anon" checked> 匿名投票（同学之间看不到彼此投给谁）</label>
+      <label>结果可见时机</label>
       <select id="vt-reveal" style="max-width:240px">
         <option value="always">一直可见（投票中也能看到各选项票数）</option>
         <option value="after_vote">投过票后可见</option>
@@ -1216,41 +1354,16 @@ function openVoteModal() {
       <button class="ghost" id="btn-cancel">取消</button>
       <button class="primary" id="vt-save">${icon('check')} 发起投票</button>
     </div>`);
-  const pv = () => {
-    const rosterId = $('#vt-roster-lib').value;
-    const raw = $('#vt-roster').value;
-    // 需学号验证 + 名单没学号 = 那张票谁都投不了（服务端同口径拦截），在发起前就点出来
-    const sidWarn = () => {
-      if (!$('#vt-reqsid').checked) return '';
-      const p = jlParseRoster(raw, $('#vt-keepid').checked);
-      const missing = p.list.filter((m) => !m.id);
-      if (!missing.length) return '';
-      return `<div class="warn-t">已勾选需学号验证，但 ${missing.length} 人缺学号：`
-        + esc(missing.slice(0, 5).map((m) => m.name).join('、')) + (missing.length > 5 ? ' 等' : '')
-        + '——名单要写成「2023001 张三」并勾选保留学号</div>';
-    };
-    if (rosterId) { $('#vt-roster-pv').innerHTML = '<span class="ok-t">✓ 使用班级名单中的名单，提交时自动读取</span>' + sidWarn(); return; }
-    const parsed = jlParseRoster(raw, $('#vt-keepid').checked);
-    $('#vt-roster-pv').innerHTML = parsed.list.length
-      ? `识别到 <b>${parsed.list.length}</b> 人${$('#vt-keepid').checked ? '（含学号）' : ''}：` + parsed.list.slice(0, 50).map((m) => `<span class="jl-chip plain">${esc(jlSlotLabel(m))}</span>`).join('') + sidWarn()
-      : '<span class="warn-t">尚未设置名单：请从班级名单选择，或直接粘贴</span>';
-  };
-  setupRosterLib('vt', (r) => {
-    $('#vt-roster').value = r.roster;
-    $('#vt-keepid').checked = !!r.keepId;
-    pv();
+  // 投票按学号定位投票人（身份来自登录账号），名单缺学号的人根本投不了票——发起前就点出来
+  bindRosterFields({
+    prefix: 'vt', mode: 'ref', sidFor: '投票',
+    applyRoster: (r) => { $('#vt-roster').value = r.roster; $('#vt-keepid').checked = !!r.keepId; },
   });
-  $('#vt-roster').addEventListener('input', pv);
-  $('#vt-keepid').addEventListener('change', pv);
-  $('#vt-roster-lib').addEventListener('change', pv);
-  $('#vt-reqsid').addEventListener('change', pv);
-  pv();
   $('#vt-save').addEventListener('click', async () => {
     const title = $('#vt-title').value.trim();
     if (!title) { toast('请填写投票标题', 'error'); return; }
-    const rosterId = $('#vt-roster-lib').value;
-    const rosterRaw = $('#vt-roster').value;
-    if (!rosterId && !rosterRaw.trim()) { toast('请设置投票名单', 'error'); return; }
+    const ros = readRoster('vt', 'ref');
+    if (!ros.libId && !ros.raw.trim()) { toast('请设置投票名单', 'error'); return; }
     try {
       const body = {
         title,
@@ -1258,16 +1371,14 @@ function openVoteModal() {
         optionsRaw: $('#vt-options').value,
         maxSelect: Number($('#vt-max').value) || 1,
         anonymous: $('#vt-anon').checked,
-        requireSid: $('#vt-reqsid').checked,
         reveal: $('#vt-reveal').value,
         allowChange: $('#vt-revote').checked,
         deadline: valToDt($('#vt-deadline').value),
-        rosterId: rosterId || null,
-        rosterRaw,
-        keepId: $('#vt-keepid').checked,
+        rosterId: ros.libId || null,
+        rosterRaw: ros.raw,
+        keepId: ros.keepId,
       };
       const r = await api('/api/vote', { method: 'POST', body });
-      if (r.adminToken) voteMineRemember(r.id, r.adminToken, title);
       toast('投票已发起 ✓');
       closeModal();
       state.vote = r.id;
@@ -1276,10 +1387,9 @@ function openVoteModal() {
   });
 }
 
-// 编辑投票（发起人/管理员）：标题/说明/截止/结果可见时机/允许改票可改；选项与名单只可「追加」，
+// 编辑投票（管理员与班委同权，不区分发起人）：标题/说明/截止/结果可见时机/允许改票可改；选项与名单只可「追加」，
 // 已有选项 key 与名单槽位 rid 不动，避免打乱已投票的指向。
-function openVoteEditModal(v, token) {
-  const tArg = token ? '?t=' + encodeURIComponent(token) : '';
+function openVoteEditModal(v) {
   const curOpts = (v.options || []).map((o) => o.label).join('、');
   openModal(`
     <h2>${icon('edit')} 编辑投票</h2>
@@ -1297,7 +1407,7 @@ function openVoteEditModal(v, token) {
       <label>追加选项（每行一个，只增不改；已有选项：${esc(curOpts || '无')}）</label>
       <textarea id="vt-e-optappend" rows="2" placeholder="需要新增的选项，每行一个…"></textarea>
       <label class="splitline"><input type="checkbox" id="vt-e-roster-keepid"> 追加名单保留学号</label>
-      <label>追加投票人（每行一个，支持「学号 姓名」；只增不改，已有 ${esc(String((v.roster || []).length))} 人）</label>
+      <label>追加投票人（每行一个，支持「学号 姓名」；只增不改，已有 ${esc(String(v.rosterSize || 0))} 人）</label>
       <textarea id="vt-e-rosterappend" rows="2" placeholder="新增可投票的同学，每行一个…"></textarea>
     </div>
     <div class="modal-foot">
@@ -1318,7 +1428,7 @@ function openVoteEditModal(v, token) {
     const rosterApp = $('#vt-e-rosterappend').value.trim();
     if (rosterApp) { body.rosterAppendRaw = rosterApp; body.rosterAppendKeepId = $('#vt-e-roster-keepid').checked; }
     try {
-      await api(`/api/vote/${v.id}${tArg}`, { method: 'PUT', body });
+      await api(`/api/vote/${v.id}`, { method: 'PUT', body });
       closeModal();
       toast('修改已保存');
       loadVoteDetail();
@@ -1330,32 +1440,15 @@ function openVoteEditModal(v, token) {
 function statCard(lab, num, cls = '') {
   return `<div class="statcard ${cls}"><div class="num">${num}</div><div class="lab">${lab}</div></div>`;
 }
+// 信息中心的「统计」：数字与分布，登录就能看
 async function loadStats() {
   const seq = loadSeq;
   const view = $('#view');
   view.innerHTML = '<div class="loading">加载中…</div>';
   const st = await api('/api/stats'); // 会话状态由启动时的 loadMe 提供，这里不重复请求
   if (seq !== loadSeq) return;
-  const editable = canEdit();
-  const cfg = editable ? await api('/api/config').catch(() => null) : null;
-  if (seq !== loadSeq) return;
   const maxG = Math.max(1, ...st.byGroup.map((g) => g.count));
   const maxC = Math.max(1, ...st.byCategory.map((c) => c.c));
-  const ingestUrl = cfg ? `${cfg.lanUrls[0] || `http://localhost:${cfg.port}`}/api/ingest?token=${cfg.ingestToken}` : '';
-  const onebotUrl = cfg ? `${cfg.lanUrls[0] || `http://localhost:${cfg.port}`}/api/onebot/report` : '';
-  const ob = (cfg && cfg.onebot) || { token: '', groups: {} };
-  const obMode = ob.mode === 'auto' ? 'auto' : 'review';
-  const obKeys = Object.keys(ob.groups || {});
-  const obFilter = ob.filter || {};
-  const fparts = [];
-  if (obFilter.minLength) fparts.push(`短于 ${obFilter.minLength} 字的跳过`);
-  if ((obFilter.stopWords || []).length) fparts.push(`水词屏蔽 ${obFilter.stopWords.length} 个`);
-  if ((obFilter.keywords || []).length) fparts.push(`只收录含关键词：${obFilter.keywords.join('、')}`);
-  if (obFilter.adminsOnly) fparts.push('只收录群主/管理员发言');
-  if (obFilter.smart) fparts.push('智能过滤，像通知/任务的才收录');
-  const napcatExample = cfg ? JSON.stringify({ network: { httpClients: [{
-    name: 'infohub', enable: true, url: onebotUrl, messagePostFormat: 'array', reportSelfMessage: false, token: ob.token,
-  }] } }, null, 2) : '';
   view.innerHTML = `
     <div class="statgrid">
       ${statCard(`${icon('feed')} 信息总数`, st.total)}
@@ -1390,6 +1483,45 @@ async function loadStats() {
           <span class="barnum">${g.count}</span>
         </div>`).join('') : '<p class="empty-mini">还没有添加群</p>'}
     </div>
+    <div class="panel">
+      <h3>${icon('bell')} 截止提醒</h3>
+      <p class="hint">点顶栏铃铛开启浏览器通知：只要信息页开着，<b>已逾期</b>或 <b>24 小时内截止</b>的任务会弹窗提醒
+      （同一条每天只提醒一次，每 5 分钟检查一次）。手机上把本页"添加到主屏幕"后同样有效。</p>
+      <button class="ghost" id="btn-bell-2">${icon('bell')} 开启 / 检查提醒</button>
+    </div>`;
+  $('#btn-bell-2').addEventListener('click', onBellClick);
+  if (isSysAdmin()) $$('.uprow', view).forEach((row) => row.addEventListener('click', async () => {
+    const it = await api('/api/messages/' + row.dataset.id);
+    openMessageModal(it);
+  }));
+}
+
+// 班级管理 → 设置（仅系统管理员）：接入地址 / 机器人 / 群管理 / 备份
+async function loadSettings() {
+  const seq = loadSeq;
+  const view = $('#view');
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  const st = await api('/api/stats');   // 群管理面板要显示每个群的信息量
+  if (seq !== loadSeq) return;
+  const editable = isSysAdmin();
+  const cfg = await api('/api/config').catch(() => null);
+  if (seq !== loadSeq) return;
+  const ingestUrl = cfg ? `${cfg.lanUrls[0] || `http://localhost:${cfg.port}`}/api/ingest?token=${cfg.ingestToken}` : '';
+  const onebotUrl = cfg ? `${cfg.lanUrls[0] || `http://localhost:${cfg.port}`}/api/onebot/report` : '';
+  const ob = (cfg && cfg.onebot) || { token: '', groups: {} };
+  const obMode = ob.mode === 'auto' ? 'auto' : 'review';
+  const obKeys = Object.keys(ob.groups || {});
+  const obFilter = ob.filter || {};
+  const fparts = [];
+  if (obFilter.minLength) fparts.push(`短于 ${obFilter.minLength} 字的跳过`);
+  if ((obFilter.stopWords || []).length) fparts.push(`水词屏蔽 ${obFilter.stopWords.length} 个`);
+  if ((obFilter.keywords || []).length) fparts.push(`只收录含关键词：${obFilter.keywords.join('、')}`);
+  if (obFilter.adminsOnly) fparts.push('只收录群主/管理员发言');
+  if (obFilter.smart) fparts.push('只收像通知/任务的消息');
+  const napcatExample = cfg ? JSON.stringify({ network: { httpClients: [{
+    name: 'infohub', enable: true, url: onebotUrl, messagePostFormat: 'array', reportSelfMessage: false, token: ob.token,
+  }] } }, null, 2) : '';
+  view.innerHTML = `
     ${cfg ? `<div class="panel">
       <h3>${icon('inbox')} 自动接入（进阶）</h3>
       <p class="hint">把这个接口地址给自动化程序（手机快捷指令等）使用，新消息会自动进入信息流，
@@ -1402,7 +1534,7 @@ async function loadStats() {
       <h3>${icon('message')} QQ 自动接入（OneBot 机器人）</h3>
       ${obMode === 'auto'
         ? `<p class="hint">当前为 <b>自动收录</b> 模式：消息通过防闲聊过滤后直接进入信息流。想改成先人工挑一遍，在 data/config.json 里把 onebot.mode 改为 <code>"review"</code>。</p>`
-        : `<p class="hint">当前为 <b>人工审核</b> 模式（默认）：群消息先进侧栏的「${icon('inbox')} 待审核」，由你挑哪些收录进信息流，收录时自动识别分类和截止时间。想全自动收录，在 data/config.json 里把 onebot.mode 改为 <code>"auto"</code>。</p>`}
+        : `<p class="hint">当前为 <b>人工审核</b> 模式（默认）：群消息先进「信息中心 → 待审核」，由你挑哪些收录进信息流，收录时自动识别分类和截止时间。想全自动收录，在 data/config.json 里把 onebot.mode 改为 <code>"auto"</code>。</p>`}
       <p class="hint">在电脑上用 <b>NapCat / LLOneBot / Lagrange / go-cqhttp</b> 等 OneBot 11 框架登录一个 QQ 小号并拉进班级群，
       在它的网络配置里添加 <b>HTTP POST 上报</b>，地址和令牌填下面两项。群文件上传也会记录（纯图片/表情消息不收录，避免刷屏）。</p>
       <div class="codebox">${esc(onebotUrl)}</div>
@@ -1411,9 +1543,13 @@ async function loadStats() {
       <p class="hint">NapCat / LLOneBot 配置示例（其他框架按各自文档填同样两项）：</p>
       <div class="codebox">${esc(napcatExample)}</div>
       <button class="ghost" id="btn-copy-onebot-json">${icon('copy')} 复制配置示例</button>
+      ${editable ? `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
+        <p class="hint"><b>管理接口令牌轮换</b>：点击后生成新 apiToken，旧令牌立即失效。新令牌在服务器 data/config.json 中查看。</p>
+        <button class="ghost" id="btn-reset-token" style="color:var(--danger)">${icon('refresh')} 重置 apiToken</button>
+      </div>` : ''}
       <p class="hint">${icon('lock')} 防闲聊过滤：${fparts.length
-        ? `${esc(fparts.join('；'))}。在 data/config.json 的 onebot.filter 里调整${obMode === 'review' ? '（关键词、仅管理员、智能过滤仅在 auto 模式参与）' : ''}。`
-        : '当前未启用，群里所有文字消息都会收录。可在 data/config.json 的 onebot.filter 里开启：最短长度、水词屏蔽、关键词白名单、仅群主/管理员、智能过滤（像通知/任务的才收录）。'}</p>
+        ? `${esc(fparts.join('；'))}。在 data/config.json 的 onebot.filter 里调整${obMode === 'review' ? '（关键词、仅管理员、只收通知类仅在 auto 模式参与）' : ''}。`
+        : '当前未启用，群里所有文字消息都会收录。可在 data/config.json 的 onebot.filter 里开启：最短长度、水词屏蔽、关键词白名单、仅群主/管理员、只收通知类（像通知/任务的才收录）。'}</p>
       ${obKeys.length
         ? `<p class="hint">已设群白名单，只收录：<code>${obKeys.map((k) => esc(k)).join('</code>、<code>')}</code>（显示名：${obKeys.map((k) => esc(ob.groups[k] || `QQ群 ${k}`)).join('、')}）</p>`
         : '<p class="hint">未设白名单：机器人所在<b>所有群</b>的消息都会收录。只想收录部分群，在 data/config.json 的 onebot.groups 里配置（如 <code>"groups": {"123456789": "班级通知群"}</code>），保存后重启生效。</p>'}
@@ -1431,19 +1567,13 @@ async function loadStats() {
       ${editable ? '<p class="hint">手机上在这里就能加群、改群名、删群，不用连电脑。</p>' : ''}
     </div>
     <div class="panel">
-      <h3>${icon('bell')} 截止提醒</h3>
-      <p class="hint">点顶栏铃铛开启浏览器通知：只要信息页开着，<b>已逾期</b>或 <b>24 小时内截止</b>的任务会弹窗提醒
-      （同一条每天只提醒一次，每 5 分钟检查一次）。手机上把本页"添加到主屏幕"后同样有效。</p>
-      <button class="ghost" id="btn-bell-2">${icon('bell')} 开启 / 检查提醒</button>
-    </div>
-    <div class="panel">
       <h3>${icon('archive')} 数据备份</h3>
       <p class="hint">所有数据都在本机 data/ 文件夹——<b>复制整个文件夹即完整备份</b>（含附件）。
       每次启动和跨天时会自动备份到 data/backups/（保留最近 14 份）；也可以导出 JSON。</p>
       ${editable ? `<button class="ghost" id="btn-export">${icon('download')} 导出 JSON 备份</button>
       <label class="importwrap">${icon('upload')} 导入 JSON 备份<input id="import-file" type="file" accept=".json,application/json"></label>` : ''}
       ${state.me.authRequired ? (state.me.loggedIn
-        ? '<button class="ghost" id="btn-logout" style="margin-left:10px">' + icon('logout') + ' 退出登录</button>'
+        ? '<button class="ghost" id="btn-logout-2" style="margin-left:10px">' + icon('logout') + ' 退出登录</button>'
         : '<a class="ghost" href="/login" style="margin-left:10px;text-decoration:none;display:inline-block">' + icon('lock') + ' 管理员登录</a>') : ''}
       <p class="hint">导入建议只在空数据时使用（已有数据时服务器会拒绝，防止重复）。JSON 备份会恢复附件记录与接龙数据，但不含附件文件本身——完整备份请复制整个 data/ 文件夹。</p>
     </div>`;
@@ -1462,18 +1592,25 @@ async function loadStats() {
     try { await navigator.clipboard.writeText(napcatExample); toast('已复制配置示例'); }
     catch (e) { toast('复制失败，请手动选择复制', 'error'); }
   });
+  const resetTokenBtn = $('#btn-reset-token');
+  if (resetTokenBtn) resetTokenBtn.addEventListener('click', async () => {
+    if (!confirm('确定要重置 apiToken 吗？旧令牌将立即失效。')) return;
+    try {
+      const r = await api('/api/settings/reset-token', { method: 'POST' });
+      toast('已重置 apiToken ✓');
+      // 刷新设置页面显示新令牌（虽然不直接显示，但重新加载确保状态一致）
+      renderView().catch(() => {});
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  });
   const exportBtn = $('#btn-export');
   if (exportBtn) exportBtn.addEventListener('click', () => { window.open('/api/export'); });
-  $('#btn-bell-2').addEventListener('click', onBellClick);
-  const logoutBtn = $('#btn-logout');
-  if (logoutBtn) logoutBtn.addEventListener('click', async () => {
-    if (!confirm('退出登录后需要重新输入密码。确定吗？')) return;
-    try { await fetch('/api/logout', { method: 'POST' }); } catch (e) { /* 忽略 */ }
-    location.href = '/';
-  });
+  const logoutBtn = $('#btn-logout-2');
+  if (logoutBtn) logoutBtn.addEventListener('click', doLogout);
   const addGroup2 = $('#btn-add-group2');
   if (addGroup2) addGroup2.addEventListener('click', () => openGroupModal(null));
-  $$('[data-editgroup]').forEach((b) => b.addEventListener('click', () => {
+  if (editable) $$('[data-editgroup]').forEach((b) => b.addEventListener('click', () => {
     const g = state.groups.find((x) => String(x.id) === b.dataset.editgroup);
     if (g) openGroupModal(g);
   }));
@@ -1493,10 +1630,6 @@ async function loadStats() {
     }
     e.target.value = '';
   });
-  if (editable) $$('.uprow', view).forEach((row) => row.addEventListener('click', async () => {
-    const it = await api('/api/messages/' + row.dataset.id);
-    openMessageModal(it);
-  }));
 }
 
 /* ========= 添加 / 编辑信息 ========= */
@@ -1522,8 +1655,8 @@ function openMessageModal(item) {
     <h2>${item ? `${icon('edit')} 编辑信息` : `${icon('inbox')} 添加信息`}</h2>
     <div class="form">
       <div class="labrow"><label>消息原文（粘贴老师发的通知/任务）</label>
-        <button id="btn-smart" type="button" class="mini">${icon('sparkles')} 智能识别</button></div>
-      <textarea id="f-content" placeholder="把老师发的通知、任务原文粘贴到这里，再点「智能识别」自动填标题、分类和截止时间…">${item ? esc(item.content || '') : ''}</textarea>
+        <button id="btn-smart" type="button" class="mini">${icon('search')} 识别正文</button></div>
+      <textarea id="f-content" placeholder="把老师发的通知、任务原文粘贴到这里，再点「识别正文」自动填标题、分类和截止时间…">${item ? esc(item.content || '') : ''}</textarea>
       <label class="splitline"><input type="checkbox" id="f-split"> ${icon('sheet')} 按空行拆分为多条（一次粘贴多条通知时勾选，每条自动识别截止时间）</label>
       <div id="f-dup" class="dupwarn" style="display:none"></div>
       <div class="grid2">
@@ -1598,33 +1731,48 @@ function openMessageModal(item) {
     };
     if (!payload.title && !payload.content) { toast('标题和内容至少填一项', 'error'); return; }
     try {
-      // 批量模式：按空行拆分为多条，每段各自智能识别（附件会挂到第一条）
+      // 批量模式：按空行拆分为多条，每段各自识别正文（附件会挂到第一条）
       const splitBox = $('#f-split');
       if (splitBox && splitBox.checked && !state.editingId) {
         const parts = payload.content.split(/\n\s*\n+/).map((s) => s.trim()).filter((s) => s.length >= 2);
         if (parts.length > 1) {
           let n = 0;
-          for (const part of parts) {
-            let pp = {};
-            try { pp = (await api('/api/parse', { method: 'POST', body: { text: part } })).parsed; } catch (e) { /* 识别失败就按普通文本存 */ }
-            const created = await api('/api/messages', { method: 'POST', body: {
-              content: part,
-              title: pp.title || part.slice(0, 40),
-              category: pp.category,
-              deadline: pp.deadline || null,
-              priority: pp.priority ? 1 : 0,
-              tags: payload.tags || (pp.tags || []).join(','),
-              group_id: payload.group_id,
-              sender_name: payload.sender_name,
-              received_at: payload.received_at,
-            } });
-            if (n === 0 && state.pendingFiles.length) {
-              const fd = new FormData();
-              fd.append('message_id', created.id);
-              for (const f of state.pendingFiles) fd.append('files', f, f.name);
-              await api('/api/upload', { method: 'POST', body: fd });
+          let failedAt = -1;
+          for (let pi = 0; pi < parts.length; pi++) {
+            const part = parts[pi];
+            try {
+              let pp = {};
+              try { pp = (await api('/api/parse', { method: 'POST', body: { text: part } })).parsed; } catch (e) { /* 识别失败就按普通文本存 */ }
+              const created = await api('/api/messages', { method: 'POST', body: {
+                content: part,
+                title: pp.title || part.slice(0, 40),
+                category: pp.category,
+                deadline: pp.deadline || null,
+                priority: pp.priority ? 1 : 0,
+                tags: payload.tags || (pp.tags || []).join(','),
+                group_id: payload.group_id,
+                sender_name: payload.sender_name,
+                received_at: payload.received_at,
+              } });
+              if (n === 0 && state.pendingFiles.length) {
+                const fd = new FormData();
+                fd.append('message_id', created.id);
+                for (const f of state.pendingFiles) fd.append('files', f, f.name);
+                await api('/api/upload', { method: 'POST', body: fd });
+              }
+              n++;
+            } catch (e) {
+              failedAt = pi;
+              break; // 中途失败就停下：已入库的不重发，未发的留在输入框里
             }
-            n++;
+          }
+          if (failedAt >= 0) {
+            const rest = parts.slice(failedAt).join('\n\n');
+            $('#f-content').value = rest;
+            splitBox.checked = false;
+            toast(`已创建 ${n}/${parts.length} 条，第 ${failedAt + 1} 条失败：未创建的部分仍留在输入框`, 'error');
+            refresh();
+            return;
           }
           closeModal();
           toast(`已按空行拆分添加 ${n} 条 ✓`);
@@ -1747,6 +1895,14 @@ async function setupRosterLib(prefix, applyRoster) {
   const sel = $('#' + prefix + '-roster-lib');
   const delBtn = $('#' + prefix + '-roster-lib-del');
   if (!sel) return;
+  // 班级名单里存的是全班学号，只有系统管理员能读；班委在这里直接粘贴名单即可，
+  // 整行藏掉比留一个空下拉框诚实。弹窗是动态插入的，.admin-only 的批量切换覆盖不到，只能就地处理。
+  if (!isSysAdmin()) {
+    const row = sel.parentElement;
+    if (row) row.style.display = 'none';
+    if (delBtn) delBtn.style.display = 'none';
+    return;
+  }
   let lib = [];
   try { lib = (await api('/api/rosters')).items; } catch (e) { /* 拉取失败按空处理 */ }
   const renderOptions = () => {
@@ -1776,35 +1932,113 @@ async function setupRosterLib(prefix, applyRoster) {
 async function saveRosterToLib(prefix, name, rosterRaw, keepId) {
   return api('/api/rosters', { method: 'POST', body: { name, rosterRaw, keepId } });
 }
+// 班委发起时不写班级名单（名单库只归系统管理员）：输入框和它的标题一起藏掉并把值清空，
+// 否则他填了名字就会在创建前撞一次 401，整次发起失败。
+// 按 rosterFields 生成的 -libname-lb 定位标题，不靠 previousElementSibling 猜——
+// 规范结构里输入框的兄弟是包着 label 的 .labrow，猜法会漏藏标题。
+function gateRosterLibSave(prefix) {
+  const el = $('#' + prefix + '-roster-libname');
+  if (!el || isSysAdmin()) return;
+  const lb = $('#' + prefix + '-roster-libname-lb');
+  if (lb) lb.style.display = 'none';
+  el.style.display = 'none';
+  el.value = '';
+}
+
+/* ---------- 名单区共用组件（全站唯一一份） ----------
+ * 名单库 / 投票 / 问卷 / 接龙 / 抽签 / 接龙编辑 / 抽签编辑 七处原先各写一套：
+ * 两套 DOM 结构、两种 placeholder、三种"含学号"文案、两种预览容器，
+ * 而且只有接龙抽签会按粘贴内容自动勾选学号——把「2023001 张三」粘进投票时学号被静默丢掉，
+ * 而投票正是按学号定位投票人的。这里收成一处，结构、文案、行为都不再分叉。
+ *
+ * mode 是真实协议差异，不是历史包袱，必须保留：
+ *   'ref'  —— 投票 / 问卷：可只交 rosterId，服务端在有人提交时现读名单（改名单不影响已投的票）
+ *   'copy' —— 接龙 / 抽签 / 名单库：把文本抄进框内，随 rosterRaw 一起快照进实体
+ */
+const ROSTER_KEEPID_LABEL = '名单含学号（按「学号 姓名」解析，重名时能区分）';
+const ROSTER_PLACEHOLDER = '每行一个人，Excel / QQ 名单整列可直接粘贴\n例如：2023001 张三 · 2. 李四 · 王五';
+
+function rosterFields(o) {
+  const { prefix, label, value = '', keepId = false, rows = 5, lib = true, saveToLib = false } = o;
+  const ph = esc(ROSTER_PLACEHOLDER).replace(/\n/g, '&#10;');
+  const out = [`<label>${label}</label>`];
+  if (lib) out.push(
+    `<div class="labrow"><select id="${prefix}-roster-lib" style="flex:1;min-width:0"><option value="">— 手动粘贴名单 —</option></select>`
+    + `<button type="button" class="mini danger" id="${prefix}-roster-lib-del" style="display:none;white-space:nowrap">${icon('trash')} 删除</button></div>`);
+  out.push(`<textarea id="${prefix}-roster" rows="${rows}" placeholder="${ph}">${esc(value)}</textarea>`);
+  out.push(`<label class="splitline"><input type="checkbox" id="${prefix}-keepid" ${keepId ? 'checked' : ''}> ${ROSTER_KEEPID_LABEL}</label>`);
+  if (saveToLib) out.push(
+    `<label id="${prefix}-roster-libname-lb">保存到班级名单（选填，同名覆盖，下次可直接选用）</label>`,
+    `<input id="${prefix}-roster-libname" maxlength="60" placeholder="例如：计科2603">`);
+  out.push(`<div id="${prefix}-roster-pv" class="roster-pv"></div>`);
+  return out.join('\n      ');
+}
+
+function rosterPreviewHtml(raw, keepId, o = {}) {
+  const parsed = jlParseRoster(raw, keepId);
+  const verb = o.sidFor;
+  if (!parsed.list.length) {
+    return o.libId
+      ? `<span class="ok-t">✓ 已选用班级名单，提交时由服务器读取</span>`
+      : `<span class="warn-t">还没有名单${o.libId ? '' : '：从班级名单选，或直接粘贴'}</span>`;
+  }
+  const missing = parsed.list.filter((m) => !m.id);
+  return `<div>识别到 <b>${parsed.list.length}</b> 人${keepId ? '（含学号）' : ''}：</div>`
+    + parsed.list.slice(0, 50).map((m) => `<span class="jl-chip plain">${esc(jlSlotLabel(m))}</span>`).join('')
+    + (parsed.list.length > 50 ? `<span class="jl-chip plain">…共 ${parsed.list.length} 人</span>` : '')
+    + (o.libId ? '<div class="hint">上面是从班级名单选的那份；改成手输即为快照名单</div>' : '')
+    + (verb && missing.length
+      ? `<div class="warn-t">${missing.length} 人缺学号，无法${verb}：`
+        + esc(missing.slice(0, 5).map((m) => m.name).join('、')) + (missing.length > 5 ? ' 等' : '')
+        + '——名单写成「2023001 张三」并勾选上面的学号项</div>' : '');
+}
+
+function bindRosterFields(o) {
+  const { prefix, mode = 'copy', sidFor, applyRoster } = o;
+  const ta = $('#' + prefix + '-roster'), cb = $('#' + prefix + '-keepid'), pv = $('#' + prefix + '-roster-pv');
+  if (!ta || !cb || !pv) return;
+  const libSel = $('#' + prefix + '-roster-lib');
+  let touched = cb.checked;   // 用户没手动动过学号勾之前，按粘贴内容自动判定（原先只有接龙抽签这么做）
+  const draw = () => {
+    // ref 模式下选了班级名单就不需要框里的文本，预览要说清这份名单从哪来
+    const libId = mode === 'ref' && libSel ? libSel.value : '';
+    pv.innerHTML = rosterPreviewHtml(ta.value, cb.checked, { sidFor, libId });
+  };
+  const auto = () => {
+    if (touched) return;
+    const k = jlParseRoster(ta.value, true).hasIds;
+    if (k !== cb.checked) { cb.checked = k; draw(); }
+  };
+  ta.addEventListener('input', () => { auto(); draw(); });
+  cb.addEventListener('change', () => { touched = true; draw(); });
+  if (libSel) {
+    libSel.addEventListener('change', draw);
+    setupRosterLib(prefix, applyRoster || ((r) => { ta.value = r.roster; touched = true; draw(); }));
+  }
+  draw();
+}
+
+// 发起 / 保存时统一从这里取值，调用点不再自己拼 id。
+// 名单框不存在时返回 null 而不是空值：编辑弹窗里非系统管理员看不到名单输入，
+// 此时必须整字段不提交，服务端才按"字段没传"保持原名单（含学号）不动；
+// 若回退成空串就会把别人的名单清空。
+function readRoster(prefix, mode = 'copy') {
+  const ta = $('#' + prefix + '-roster');
+  if (!ta) return null;
+  const libSel = $('#' + prefix + '-roster-lib');
+  return {
+    libId: mode === 'ref' && libSel ? libSel.value : '',
+    raw: ta.value,
+    keepId: !!($('#' + prefix + '-keepid') || {}).checked,
+    libName: (($('#' + prefix + '-roster-libname') || {}).value || '').trim(),
+  };
+}
 
 /* ========= 班级接龙（自「接龙小助手」并入） ========= */
 let jlTimer = null;
 function jlStopTimer() { if (jlTimer) { clearInterval(jlTimer); jlTimer = null; } }
 let vTimer = null;
 function vStopTimer() { if (vTimer) { clearInterval(vTimer); vTimer = null; } }
-function voteMine() {
-  try { return JSON.parse(localStorage.getItem('infohub-vote-mine') || '[]'); } catch (e) { return []; }
-}
-function voteMineRemember(id, token, title) {
-  const list = voteMine().filter((x) => x.id !== id);
-  list.unshift({ id, token, title }); // 头插：超出保留上限时丢的是最旧的令牌
-  try { localStorage.setItem('infohub-vote-mine', JSON.stringify(list.slice(0, 50))); } catch (e) { /* 忽略 */ }
-}
-const voteTokenOf = (id) => (voteMine().find((x) => x.id === id) || {}).token || null;
-
-function jlMine() {
-  try { return JSON.parse(localStorage.getItem('infohub-jielong-mine') || '[]'); } catch (e) { return []; }
-}
-function jlMineSave(list) {
-  try { localStorage.setItem('infohub-jielong-mine', JSON.stringify(list.slice(0, 50))); } catch (e) { /* 忽略 */ }
-}
-function jlMineRemember(id, token, title) {
-  jlMineSave([{ id, token, title, ts: Date.now() }, ...jlMine().filter((x) => x.id !== id)]);
-}
-function jlTokenOf(id) {
-  const it = jlMine().find((x) => x.id === id);
-  return it ? it.token : '';
-}
 function jlSlotLabel(r) { return r.id ? r.id + ' ' + r.name : r.name; }
 function jlFmtTime(ts) {
   if (!ts) return '';
@@ -1954,13 +2188,8 @@ async function loadJielong() {
   view.innerHTML = '<div class="loading">加载中…</div>';
   const data = await api('/api/jielong');
   if (seq !== loadSeq) return;
-  // 清理已失效的本地入口（接龙被删除后）
-  const known = new Set(data.items.map((x) => x.id));
-  const mine = jlMine();
-  if (mine.some((x) => !known.has(x.id))) jlMineSave(mine.filter((x) => known.has(x.id)));
-
   const items = data.items.map((a) => {
-    const hasToken = canEdit() || jlTokenOf(a.id);
+    const canEdit = canPost();
     return `<div class="panel">
       <div class="jl-head"><h2>${esc(a.title)}</h2>${jlStatusBadge(a)}</div>
       ${a.description ? `<p class="jl-desc">${esc(a.description.length > 80 ? a.description.slice(0, 80) + '…' : a.description)}</p>` : ''}
@@ -1970,7 +2199,7 @@ async function loadJielong() {
       <div class="jl-actions">
         <button class="ghost" data-jl-open="${a.id}">${icon('external')} 打开接龙页</button>
         <button class="ghost" data-jl-copy="${a.id}">${icon('copy')} 复制学生链接</button>
-        ${hasToken ? `<button class="ghost" data-jl-manage="${a.id}">${icon('settings')} 管理</button>` : ''}
+        ${canEdit ? `<button class="ghost" data-jl-manage="${a.id}">${icon('settings')} 管理</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -1978,17 +2207,17 @@ async function loadJielong() {
   view.innerHTML =
     `<div class="jl-head"><h2>${icon('jielong')} 活动接龙</h2></div>
     <p class="hint">接龙链接发到班群，同学点开即填即交；自动比对名单，谁没接龙一目了然。</p>
-    ${canEdit() ? `<div class="jl-actions"><button class="primary" id="btn-jl-create">${icon('plus')} 发起接龙</button></div>` : ''}
+    ${canPost() ? `<div class="jl-actions"><button class="primary" id="btn-jl-create">${icon('plus')} 发起接龙</button></div>` : ''}
     ${items || `<div class="empty"><div class="big">${icon('jielong')}</div>还没有接龙` +
-      (canEdit() ? '<br>点上面「发起接龙」，把班群里的接龙搬到这里' : '<br>发起后接龙会出现在这里') + '</div>'}`;
+      (canPost() ? '<br>点上面「发起接龙」，把班群里的接龙搬到这里' : '<br>发起后接龙会出现在这里') + '</div>'}`;
   const createBtn = $('#btn-jl-create');
   if (createBtn) createBtn.addEventListener('click', openJielongCreateModal);
   $$('[data-jl-manage]').forEach((b) => b.addEventListener('click', () => {
-    state.jl = { id: b.dataset.jlManage, token: jlTokenOf(b.dataset.jlManage) };
+    state.jl = { id: b.dataset.jlManage };
     renderView().catch((e) => toast(e.message, 'error'));
   }));
   $$('[data-jl-open]').forEach((b) => b.addEventListener('click', () => window.open('/j/' + b.dataset.jlOpen)));
-  $$('[data-jl-copy]').forEach((b) => jlCopy(location.origin + '/j/' + b.dataset.jlCopy, '学生链接已复制，可发到班群'));
+  $$('[data-jl-copy]').forEach((b) => b.addEventListener('click', () => jlCopy(location.origin + '/j/' + b.dataset.jlCopy, '学生链接已复制，可发到班群')));
 }
 
 /* ---------- 接龙详情（管理台） ---------- */
@@ -2006,10 +2235,7 @@ async function loadJielongDetail() {
     return loadJielong();
   }
   if (seq !== loadSeq) return; // 等待期间已切换视图，丢弃旧响应
-  const token = state.jl.token || jlTokenOf(a.id) || (a.adminToken || ''); // 管理员可从详情取回令牌
-  const canManage = canEdit() || !!token;
-  if (token && !jlTokenOf(a.id)) jlMineRemember(a.id, token, a.title); // 委托链接：保存入口
-  const tArg = token ? '?t=' + encodeURIComponent(token) : '';
+  const canEdit = canPost();   // 接龙的管理动作班委与管理员同权；学号要不要显示由服务端下发时脱敏决定
   const stuLink = location.origin + '/j/' + a.id;
 
   const withId = (a.roster || []).some((r) => r.id) || a.entries.some((e) => e.id);
@@ -2032,7 +2258,7 @@ async function loadJielongDetail() {
 
   view.innerHTML = `
     <button class="ghost jl-back" id="jl-back">← 返回接龙列表</button>
-    ${state.jlBanner ? `<div class="jl-banner">${icon('check')} 接龙创建成功！把「学生链接」发到班群即可；本页可随时查看进度、复制提醒文案。<b>管理入口保存在本浏览器</b>，换设备请收藏带令牌的管理链接。</div>` : ''}
+    ${state.jlBanner ? `<div class="jl-banner">${icon('check')} 接龙创建成功！把「学生链接」发到班群即可；本页可随时查看进度、复制提醒文案。<b>这条接龙的入口保存在本浏览器</b>，换设备登录后从「活动接龙」进入。</div>` : ''}
     <div class="panel">
       <div class="jl-head"><h2>${esc(a.title)}</h2>${jlStatusBadge(a)}</div>
       ${a.description ? `<p class="jl-desc">${esc(a.description)}</p>` : ''}
@@ -2040,30 +2266,23 @@ async function loadJielongDetail() {
         ${a.closedNow ? '<span class="jl-badge warn">已截止，不能再提交</span>' : ''}</div>
       <div class="jl-prog">${jlProgressHtml(a)}</div>
     </div>
-    ${canManage ? `<div class="panel">
+    ${canEdit ? `<div class="panel">
       <div class="jl-linkrow"><input readonly value="${esc(stuLink)}"><button class="ghost" id="jl-copy-stu">复制学生链接</button>
         <button class="ghost" id="jl-show-qr">二维码</button></div>
       <div class="jl-actions">
         <button class="ghost" id="jl-copy-miss">${icon('copy')} 复制未接名单</button>
         <button class="ghost" id="jl-copy-full">${icon('doc')} 复制接龙全文</button>
-        <a class="ghost" id="jl-export" href="/api/jielong/${a.id}/export${tArg}" download>${icon('download')} 导出 CSV</a>
-        <button class="ghost" id="jl-per">${icon('link')} 专属链接</button>
-        ${canEdit() && token ? `<button class="ghost" id="jl-copy-admin">${icon('users')} 复制管理链接</button>` : ''}
+        <a class="ghost" id="jl-export" href="/api/jielong/${a.id}/export" download>${icon('download')} 导出 CSV</a>
         <button class="ghost" id="jl-edit">${icon('edit')} 编辑</button>
         <button class="ghost" id="jl-close">${a.closed ? `${icon('refresh')} 重新开启` : `${icon('clock')} 停止接龙`}</button>
         <button class="ghost danger" id="jl-del">${icon('trash')} 删除接龙</button>
-      </div>
-      <div id="jl-per-box" style="display:none">
-        <p class="jl-sec">${icon('link')} 专属链接（打开后姓名锁定，防代填；适合私发个人）</p>
-        <textarea id="jl-per-list" class="form-like" rows="6" readonly style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text);font-size:12.5px;resize:vertical"></textarea>
-        <div class="jl-actions"><button class="ghost" id="jl-per-copy">复制全部</button></div>
       </div>
     </div>` : ''}
     <div class="panel">
       <h3>${icon('users')} 已接龙（${a.entries.length} 人）</h3>
       ${a.entries.length ? `<div class="jl-tblwrap"><table class="jl-table">
         <thead><tr><th>#</th>${withId ? '<th>学号</th>' : ''}<th>姓名</th>
-        ${a.fields.map((f) => `<th>${esc(f.label)}</th>`).join('')}<th>备注</th><th>时间</th>${canManage ? '<th></th>' : ''}</tr></thead>
+        ${a.fields.map((f) => `<th>${esc(f.label)}</th>`).join('')}<th>备注</th><th>时间</th>${canEdit ? '<th></th>' : ''}</tr></thead>
         <tbody>${a.entries.map((e, i) => `
           <tr><td>${i + 1}</td>
           ${withId ? `<td>${esc(e.id || '—')}</td>` : ''}
@@ -2071,13 +2290,13 @@ async function loadJielongDetail() {
           ${a.fields.map((f) => `<td>${esc(e.values[f.key] || '—')}</td>`).join('')}
           <td>${esc(e.remark || '—')}</td>
           <td class="dim">${jlFmtTime(e.time)}</td>
-          ${canManage ? `<td><button class="mini danger" data-jl-del-entry="${e.outside || e.rid == null ? 'n:' + esc(e.name) : 'r:' + e.rid}">删除</button></td>` : ''}</tr>`).join('')}</tbody>
+          ${canEdit ? `<td><button class="mini danger" data-jl-del-entry="${e.outside || e.rid == null ? 'n:' + esc(e.name) : 'r:' + e.rid}">删除</button></td>` : ''}</tr>`).join('')}</tbody>
       </table></div>` : '<p class="empty-mini">还没有人接龙，快把学生链接发到班群吧</p>'}
     </div>
     ${a.hasRoster ? `<div class="panel">
       <h3>${icon('clock')} 未接龙（${(a.missing || []).length} 人）</h3>
       ${(a.missing || []).length
-        ? `<div>${a.missing.map((m) => `<span class="jl-chip" data-jl-per="${m.i}" title="点击复制该同学的专属链接">${esc(jlSlotLabel(m))}</span>`).join('')}</div>`
+        ? `<div>${a.missing.map((m) => `<span class="jl-chip">${esc(jlSlotLabel(m))}</span>`).join('')}</div>`
         : '<p class="empty-mini">全部完成！</p>'}
     </div>` : ''}`;
 
@@ -2104,7 +2323,7 @@ async function loadJielongDetail() {
   }, 5000);
   if (!state.jlQuiet) window.scrollTo(0, 0);
 
-  if (!canManage) return;
+  if (!canEdit) return;
 
   $('#jl-copy-stu').addEventListener('click', () => jlCopy(stuLink, '学生链接已复制'));
   $('#jl-show-qr').addEventListener('click', () => openJlQrModal(stuLink));
@@ -2116,14 +2335,12 @@ async function loadJielongDetail() {
       missing.map(jlSlotLabel).join('、') + '\n请点击链接完成接龙：' + stuLink, '已复制，可粘贴到班群提醒大家');
   });
   $('#jl-copy-full').addEventListener('click', () => jlCopy(jlFullText(), '接龙全文已复制，可粘贴到班群'));
-  const copyAdmin = $('#jl-copy-admin');
-  if (copyAdmin) copyAdmin.addEventListener('click', () => jlCopy(location.origin + '/?jl=' + a.id + '&t=' + encodeURIComponent(token), '管理链接已复制，发给班委即可代管本次接龙'));
-  $('#jl-edit').addEventListener('click', () => openJielongEditModal(a, token));
+  $('#jl-edit').addEventListener('click', () => openJielongEditModal(a));
   $('#jl-close').addEventListener('click', async () => {
     const target = !a.closed;
     if (target && !confirm('确定停止接龙？停止后同学将无法再提交（可重新开启）。')) return;
     try {
-      await api(`/api/jielong/${a.id}/close${tArg}`, { method: 'POST', body: { closed: target } });
+      await api(`/api/jielong/${a.id}/close`, { method: 'POST', body: { closed: target } });
       toast(target ? '已停止接龙' : '已重新开启接龙');
       loadJielongDetail();
     } catch (e) { toast(e.message, 'error'); }
@@ -2132,34 +2349,18 @@ async function loadJielongDetail() {
     if (!confirm(`确定删除整个接龙？「${a.title}」的全部数据（含 ${a.entries.length} 条记录）将被清除，不可恢复！`)) return;
     if (!confirm('再次确认：真的要删除吗？')) return;
     try {
-      await api(`/api/jielong/${a.id}${tArg}`, { method: 'DELETE' });
-      jlMineSave(jlMine().filter((x) => x.id !== a.id));
+      await api(`/api/jielong/${a.id}`, { method: 'DELETE' });
       state.jl = null;
       toast('接龙已删除');
       renderView().catch(() => {});
     } catch (e) { toast(e.message, 'error'); }
   });
-  const perBtn = $('#jl-per');
-  if (perBtn) perBtn.addEventListener('click', () => {
-    const box = $('#jl-per-box');
-    if (!a.roster.length) { toast('本次接龙未设置名单，没有专属链接'); return; }
-    if (box.style.display !== 'none') { box.style.display = 'none'; return; }
-    $('#jl-per-list').value = a.roster.map((r, i) => jlSlotLabel(r) + '：' + stuLink + '?u=' + i).join('\n');
-    box.style.display = '';
-  });
-  const perCopy = $('#jl-per-copy');
-  if (perCopy) perCopy.addEventListener('click', () => jlCopy($('#jl-per-list').value, '专属链接已全部复制'));
-  $$('[data-jl-per]').forEach((chip) => chip.addEventListener('click', () => {
-    const i = +chip.dataset.jlPer;
-    if (!(a.roster || [])[i]) return;
-    jlCopy(stuLink + '?u=' + i, '已复制 ' + jlSlotLabel(a.roster[i]) + ' 的专属链接');
-  }));
   $$('[data-jl-del-entry]').forEach((btn) => btn.addEventListener('click', async () => {
     const key = btn.dataset.jlDelEntry;
     const label = key.startsWith('r:') ? '该同学的' : `「${key.slice(2)}」的`;
     if (!confirm(`确定删除${label}接龙记录？`)) return;
     try {
-      await api(`/api/jielong/${a.id}/entry${tArg}${tArg ? '&' : '?'}${key.startsWith('r:') ? 'rid=' + key.slice(2) : 'name=' + encodeURIComponent(key.slice(2))}`, { method: 'DELETE' });
+      await api(`/api/jielong/${a.id}/entry?${key.startsWith('r:') ? 'rid=' + key.slice(2) : 'name=' + encodeURIComponent(key.slice(2))}`, { method: 'DELETE' });
       loadJielongDetail();
     } catch (e) { toast(e.message, 'error'); }
   }));
@@ -2168,18 +2369,7 @@ async function loadJielongDetail() {
 /* ---------- 发起 / 编辑接龙 ---------- */
 function openJielongCreateModal() {
   const fields = [{ label: '接龙内容', type: 'text', required: true, options: [] }];
-  let withIdTouched = false;
 
-  const rosterPreview = () => {
-    const raw = $('#jl-roster').value;
-    if (!withIdTouched) $('#jl-withid').checked = jlParseRoster(raw, true).hasIds;
-    const parsed = jlParseRoster(raw, $('#jl-withid').checked);
-    const pv = $('#jl-roster-pv');
-    if (!parsed.list.length) { pv.innerHTML = ''; return; }
-    pv.innerHTML = `<div>识别到 <b>${parsed.list.length}</b> 人${$('#jl-withid').checked ? '（含学号）' : ''}：</div>` +
-      parsed.list.slice(0, 50).map((r) => `<span class="jl-chip plain">${esc(jlSlotLabel(r))}</span>`).join('') +
-      (parsed.list.length > 50 ? `<span class="jl-chip plain">…共 ${parsed.list.length} 人</span>` : '');
-  };
   const renderFields = () => {
     const box = $('#jl-fields');
     box.innerHTML = '';
@@ -2216,23 +2406,13 @@ function openJielongCreateModal() {
       <input id="jl-title" maxlength="60" placeholder="例如：9月12日春游报名">
       <label>说明（选填）</label>
       <textarea id="jl-desc" rows="2" maxlength="1000" placeholder="时间、地点、要求等，同学打开链接就能看到"></textarea>
-      <label>从班级名单选择（可选）</label>
-      <div class="labrow">
-        <select id="jl-roster-lib" style="flex:1;min-width:0"><option value="">— 手动粘贴名单 —</option></select>
-        <button type="button" class="mini danger" id="jl-roster-lib-del" style="display:none;white-space:nowrap">${icon('trash')} 删除</button>
-      </div>
-      <label>班级名单（选填，用于自动统计谁没接龙；支持直接粘贴 Excel / QQ 名单）</label>
-      <textarea id="jl-roster" rows="5" placeholder="每行一个，支持“学号 姓名”&#10;例如：&#10;2023001 张三&#10;2. 李四&#10;王五"></textarea>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer"><input type="checkbox" id="jl-withid" style="width:auto"> 名单包含学号（输入学号或姓名都能匹配）</label>
-      <div id="jl-roster-pv" class="jl-roster-pv"></div>
-      <label>保存到班级名单（选填，同名覆盖，下次创建时可直接选用）</label>
-      <input id="jl-roster-libname" maxlength="60" placeholder="例如：三年二班名单">
+      ${rosterFields({ prefix: 'jl', label: '班级名单（选填，用于自动统计谁没接龙）', saveToLib: true })}
       <label>截止时间（选填）</label>
       <input id="jl-deadline" type="datetime-local">
       <label>接龙内容（同学需要填写的项目，可增减）</label>
       <div id="jl-fields"></div>
       <button class="ghost" id="jl-addfield" type="button">${icon('plus')} 添加填写项</button>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer;margin-top:12px"><input type="checkbox" id="jl-outside" checked style="width:auto"> 允许名单外的同学接龙（会标记“名单外”）</label>
+      <label class="splitline" style="margin-top:12px"><input type="checkbox" id="jl-outside" checked> 允许名单外的同学接龙（会标记“名单外”）</label>
     </div>
     <div class="modal-foot">
       <button class="ghost" id="btn-cancel">取消</button>
@@ -2240,39 +2420,32 @@ function openJielongCreateModal() {
     </div>`);
 
   renderFields();
-  $('#jl-roster').addEventListener('input', rosterPreview);
-  $('#jl-withid').addEventListener('change', () => { withIdTouched = true; rosterPreview(); });
   $('#jl-addfield').addEventListener('click', () => {
     if (fields.length >= 8) { toast('最多 8 个填写项', 'error'); return; }
     fields.push({ label: '', type: 'text', required: true, options: [] });
     renderFields();
   });
-  rosterPreview();
-  setupRosterLib('jl', (r) => {
-    $('#jl-roster').value = r.roster;
-    $('#jl-withid').checked = !!r.keepId;
-    withIdTouched = true;
-    rosterPreview();
-  });
+  gateRosterLibSave('jl');
+  bindRosterFields({ prefix: 'jl', mode: 'copy' });
 
   $('#jl-save').addEventListener('click', async () => {
     const title = $('#jl-title').value.trim();
     if (!title) { toast('请填写接龙标题', 'error'); return; }
+    const ros = readRoster('jl');
     try {
-      const libName = $('#jl-roster-libname').value.trim();
-      if (libName) await saveRosterToLib('jl', libName, $('#jl-roster').value, $('#jl-withid').checked);
+      // 名单本身选填：只填了库名没贴名单时跳过保存，别让辅助字段把主流程 400 卡断
+      if (ros.libName && ros.raw.trim()) await saveRosterToLib('jl', ros.libName, ros.raw, ros.keepId);
       const r = await api('/api/jielong', { method: 'POST', body: {
         title,
         description: $('#jl-desc').value.trim(),
-        rosterRaw: $('#jl-roster').value,
-        keepId: $('#jl-withid').checked,
+        rosterRaw: ros.raw,
+        keepId: ros.keepId,
         deadline: valToDt($('#jl-deadline').value) || null,
         allowOutside: $('#jl-outside').checked,
         fields: fields.filter((f) => f.label.trim()).map((f) => ({ label: f.label.trim(), type: f.type, required: f.required, options: f.options || [] })),
       } });
-      jlMineRemember(r.id, r.adminToken, title);
       closeModal();
-      state.jl = { id: r.id, token: r.adminToken };
+      state.jl = { id: r.id };
       state.jlBanner = true;
       if (state.view !== 'jielong') state.view = 'jielong';
       syncNavActive();
@@ -2282,32 +2455,36 @@ function openJielongCreateModal() {
   });
 }
 
-function openJielongEditModal(a, token) {
-  const tArg = token ? '?t=' + encodeURIComponent(token) : '';
+function openJielongEditModal(a) {
   openModal(`
     <h2>${icon('edit')} 编辑接龙</h2>
     <div class="form">
       <label>标题</label><input id="jl-e-title" maxlength="60" value="${esc(a.title)}">
       <label>说明</label><textarea id="jl-e-desc" rows="2" maxlength="1000">${esc(a.description || '')}</textarea>
       <label>截止时间（留空表示不设截止）</label><input id="jl-e-deadline" type="datetime-local" value="${dtToVal(a.deadline)}">
-      <label>名单（保存后已接记录自动重新匹配；不在新名单中的已接记录会转为“名单外”）</label>
-      <textarea id="jl-e-roster" rows="5">${esc((a.roster || []).map(jlSlotLabel).join('\n'))}</textarea>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer"><input type="checkbox" id="jl-e-withid" style="width:auto"${(a.roster || []).some((r) => r.id) ? ' checked' : ''}> 名单包含学号</label>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer"><input type="checkbox" id="jl-e-outside" style="width:auto"${a.allowOutside ? ' checked' : ''}> 允许名单外的同学接龙</label>
+      ${isSysAdmin() ? rosterFields({
+        prefix: 'jl-e', label: '名单（保存后已接记录自动重新匹配；不在新名单中的已接记录会转为"名单外"）',
+        value: (a.roster || []).map(jlSlotLabel).join('\n'),
+        keepId: (a.roster || []).some((r) => r.id), lib: false,
+      })
+        : `<label>名单</label><div class="hint">共 ${(a.roster || []).length} 人；名单不能在这里改，保存会把学号冲掉。这里只改标题、说明、截止与开关</div>`}
+      <label class="splitline"><input type="checkbox" id="jl-e-outside" ${a.allowOutside ? 'checked' : ''}> 允许名单外的同学接龙</label>
     </div>
     <div class="modal-foot">
       <button class="ghost" id="btn-cancel">取消</button>
       <button class="primary" id="jl-e-save">保存修改</button>
     </div>`);
+  bindRosterFields({ prefix: 'jl-e' });
   $('#jl-e-save').addEventListener('click', async () => {
     if (!$('#jl-e-title').value.trim()) { toast('标题不能为空', 'error'); return; }
+    const ros = readRoster('jl-e');
     try {
-      await api(`/api/jielong/${a.id}${tArg}`, { method: 'PUT', body: {
+      await api(`/api/jielong/${a.id}`, { method: 'PUT', body: {
         title: $('#jl-e-title').value,
         description: $('#jl-e-desc').value,
         deadline: valToDt($('#jl-e-deadline').value) || null,
-        rosterRaw: $('#jl-e-roster').value,
-        keepId: $('#jl-e-withid').checked,
+        rosterRaw: ros ? ros.raw : undefined,
+        keepId: ros ? ros.keepId : undefined,
         allowOutside: $('#jl-e-outside').checked,
       } });
       closeModal();
@@ -2331,14 +2508,14 @@ async function loadDraw() {
       <div class="jl-meta"><span>每次抽 ${d.perDraw} 人</span><span>已抽 ${d.roundCount} 轮</span><span>名单 ${d.total} 人</span></div>
       <div class="jl-actions">
         <button class="primary" data-dw-open="${d.id}">${icon('draw')} 进入抽签</button>
-        ${canEdit() ? `<button class="ghost danger" data-dw-del="${d.id}">${icon('trash')} 删除</button>` : ''}
+        ${canPost() ? `<button class="ghost danger" data-dw-del="${d.id}">${icon('trash')} 删除</button>` : ''}
       </div>
     </div>`).join('');
   view.innerHTML = `
     <div class="jl-head"><h2>${icon('draw')} 抽签点名</h2></div>
     <p class="hint">按班级名单建签箱：抽过的人自动排除，下次不会被抽到；箱内抽空后自动开始新一轮，保证大家轮流参加。</p>
-    ${canEdit() ? `<div class="jl-actions"><button class="primary" id="btn-dw-create">${icon('plus')} 新建签箱</button></div>` : ''}
-    ${items || `<div class="empty"><div class="big">${icon('draw')}</div>还没有签箱<br>${canEdit() ? '点上面「新建签箱」，粘贴班级名单就能开始抽签' : '发起后签箱会出现在这里'}</div>`}`;
+    ${canPost() ? `<div class="jl-actions"><button class="primary" id="btn-dw-create">${icon('plus')} 新建签箱</button></div>` : ''}
+    ${items || `<div class="empty"><div class="big">${icon('draw')}</div>还没有签箱<br>${canPost() ? '点上面「新建签箱」，粘贴班级名单就能开始抽签' : '发起后签箱会出现在这里'}</div>`}`;
   const createBtn = $('#btn-dw-create');
   if (createBtn) createBtn.addEventListener('click', openDrawCreateModal);
   $$('[data-dw-open]').forEach((b) => b.addEventListener('click', () => {
@@ -2369,6 +2546,7 @@ async function loadDrawDetail() {
 
 function renderDrawDetail(d) {
   const view = $('#view');
+  const canEdit = canPost();   // 抽签的全套动作班委可用；学号要不要出现由服务端下发时脱敏决定
   const pct = d.total ? Math.round((d.total - d.remainingCount) / d.total * 100) : 0;
   const done = d.total > 0 && d.remainingCount === 0;
   const last = d.rounds[d.rounds.length - 1];
@@ -2386,7 +2564,7 @@ function renderDrawDetail(d) {
       <div class="dw-countrow">本次抽 <input id="dw-count" type="number" min="1" max="${nextMax}" value="${nextN}"> 人
         <span class="hint" style="margin:0">${done ? '箱内已抽空，下次抽签自动开始新一轮' : `还剩 ${d.remainingCount} 人未被抽到`}</span></div>
       <div class="dw-result" id="dw-result">${last ? last.picked.map((p) => `<span class="dw-name">${esc(p.name)}</span>`).join('') : `<span class="dw-empty">点下面按钮开始抽签</span>`}</div>
-      ${canEdit() ? `
+      ${canEdit ? `
       <button class="dw-go" id="dw-go">${icon('draw')} 开始抽签${done ? '（新一轮）' : ''}</button>
       <div class="jl-actions">
         <button class="ghost" id="dw-undo" ${d.roundCount ? '' : 'disabled'}>${icon('undo')} 撤销上一轮</button>
@@ -2401,12 +2579,12 @@ function renderDrawDetail(d) {
           <span class="dw-rnames">${r.picked.map((p) => `<span class="dw-rname">${esc(p.name)}</span>`).join('')}</span>
         </div>`).join('') : '<p class="empty-mini">还没有抽过</p>'}
     </div>
-    ${canEdit() ? `<div class="jl-actions">
+    ${canEdit ? `<div class="jl-actions">
       <button class="ghost" id="dw-edit">${icon('edit')} 编辑签箱</button>
       <button class="ghost danger" id="dw-del">${icon('trash')} 删除签箱</button>
     </div>` : ''}`;
   $('#dw-back').addEventListener('click', () => { state.draw = null; renderView().catch(() => {}); });
-  if (!canEdit()) return;
+  if (!canEdit) return;
 
   $('#dw-go').addEventListener('click', async () => {
     const n = Math.max(1, Number($('#dw-count').value) || d.perDraw);
@@ -2448,33 +2626,12 @@ function renderDrawDetail(d) {
 }
 
 function openDrawCreateModal() {
-  let withIdTouched = false;
-  const rosterPreview = () => {
-    const raw = $('#dw-roster').value;
-    if (!withIdTouched) $('#dw-withid').checked = jlParseRoster(raw, true).hasIds;
-    const parsed = jlParseRoster(raw, $('#dw-withid').checked);
-    const pv = $('#dw-roster-pv');
-    if (!parsed.list.length) { pv.innerHTML = ''; return; }
-    pv.innerHTML = `<div>识别到 <b>${parsed.list.length}</b> 人${$('#dw-withid').checked ? '（含学号）' : ''}：</div>` +
-      parsed.list.slice(0, 50).map((r) => `<span class="jl-chip plain">${esc(jlSlotLabel(r))}</span>`).join('') +
-      (parsed.list.length > 50 ? `<span class="jl-chip plain">…共 ${parsed.list.length} 人</span>` : '');
-  };
   openModal(`
     <h2>${icon('draw')} 新建签箱</h2>
     <div class="form">
       <label>抽签标题</label>
       <input id="dw-title" maxlength="60" placeholder="例如：运动会志愿者抽签">
-      <label>从班级名单选择（可选）</label>
-      <div class="labrow">
-        <select id="dw-roster-lib" style="flex:1;min-width:0"><option value="">— 手动粘贴名单 —</option></select>
-        <button type="button" class="mini danger" id="dw-roster-lib-del" style="display:none;white-space:nowrap">${icon('trash')} 删除</button>
-      </div>
-      <label>班级名单（支持直接粘贴 Excel / QQ 名单）</label>
-      <textarea id="dw-roster" rows="5" placeholder="每行一个，支持“学号 姓名”&#10;例如：&#10;2023001 张三&#10;2. 李四&#10;王五"></textarea>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer"><input type="checkbox" id="dw-withid" style="width:auto"> 名单包含学号（重名班级建议保留，按学号区分）</label>
-      <div id="dw-roster-pv" class="jl-roster-pv"></div>
-      <label>保存到班级名单（选填，同名覆盖，下次创建时可直接选用）</label>
-      <input id="dw-roster-libname" maxlength="60" placeholder="例如：三年二班名单">
+      ${rosterFields({ prefix: 'dw', label: '班级名单（签箱里的人，支持直接粘贴 Excel / QQ 名单）', saveToLib: true })}
       <label>每次抽几人（抽签时还可以临时改）</label>
       <input id="dw-perdraw" type="number" min="1" value="1">
     </div>
@@ -2482,25 +2639,18 @@ function openDrawCreateModal() {
       <button class="ghost" id="btn-cancel">取消</button>
       <button class="primary" id="dw-save">创建签箱</button>
     </div>`);
-  rosterPreview();
-  setupRosterLib('dw', (r) => {
-    $('#dw-roster').value = r.roster;
-    $('#dw-withid').checked = !!r.keepId;
-    withIdTouched = true;
-    rosterPreview();
-  });
-  $('#dw-roster').addEventListener('input', rosterPreview);
-  $('#dw-withid').addEventListener('change', () => { withIdTouched = true; rosterPreview(); });
+  gateRosterLibSave('dw');
+  bindRosterFields({ prefix: 'dw', mode: 'copy' });
   $('#dw-save').addEventListener('click', async () => {
     const title = $('#dw-title').value.trim();
     if (!title) { toast('请填写抽签标题', 'error'); return; }
+    const ros = readRoster('dw');
     try {
-      const libName = $('#dw-roster-libname').value.trim();
-      if (libName) await saveRosterToLib('dw', libName, $('#dw-roster').value, $('#dw-withid').checked);
+      if (ros.libName) await saveRosterToLib('dw', ros.libName, ros.raw, ros.keepId);
       const r = await api('/api/draw', { method: 'POST', body: {
         title,
-        rosterRaw: $('#dw-roster').value,
-        keepId: $('#dw-withid').checked,
+        rosterRaw: ros.raw,
+        keepId: ros.keepId,
         perDraw: Number($('#dw-perdraw').value) || 1,
       } });
       closeModal();
@@ -2514,21 +2664,16 @@ function openDrawCreateModal() {
 }
 
 function openDrawEditModal(d) {
-  let withIdTouched = true;
-  const rosterPreview = () => {
-    const parsed = jlParseRoster($('#dw-e-roster').value, $('#dw-e-withid').checked);
-    const pv = $('#dw-e-roster-pv');
-    if (!parsed.list.length) { pv.innerHTML = ''; return; }
-    pv.innerHTML = `<div>识别到 <b>${parsed.list.length}</b> 人${$('#dw-e-withid').checked ? '（含学号）' : ''}</div>`;
-  };
   openModal(`
     <h2>${icon('edit')} 编辑签箱</h2>
     <div class="form">
       <label>标题</label><input id="dw-e-title" maxlength="60" value="${esc(d.title)}">
-      <label>名单（保存后按“学号+姓名”匹配已抽记录；不在新名单中的已抽记录自动失效）</label>
-      <textarea id="dw-e-roster" rows="5">${esc(d.roster ? d.roster.map(jlSlotLabel).join('\n') : '')}</textarea>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer"><input type="checkbox" id="dw-e-withid" style="width:auto"${(d.roster || []).some((r) => r.id) ? ' checked' : ''}> 名单包含学号</label>
-      <div id="dw-e-roster-pv" class="jl-roster-pv"></div>
+      ${isSysAdmin() ? rosterFields({
+        prefix: 'dw-e', label: '名单（保存后按"学号+姓名"匹配已抽记录；不在新名单中的已抽记录自动失效）',
+        value: d.roster ? d.roster.map(jlSlotLabel).join('\n') : '',
+        keepId: (d.roster || []).some((r) => r.id), lib: false,
+      })
+        : `<label>名单</label><div class="hint">共 ${d.total} 人；名单不能在这里改，保存会把学号冲掉。这里只改标题与每次抽几人</div>`}
       <label>每次抽几人</label>
       <input id="dw-e-perdraw" type="number" min="1" value="${d.perDraw}">
     </div>
@@ -2536,16 +2681,15 @@ function openDrawEditModal(d) {
       <button class="ghost" id="btn-cancel">取消</button>
       <button class="primary" id="dw-e-save">保存修改</button>
     </div>`);
-  rosterPreview();
-  $('#dw-e-roster').addEventListener('input', rosterPreview);
-  $('#dw-e-withid').addEventListener('change', rosterPreview);
+  bindRosterFields({ prefix: 'dw-e' });
   $('#dw-e-save').addEventListener('click', async () => {
     if (!$('#dw-e-title').value.trim()) { toast('标题不能为空', 'error'); return; }
+    const ros = readRoster('dw-e');
     try {
       await api('/api/draw/' + d.id, { method: 'PUT', body: {
         title: $('#dw-e-title').value,
-        rosterRaw: $('#dw-e-roster').value,
-        keepId: $('#dw-e-withid').checked,
+        rosterRaw: ros ? ros.raw : undefined,
+        keepId: ros ? ros.keepId : undefined,
         perDraw: Number($('#dw-e-perdraw').value) || 1,
       } });
       closeModal();
@@ -2580,14 +2724,6 @@ function bdWish(m) {
   const pick = (arr) => { const v = arr[s % arr.length]; s = Math.floor(s / arr.length) + 7; return v; };
   return pick(BD_WISH_OPEN) + pick(BD_WISH_CORE) + (Math.random() < 0.5 ? ' ' + pick(BD_WISH_TAIL) : '');
 }
-const bdChip = (m) => {
-  if (m.pending) return '<span class="bd-chip pending">生日待填</span>';
-  if (m.isToday) return '<span class="bd-chip today">今天生日</span>';
-  if (m.daysUntil === 1) return '<span class="bd-chip soon">明天生日</span>';
-  if (m.daysUntil <= 7) return `<span class="bd-chip soon">还有 ${m.daysUntil} 天</span>`;
-  return `<span class="bd-chip later">${m.month} 月 ${m.day} 日 · 还有 ${m.daysUntil} 天</span>`;
-};
-
 let bdTodayCache = null;
 async function refreshBirthdaysToday() {
   try {
@@ -2618,6 +2754,983 @@ async function checkBirthdayNotifs() {
     }
     localStorage.setItem(key, JSON.stringify([...done]));
   } catch (e) { /* 静默 */ }
+}
+
+/* ========= 问卷调查 ========= */
+async function loadSurveys() {
+  const seq = loadSeq;
+  const view = $('#view');
+  if (state.survey) { await loadSurveyDetail(); return; }
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  const data = await api('/api/survey');
+  if (seq !== loadSeq) return;
+  const items = data.items || [];
+  view.innerHTML = `
+    <div class="jl-head"><h2>${icon('survey')} 问卷调查</h2></div>
+    <p class="hint">把题目一道一道拼成问卷，单选 / 多选 / 评分 / 数字 / 日期 / 文本都可以；可匿名，可设截止时间。</p>
+    ${canPost() ? `<div class="jl-actions"><button class="primary" id="btn-survey-new">${icon('plus')} 发起问卷</button></div>` : ''}
+    ${items.map((s) => `
+      <div class="panel">
+        <div class="jl-head"><h2>${esc(s.title)}</h2><span class="jl-badge ${s.closed ? 'off' : 'on'}">${s.closed ? '已截止' : '收集中'}</span></div>
+        ${s.description ? `<p class="jl-desc">${esc(s.description)}</p>` : ''}
+        <div class="jl-meta">
+          <span>已填 <b>${s.done}</b> / ${s.rosterSize} 人</span>
+          ${s.deadline ? `<span>${icon('clock')} 截止 ${esc(s.deadline)}</span>` : ''}
+          <span>${s.anonymous ? '匿名问卷' : '记名问卷'}</span>
+        </div>
+        <div class="jl-actions">
+          <button class="primary" data-sid-open="${s.id}">${icon('survey')} ${s.closed ? '查看问卷' : '进入问卷'}</button>
+          <button class="ghost" data-sid-copy="${s.id}">${icon('copy')} 复制学生链接</button>
+        </div>
+      </div>`).join('')}
+    ${items.length ? '' : `<div class="empty"><div class="big">${icon('survey')}</div>还没有发起过问卷<br>${canPost() ? '点「发起问卷」开始一次班级调研' : '班委发起问卷后会出现在这里'}</div>`}`;
+  const newBtn = $('#btn-survey-new');
+  if (newBtn) newBtn.addEventListener('click', () => openSurveyModal());
+  $$('[data-sid-open]').forEach((b) => b.addEventListener('click', () => {
+    state.survey = b.dataset.sidOpen;
+    renderView().catch((e) => toast(e.message, 'error'));
+  }));
+  $$('[data-sid-copy]').forEach((b) => b.addEventListener('click', () => jlCopy(location.origin + '/s/' + b.dataset.sidCopy, '学生链接已复制，可发到班群')));
+}
+
+async function loadSurveyDetail() {
+  if (!state.survey) return;
+  const seq = loadSeq;
+  const view = $('#view');
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  let d;
+  try { d = await api('/api/survey/' + state.survey); }
+  catch (e) {
+    if (seq !== loadSeq) return;
+    state.survey = null;
+    toast(e.message, 'error');
+    return loadSurveys();
+  }
+  if (seq !== loadSeq) return;
+  const fmtTs = (ts) => {
+    const dt = new Date(ts);
+    const p2 = (n) => String(n).padStart(2, '0');
+    return `${dt.getFullYear()}-${p2(dt.getMonth() + 1)}-${p2(dt.getDate())} ${p2(dt.getHours())}:${p2(dt.getMinutes())}`;
+  };
+  const canEdit = canPost();
+  const stuLink = location.origin + '/s/' + d.id;
+  
+  // 渲染问题列表
+  const questionsHtml = d.questions.map((q, idx) => `
+    <div class="panel" style="margin-top:12px">
+      <div class="jl-head"><h2 style="font-size:15px">${idx + 1}. ${esc(q.question)}${q.required ? ' <span class="q-required">*</span>' : ''}</h2>
+        <span class="hint">${{single:'单选',multiple:'多选',rating:'评分',number:'数字',date:'日期',text:'文本题'}[q.qtype] || '单选'}</span></div>
+      ${q.description ? `<div class="q-description">${esc(q.description)}</div>` : ''}
+      ${q.qtype === 'single' ? q.options.map((opt) => `
+        <label class="vopt"><input type="radio" name="q_${q.id}" value="${esc(opt)}"><span>${esc(opt)}</span></label>
+      `).join('') : ''}
+      ${q.qtype === 'multiple' ? q.options.map((opt) => `
+        <label class="vopt"><input type="checkbox" name="q_${q.id}" value="${esc(opt)}"><span>${esc(opt)}</span></label>
+      `).join('') : ''}
+      ${q.qtype === 'rating' ? q.options.map((opt) => `
+        <label class="vopt"><input type="radio" name="q_${q.id}" value="${esc(opt)}"><span>${esc(opt)}</span></label>
+      `).join('') : ''}
+      ${q.qtype === 'number' ? `<input type="number" id="ans_${q.id}" placeholder="请输入数字" style="width:100%;margin-top:8px">` : ''}
+      ${q.qtype === 'date' ? `<input type="date" id="ans_${q.id}" style="width:100%;margin-top:8px">` : ''}
+      ${q.qtype === 'text' ? `<textarea id="ans_${q.id}" placeholder="请输入你的回答" style="width:100%;min-height:80px;margin-top:8px"></textarea>` : ''}
+    </div>
+  `).join('');
+
+  // 根据权限显示不同内容
+  let resultsHtml = '';
+  if (d.responses) {
+    // 管理员：先给统计图（与班委视图同一套 tally 基元，从提交明细实时算），
+    // 再跟逐人明细——此前管理员只有文字明细，看不出整体分布
+    const n = d.responses.length;
+    const statFor = (q) => {
+      if (q.qtype === 'single' || q.qtype === 'multiple') {
+        const counts = {};
+        q.options.forEach((o) => { counts[o] = 0; });
+        d.responses.forEach((r) => {
+          const a = r.answers[String(q.id)];
+          (Array.isArray(a) ? a : [a]).forEach((x) => { if (x && counts[x] !== undefined) counts[x]++; });
+        });
+        return { type: 'bars', counts };
+      }
+      if (q.qtype === 'rating') {
+        const counts = {};
+        q.options.forEach((o) => { counts[o] = 0; });
+        let sum = 0, cnt = 0;
+        d.responses.forEach((r) => {
+          const a = r.answers[String(q.id)];
+          if (a && counts[a] !== undefined) { counts[a]++; sum += Number(a); cnt++; }
+        });
+        return { type: 'bars', counts, avg: cnt ? (sum / cnt).toFixed(1) : null };
+      }
+      return { type: 'list' };
+    };
+    const bars = (s) => Object.entries(s.counts).map(([opt, count]) => {
+      const pct = n ? Math.round(count / n * 100) : 0;
+      return `<div class="tally-row"><div class="tlabel"><b>${esc(opt)}</b><span class="hint">${count} 票 · ${pct}%</span></div><div class="bar"><i style="width:${pct}%"></i></div></div>`;
+    }).join('');
+    const chartHtml = `
+      <div class="panel" style="margin-top:16px">
+        <div class="jl-head"><h2 style="font-size:15px">统计图（${n} 份）</h2>
+          <span class="hint">自动汇总；逐人原文见下方明细</span></div>
+        ${n ? d.questions.map((q) => {
+          const s = statFor(q);
+          if (s.type === 'list') return ''; // 文本题无分布可言，原文在下方明细逐条列
+          const avg = s.avg != null ? ` <span class="hint">平均 ${s.avg} 分</span>` : '';
+          return `<div class="item-group"><b>${esc(q.question)}</b>${avg}${bars(s)}</div>`;
+        }).join('') : '<div class="hint">还没有人提交</div>'}
+      </div>`;
+    resultsHtml = chartHtml + `
+      <div class="panel" style="margin-top:16px">
+        <div class="jl-head"><h2 style="font-size:15px">回答明细（${n} 份）</h2>
+          <span class="hint">按提交时间排列</span></div>
+        ${d.responses.map((r, i) => `
+          <div class="item-group">
+            <b>${i + 1}. ${r.name ? `${esc(r.name)}（${esc(r.sid)}）` : '<span class="hint">匿名提交（未匹配到名单）</span>'}<span class="hint" style="margin-left:8px">${fmtTs(r.submitted_at)}</span></b>
+            ${d.questions.map((q) => {
+              const ans = r.answers[String(q.id)];
+              const ansText = Array.isArray(ans) ? ans.join('、') : (ans || '未回答');
+              return `<div class="entry-sub">${esc(q.question)}：${esc(ansText)}</div>`;
+            }).join('')}
+          </div>
+        `).join('')}
+      </div>`;
+  } else if (d.stats) {
+    // 班委：显示统计汇总
+    resultsHtml = `
+      <div class="panel" style="margin-top:16px">
+        <div class="jl-head"><h2 style="font-size:15px">统计汇总</h2>
+          <span class="hint">班委视角，不含个人明细</span></div>
+        ${d.questions.map((q) => {
+          const stat = d.stats[String(q.id)];
+          if (q.qtype === 'text' || q.qtype === 'number' || q.qtype === 'date') {
+            // 文本/数字/日期题：服务端返回的是回答值数组，按列表展示
+            // （此前 number/date 落进选择题分支，把数组下标当选项名渲染出错乱条）
+            return `<div class="item-group">
+              <b>${esc(q.question)}</b>
+              ${(stat || []).map((ans, i) => `<div class="entry-sub">${i + 1}. ${esc(ans)}</div>`).join('')}
+              ${(!stat || !stat.length) ? '<div class="entry-sub hint">暂无回答</div>' : ''}
+            </div>`;
+          } else {
+            // 选择题：与投票详情同一套票数条（堆叠标签 + 共享 .bar 基元）；评分题加平均分
+            const total = Object.values(stat || {}).reduce((a, b) => a + b, 0);
+            let avgTag = '';
+            if (q.qtype === 'rating' && total) {
+              const sum = Object.entries(stat || {}).reduce((a, [opt, count]) => a + Number(opt) * count, 0);
+              avgTag = ` <span class="hint">平均 ${(sum / total).toFixed(1)} 分</span>`;
+            }
+            return `<div class="item-group">
+              <b>${esc(q.question)}</b>${avgTag}
+              ${Object.entries(stat || {}).map(([opt, count]) => {
+                const pct = total ? Math.round(count / total * 100) : 0;
+                return `<div class="tally-row"><div class="tlabel"><b>${esc(opt)}</b><span class="hint">${count} 票 · ${pct}%</span></div><div class="bar"><i style="width:${pct}%"></i></div></div>`;
+              }).join('')}
+            </div>`;
+          }
+        }).join('')}
+      </div>`;
+  } else if (d.myAnswers) {
+    // 学生：显示自己的回答
+    resultsHtml = `
+      <div class="panel" style="margin-top:16px">
+        <div class="jl-head"><h2 style="font-size:15px">我的回答</h2>
+          <span class="hint">你已提交的答案</span></div>
+        ${d.questions.map((q) => {
+          const ans = d.myAnswers[String(q.id)];
+          const ansText = Array.isArray(ans) ? ans.join('、') : (ans || '未回答');
+          return `<div class="item-group">
+            <b>${esc(q.question)}</b>
+            <div class="entry-sub">${esc(ansText)}</div>
+          </div>`;
+        }).join('')}
+      </div>`;
+  }
+
+  view.innerHTML = `
+    <button class="ghost jl-back" id="btn-survey-back">← 返回问卷列表</button>
+    <div class="panel">
+      <div class="jl-head"><h2>${esc(d.title)}</h2>
+        <span class="jl-badge ${d.closed ? 'off' : 'on'}">${d.closed ? '已截止' : '收集中'}</span>
+        ${d.anonymous ? '<span class="jl-badge off">匿名</span>' : ''}</div>
+      ${d.description ? `<p class="jl-desc">${esc(d.description)}</p>` : ''}
+      <div class="jl-meta">
+        <span>已填 <b>${d.done}</b> / ${d.rosterSize} 人</span>
+        ${d.deadline ? `<span>${icon('clock')} 截止 ${esc(d.deadline)}</span>` : ''}
+        <span>${d.anonymous ? '匿名问卷（不收集学号和姓名）' : '记名问卷'}</span>
+      </div>
+      ${canEdit ? `<div class="jl-actions">
+        ${!d.closed ? `<button class="ghost" id="btn-survey-stop">${icon('stop')} 停止问卷</button>` : ''}
+        <button class="ghost" id="btn-survey-settings">${icon('edit')} 修改设置</button>
+        <button class="ghost" id="btn-survey-export">${icon('download')} 导出CSV</button>
+        <button class="ghost danger" id="btn-survey-delete">${icon('trash')} 删除问卷</button>
+      </div>` : ''}
+      <div class="jl-linkrow"><input readonly value="${esc(stuLink)}"><button class="ghost" id="btn-copy-stu-link">${icon('link')} 复制学生链接</button></div>
+    </div>
+    ${!d.closed ? questionsHtml : ''}
+    ${!d.closed ? `
+      <div class="panel" style="margin-top:12px">
+        <div class="jl-head"><h2 style="font-size:15px">${d.filled ? '修改答案' : '提交答案'}</h2></div>
+        <div class="jl-actions">
+          <button class="primary" id="btn-survey-submit">${icon('check')} ${d.filled ? '保存修改' : '提交问卷'}</button>
+          <span class="hint">共 ${d.questions.length} 题，必填 ${d.questions.filter(q => q.required).length} 题${d.filled ? '，截止前可改，以最新答案为准' : ''}</span>
+        </div>
+        <div id="survey-progress" class="panel" style="margin-top:12px;padding:12px;display:none">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <span style="font-size:14px;font-weight:600">答题进度</span>
+            <span id="progress-text" class="hint">0 / ${d.questions.length}</span>
+          </div>
+          <div class="bar" style="height:8px">
+            <i id="progress-bar" style="width:0%"></i>
+          </div>
+          <div id="progress-detail" class="entry-sub hint" style="margin-left:0;font-size:12px"></div>
+        </div>
+      </div>
+    ` : ''}
+    ${d.closed ? '<div class="panel" style="margin-top:12px"><div class="hint">问卷已截止，无法提交。</div></div>' : ''}
+    ${resultsHtml}`;
+
+  // 事件绑定
+  const backBtn = $('#btn-survey-back');
+  if (backBtn) backBtn.addEventListener('click', () => { state.survey = null; renderView(); });
+
+  const copyBtn = $('#btn-copy-stu-link');
+  if (copyBtn) copyBtn.addEventListener('click', () => { navigator.clipboard.writeText(stuLink); toast('链接已复制'); });
+
+  const exportBtn = $('#btn-survey-export');
+  if (exportBtn) exportBtn.addEventListener('click', async () => {
+    try {
+      // 不查 r.ok 的话，401/500 的 JSON 错误体也会被存成 .csv 还提示成功
+      const r = await fetch('/api/survey/' + d.id + '/export');
+      if (!r.ok) {
+        let msg = '导出失败（' + r.status + '）';
+        try { const j = await r.json(); if (j.error) msg = j.error; } catch (e) { /* 非 JSON 就用默认文案 */ }
+        throw new Error(msg);
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${d.title.replace(/[^\w\u4e00-\u9fa5]/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('导出成功');
+    } catch (e) { toast('导出失败：' + e.message, 'error'); }
+  });
+
+  const stopBtn = $('#btn-survey-stop');
+  if (stopBtn) stopBtn.addEventListener('click', async () => {
+    if (!confirm('确定要停止此问卷吗？停止后不能再提交。')) return;
+    try {
+      await api('/api/survey/' + d.id + '/stop', { method: 'POST' });
+      toast('问卷已停止');
+      renderView();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  // 修改设置：标题/说明/截止时间随时可改（顺延截止时间会自动重新开放收集）；
+  // 已有提交时题目锁定，弹窗里如实说明
+  const settingsBtn = $('#btn-survey-settings');
+  if (settingsBtn) settingsBtn.addEventListener('click', () => {
+    openModal(`
+      <h2>${icon('edit')} 修改问卷设置</h2>
+      <div class="form">
+        <label>标题</label>
+        <input id="sv-e-title" maxlength="80" value="${esc(d.title)}">
+        <label>说明（选填）</label>
+        <textarea id="sv-e-desc" rows="2" maxlength="1000">${esc(d.description || '')}</textarea>
+        <label>截止时间（留空 = 不设截止）</label>
+        <input id="sv-e-deadline" type="datetime-local" value="${dtToVal(d.deadline)}">
+        <label class="splitline" style="margin-top:8px"><input type="checkbox" id="sv-e-anon" ${d.anonymous ? 'checked' : ''}> 匿名收集（不记录提交人身份）</label>
+        <p class="hint" style="margin:6px 0 0">切换只影响之后的提交：转记名后管理员可看到提交人；匿名期已收的历史提交不与身份关联（系统不做回溯识别）。${d.done ? `当前已有 ${d.done} 份匿名期提交。` : ''}</p>
+        ${d.done ? `<p class="hint" style="margin-top:8px">已有 ${d.done} 份提交：题目不能再改，只能调整标题/说明/截止时间。顺延截止时间后问卷会重新开放收集。</p>` : ''}
+      </div>
+      <div class="modal-foot">
+        <button class="ghost" id="btn-cancel">取消</button>
+        <button class="primary" id="sv-e-save">${icon('check')} 保存修改</button>
+      </div>`);
+    $('#sv-e-save').addEventListener('click', async () => {
+      const title = $('#sv-e-title').value.trim();
+      if (!title) { toast('标题不能为空', 'error'); return; }
+      try {
+        await api('/api/survey/' + d.id, { method: 'PUT', body: {
+          title,
+          description: $('#sv-e-desc').value.trim(),
+          deadline: valToDt($('#sv-e-deadline').value) || '',
+          anonymous: $('#sv-e-anon').checked,
+        } });
+        closeModal();
+        toast('修改已保存');
+        renderView();
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  });
+
+  // 删除问卷：连带全部提交，仅管理员与班委可操作（API 侧同权限），二次确认写明份数
+  const delSurveyBtn = $('#btn-survey-delete');
+  if (delSurveyBtn) delSurveyBtn.addEventListener('click', async () => {
+    const n = d.done || 0;
+    if (!confirm(`确定删除问卷「${d.title}」吗？${n ? `连同 ${n} 份提交` : ''}一起删除，不可恢复！`)) return;
+    try {
+      await api('/api/survey/' + d.id, { method: 'DELETE' });
+      toast('问卷已删除');
+      state.survey = null;
+      renderView();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  // 进度更新函数
+  const progressContainer = $('#survey-progress');
+  const progressBar = $('#progress-bar');
+  const progressText = $('#progress-text');
+  const progressDetail = $('#progress-detail');
+  
+  function updateProgress() {
+    if (!progressContainer) return;
+    
+    let answered = 0;
+    let requiredAnswered = 0;
+    const totalRequired = d.questions.filter(q => q.required).length;
+    
+    for (const q of d.questions) {
+      let isAnswered = false;
+      if (['text', 'number', 'date'].includes(q.qtype)) {
+        const val = $(`#ans_${q.id}`)?.value.trim();
+        isAnswered = !!val;
+      } else {
+        const checked = view.querySelectorAll(`input[name="q_${q.id}"]:checked`);
+        isAnswered = checked.length > 0;
+      }
+      
+      if (isAnswered) {
+        answered++;
+        if (q.required) requiredAnswered++;
+      }
+    }
+    
+    const percent = d.questions.length > 0 ? Math.round((answered / d.questions.length) * 100) : 0;
+    progressBar.style.width = percent + '%';
+    progressText.textContent = `${answered} / ${d.questions.length}`;
+    
+    const requiredPercent = totalRequired > 0 ? Math.round((requiredAnswered / totalRequired) * 100) : 100;
+    progressDetail.innerHTML = `
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <span>总进度：${percent}%</span>
+        <span>必填题：${requiredAnswered}/${totalRequired}（${requiredPercent}%）</span>
+        ${requiredAnswered === totalRequired && answered === d.questions.length 
+          ? '<span style="color:var(--success);font-weight:600">✓ 全部完成</span>' 
+          : ''}
+      </div>
+    `;
+  }
+  
+  // 显示进度条并监听输入变化
+  if (progressContainer) {
+    progressContainer.style.display = 'block';
+    updateProgress();
+
+    // 监听所有输入框的变化（数字/日期输入框也要算，否则进度条不动）
+    view.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach(el => {
+      el.addEventListener('change', updateProgress);
+    });
+    view.querySelectorAll('textarea, input[type="number"], input[type="date"]').forEach(el => {
+      el.addEventListener('input', updateProgress);
+    });
+  }
+
+  // 已提交过：预填本人答案，改完点「保存修改」整份覆盖（服务端按本人更新）
+  if (d.filled && d.myAnswers) {
+    for (const q of d.questions) {
+      const ans = d.myAnswers[String(q.id)];
+      if (ans == null) continue;
+      if (['single', 'rating'].includes(q.qtype)) {
+        const el = view.querySelector(`input[name="q_${q.id}"][value="${CSS.escape(String(ans))}"]`);
+        if (el) el.checked = true;
+      } else if (q.qtype === 'multiple' && Array.isArray(ans)) {
+        for (const val of ans) {
+          const el = view.querySelector(`input[name="q_${q.id}"][value="${CSS.escape(String(val))}"]`);
+          if (el) el.checked = true;
+        }
+      } else {
+        const el = $(`#ans_${q.id}`);
+        if (el) el.value = ans;
+      }
+    }
+    updateProgress();
+  }
+
+  const submitBtn = $('#btn-survey-submit');
+  if (submitBtn) submitBtn.addEventListener('click', async () => {
+    const answers = {};
+    for (const q of d.questions) {
+      if (['single', 'multiple', 'rating'].includes(q.qtype)) {
+        const checked = Array.from(view.querySelectorAll(`input[name="q_${q.id}"]:checked`)).map(el => el.value);
+        if (q.required && !checked.length) { toast(`问题"${q.question}"为必填`, 'error'); return; }
+        answers[String(q.id)] = q.qtype === 'single' || q.qtype === 'rating' ? checked[0] : checked;
+      } else if (q.qtype === 'number') {
+        const val = $(`#ans_${q.id}`).value.trim();
+        if (q.required && !val) { toast(`问题"${q.question}"为必填`, 'error'); return; }
+        if (val && isNaN(val)) { toast(`问题"${q.question}"必须为数字`, 'error'); return; }
+        answers[String(q.id)] = val;
+      } else if (q.qtype === 'date') {
+        const val = $(`#ans_${q.id}`).value;
+        if (q.required && !val) { toast(`问题"${q.question}"为必填`, 'error'); return; }
+        answers[String(q.id)] = val;
+      } else {
+        // text
+        const val = $(`#ans_${q.id}`).value.trim();
+        if (q.required && !val) { toast(`问题"${q.question}"为必填`, 'error'); return; }
+        answers[String(q.id)] = val;
+      }
+    }
+    try {
+      const r = await api('/api/survey/' + d.id + '/submit', { method: 'POST', body: { answers } });
+      toast(r && r.updated ? '修改已保存' : '提交成功');
+      renderView();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+// 问卷模板管理
+function openTemplateManager(onClose) {
+  let templates = [];
+  let editingId = null;
+
+  async function loadList() {
+    templates = await api('/api/survey-template');
+    renderList();
+  }
+
+  function renderList() {
+    const listEl = $('#tpl-list');
+    if (!listEl) return;
+    if (templates.length === 0) {
+      listEl.innerHTML = '<div class="empty"><div class="big">' + icon('survey') + '</div>还没有模板<br>点「新建模板」创建第一个</div>';
+      return;
+    }
+    listEl.innerHTML = templates.map((t) => `
+      <div class="panel" style="margin-top:8px;padding:12px" data-tpl-id="${t.id}">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <strong>${esc(t.name)}</strong>
+            <span class="hint" style="margin-left:8px">${t.questions.length} 个问题</span>
+            ${t.title ? `<div class="entry-sub" style="margin-left:0;font-size:12px">标题：${esc(t.title)}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="mini ghost" data-tpl-edit="${t.id}">${icon('edit')} 编辑</button>
+            <button class="mini danger" data-tpl-del="${t.id}">${icon('trash')} 删除</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+
+    listEl.querySelectorAll('[data-tpl-edit]').forEach((btn) => {
+      btn.addEventListener('click', () => openEditor(parseInt(btn.dataset.tplEdit)));
+    });
+    listEl.querySelectorAll('[data-tpl-del]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = parseInt(btn.dataset.tplDel);
+        const t = templates.find((x) => x.id === id);
+        if (!confirm(`确定删除模板「${t.name}」吗？`)) return;
+        try {
+          await api('/api/survey-template/' + id, { method: 'DELETE' });
+          toast('已删除');
+          loadList();
+        } catch (e) { toast(e.message, 'error'); }
+      });
+    });
+  }
+
+  function openEditor(id) {
+    editingId = id;
+    const t = id ? templates.find((x) => x.id === id) : { name: '', title: '', description: '', questions: [] };
+    const editorEl = $('#tpl-editor');
+    if (!editorEl) return;
+    editorEl.style.display = 'block';
+    editorEl.innerHTML = `
+      <label>模板名称</label>
+      <input id="tpl-edit-name" value="${esc(t.name)}" maxlength="40" placeholder="如：满意度调查">
+      <div class="labrow" style="margin-top:8px"><label>默认标题（选填）</label></div>
+      <input id="tpl-edit-title" value="${esc(t.title)}" maxlength="60" placeholder="套用模板时自动填入的问卷标题">
+      <div class="labrow" style="margin-top:8px"><label>默认说明（选填）</label></div>
+      <textarea id="tpl-edit-desc" rows="2" maxlength="1000" placeholder="套用模板时自动填入的问卷说明">${esc(t.description)}</textarea>
+      <div class="labrow" style="margin-top:12px"><label>问题列表</label></div>
+      <div id="tpl-edit-questions"></div>
+      <button class="mini ghost" id="tpl-add-q" style="margin-top:8px">${icon('plus')} 添加问题</button>
+      <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
+        <button class="ghost" id="tpl-edit-cancel">取消</button>
+        <button class="primary" id="tpl-edit-save">${icon('check')} 保存</button>
+      </div>
+    `;
+
+    let questions = t.questions.map((q) => ({ ...q }));
+    // 把 DOM 里的当前输入收回 questions 数组：删除/换题型/添加都会重渲染，先存再动
+    function saveEdits() {
+      const qEl = $('#tpl-edit-questions');
+      if (!qEl) return;
+      qEl.querySelectorAll('[data-q-text]').forEach((input) => {
+        const idx = parseInt(input.dataset.qText);
+        const q = questions[idx];
+        if (!q) return;
+        q.question = input.value.trim();
+        const typeEl = qEl.querySelector(`[data-q-type="${idx}"]`);
+        if (typeEl) q.qtype = typeEl.value;
+        const reqEl = qEl.querySelector(`[data-q-req="${idx}"]`);
+        if (reqEl) q.required = reqEl.checked;
+        const optsEl = qEl.querySelector(`[data-q-opts="${idx}"]`);
+        if (optsEl) q.options = optsEl.value.split('\n').map((o) => o.trim()).filter((o) => o);
+      });
+    }
+    renderQuestions();
+
+    function renderQuestions() {
+      const qEl = $('#tpl-edit-questions');
+      if (!qEl) return;
+      if (questions.length === 0) {
+        qEl.innerHTML = '<div class="hint">还没有问题，点「添加问题」开始</div>';
+        return;
+      }
+      qEl.innerHTML = questions.map((q, idx) => `
+        <div class="panel" style="margin-top:8px;padding:10px;background:#fafafa">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <strong>问题 ${idx + 1}</strong>
+            <button class="mini danger" data-q-del="${idx}">${icon('trash')}</button>
+          </div>
+          <input data-q-text="${idx}" value="${esc(q.question)}" maxlength="200" placeholder="问题内容">
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <select data-q-type="${idx}" style="max-width:120px">
+              <option value="single" ${q.qtype === 'single' ? 'selected' : ''}>单选</option>
+              <option value="multiple" ${q.qtype === 'multiple' ? 'selected' : ''}>多选</option>
+              <option value="rating" ${q.qtype === 'rating' ? 'selected' : ''}>评分</option>
+              <option value="number" ${q.qtype === 'number' ? 'selected' : ''}>数字</option>
+              <option value="date" ${q.qtype === 'date' ? 'selected' : ''}>日期</option>
+              <option value="text" ${q.qtype === 'text' ? 'selected' : ''}>文本</option>
+            </select>
+            <label class="splitline" style="margin:0"><input type="checkbox" data-q-req="${idx}" ${q.required ? 'checked' : ''}> 必填</label>
+          </div>
+          ${['single', 'multiple', 'rating'].includes(q.qtype) ? `
+            <textarea data-q-opts="${idx}" rows="2" style="margin-top:6px" placeholder="选项（每行一个）">${esc((q.options || []).join('\n'))}</textarea>
+          ` : ''}
+        </div>
+      `).join('');
+
+      qEl.querySelectorAll('[data-q-del]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          saveEdits();
+          questions.splice(parseInt(btn.dataset.qDel), 1);
+          renderQuestions();
+        });
+      });
+      // 换题型要立刻重渲染：单选/多选/评分才有选项框，切到数字/日期要收掉、
+      // 切回来要补上（此前不重渲染，改完题型保存会被「至少 2 个选项」卡死或残留选项）
+      qEl.querySelectorAll('[data-q-type]').forEach((sel) => {
+        sel.addEventListener('change', () => {
+          saveEdits();
+          const idx = parseInt(sel.dataset.qType);
+          if (questions[idx]) questions[idx].qtype = sel.value;
+          renderQuestions();
+        });
+      });
+    }
+
+    $('#tpl-add-q').addEventListener('click', () => {
+      saveEdits();
+      questions.push({ question: '', qtype: 'single', options: ['选项1', '选项2'], required: true });
+      renderQuestions();
+    });
+
+    $('#tpl-edit-cancel').addEventListener('click', () => {
+      editorEl.style.display = 'none';
+      editingId = null;
+    });
+
+    $('#tpl-edit-save').addEventListener('click', async () => {
+      const name = $('#tpl-edit-name').value.trim();
+      if (!name) { toast('请填写模板名称', 'error'); return; }
+      const title = $('#tpl-edit-title').value.trim();
+      const description = $('#tpl-edit-desc').value.trim();
+
+      // 收集问题：先收回 DOM 输入再校验（与删除/换题型/添加同一份收集逻辑）
+      saveEdits();
+      const qData = questions.filter((q) => q.question);
+
+      if (qData.length === 0) { toast('至少需要一个问题', 'error'); return; }
+      for (const q of qData) {
+        if (['single', 'multiple', 'rating'].includes(q.qtype) && (!q.options || q.options.length < 2)) {
+          toast(`问题「${q.question.slice(0, 20)}」至少需要 2 个选项`, 'error');
+          return;
+        }
+      }
+
+      const body = { name, title, description, questions: qData };
+      try {
+        if (editingId) {
+          await api('/api/survey-template/' + editingId, { method: 'PUT', body });
+          toast('模板已更新');
+        } else {
+          await api('/api/survey-template', { method: 'POST', body });
+          toast('模板已创建');
+        }
+        editorEl.style.display = 'none';
+        editingId = null;
+        loadList();
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  }
+
+  openModal(`
+    <h2>${icon('settings')} 管理问卷模板</h2>
+    <div class="form">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <span class="hint" style="margin:0">发起问卷时可直接套用这里的模板；管理员和班委都能增删改</span>
+        <button class="mini ghost" id="tpl-new">${icon('plus')} 新建模板</button>
+      </div>
+      <div id="tpl-list"></div>
+      <div id="tpl-editor" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--line)"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="primary" id="btn-close">完成</button>
+    </div>
+  `);
+
+  $('#tpl-new').addEventListener('click', () => openEditor(null));
+  $('#btn-close').addEventListener('click', () => {
+    closeModal();
+    if (onClose) onClose();
+  });
+
+  loadList();
+}
+
+function openSurveyModal(initial = null) {
+  // initial：从「管理模板」回来时带回的草稿快照（openModal 单容器，模板管理会顶掉发起弹窗）
+  let questionCount = initial && Array.isArray(initial.questions) ? initial.questions.length : 0;
+  const questions = initial && Array.isArray(initial.questions)
+    ? initial.questions.map((q) => ({ ...q, options: Array.isArray(q.options) ? [...q.options] : q.options }))
+    : [];
+  let templates = []; // 从 API 加载
+
+  // 加载模板列表
+  async function loadTemplates() {
+    try {
+      templates = await api('/api/survey-template');
+      const sel = $('#sv-template');
+      if (sel) {
+        sel.innerHTML = '<option value="">— 从模板创建 —</option>' +
+          templates.map((t, i) => `<option value="${i}">${esc(t.name)}</option>`).join('');
+      }
+    } catch (e) {
+      console.error('加载模板失败:', e);
+    }
+  }
+
+  function renderQuestions() {
+    return questions.map((q, idx) => `
+      <div class="panel" data-q-idx="${idx}" draggable="true" style="margin-top:8px;padding:12px;background:#fafafa;cursor:move;position:relative">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="hint" style="cursor:grab;font-size:16px" title="拖拽排序">⋮⋮</span>
+            <h3 style="font-size:14px;margin:0">问题 ${idx + 1}</h3>
+          </div>
+          <button class="mini danger" data-q-del="${idx}">${icon('trash')} 删除</button>
+        </div>
+        <label>问题内容</label>
+        <input data-q-text="${idx}" value="${esc(q.question)}" maxlength="200" placeholder="请输入问题">
+        <div class="labrow" style="margin-top:8px"><label>问题描述（选填，帮助学生理解题目）</label></div>
+        <textarea data-q-desc="${idx}" rows="2" maxlength="500" placeholder="补充说明，如：可多选、限选几项、填写要求等…">${esc(q.description || '')}</textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <select data-q-type="${idx}" style="max-width:160px">
+            <option value="single" ${q.qtype === 'single' ? 'selected' : ''}>单选题</option>
+            <option value="multiple" ${q.qtype === 'multiple' ? 'selected' : ''}>多选题</option>
+            <option value="rating" ${q.qtype === 'rating' ? 'selected' : ''}>评分题</option>
+            <option value="number" ${q.qtype === 'number' ? 'selected' : ''}>数字题</option>
+            <option value="date" ${q.qtype === 'date' ? 'selected' : ''}>日期题</option>
+            <option value="text" ${q.qtype === 'text' ? 'selected' : ''}>文本题</option>
+          </select>
+          <label class="splitline" style="margin:0"><input type="checkbox" data-q-req="${idx}" ${q.required ? 'checked' : ''}> 必填</label>
+        </div>
+        ${['single', 'multiple', 'rating'].includes(q.qtype) ? `
+          <div class="labrow" style="margin-top:8px"><label>选项（每行一个，至少 2 个）</label></div>
+          <textarea data-q-opts="${idx}" rows="3" placeholder="选项1&#10;选项2&#10;选项3">${esc(q.options ? q.options.join('\n') : '')}</textarea>
+        ` : ''}
+      </div>
+    `).join('');
+  }
+
+  openModal(`
+    <h2>${icon('survey')} 发起问卷</h2>
+    <div class="form">
+      <label>问卷标题</label>
+      <input id="sv-title" maxlength="60" placeholder="如：班级活动意向调查">
+      <label>问卷说明（选填）</label>
+      <textarea id="sv-desc" rows="2" maxlength="1000" placeholder="问卷背景、填写说明等…"></textarea>
+      ${rosterFields({ prefix: 'sv', label: '答题名单（只有名单内的同学可以提交）' })}
+      <label>截止时间（选填，到点自动结束）</label>
+      <input id="sv-deadline" type="datetime-local">
+      <label class="splitline" style="margin-top:12px"><input type="checkbox" id="sv-anonymous"> 匿名收集（回答不署名，同学之间互不可见）</label>
+      <p class="hint" style="margin:6px 0 0">不勾 = 记名：每份回答直接带上姓名学号。勾选 = 匿名：回答不署名、同学之间互不可见；管理员仍可按名单核对每份回答是谁填的——适合想听真话、又需要跟进到人的摸底。</p>
+      
+      <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <h3 id="sv-q-count" style="font-size:15px;margin:0">问题列表（${questionCount} 题）</h3>
+          <div style="display:flex;gap:8px">
+            <select id="sv-template" style="max-width:200px;font-size:13px">
+              <option value="">— 从模板创建 —</option>
+            </select>
+            <button class="mini ghost" id="sv-manage-tpl" title="管理问卷模板">${icon('settings')} 管理模板</button>
+            <button class="mini ghost" id="sv-add-q">${icon('plus')} 添加问题</button>
+          </div>
+        </div>
+        <div id="sv-questions-list">${renderQuestions()}</div>
+        ${questionCount === 0 ? '<div class="empty" style="margin-top:8px"><div class="big">' + icon('survey') + '</div>还没有添加问题<br>点「添加问题」自己写，或从上面的模板套一份</div>' : ''}
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" id="btn-cancel">取消</button>
+      <button class="primary" id="sv-save">${icon('check')} 发起问卷</button>
+    </div>`);
+
+  bindRosterFields({
+    prefix: 'sv', mode: 'ref', sidFor: '提交',
+    applyRoster: (r) => { $('#sv-roster').value = r.roster; $('#sv-keepid').checked = !!r.keepId; },
+  });
+
+  // 加载模板列表
+  loadTemplates();
+
+  // 回填草稿（从模板管理回来时）
+  if (initial) {
+    $('#sv-title').value = initial.title || '';
+    $('#sv-desc').value = initial.description || '';
+    if (initial.deadline) $('#sv-deadline').value = initial.deadline;
+    if (initial.anonymous) $('#sv-anonymous').checked = true;
+    if (initial.rosterRaw) $('#sv-roster').value = initial.rosterRaw;
+    if (initial.keepId) $('#sv-keepid').checked = true;
+  }
+
+  // 管理模板：openModal 单容器会顶掉本弹窗——先快照草稿，关闭后带着草稿原样重建
+  $('#sv-manage-tpl').addEventListener('click', () => {
+    saveCurrentInputs();
+    const draft = {
+      title: $('#sv-title').value,
+      description: $('#sv-desc').value,
+      deadline: $('#sv-deadline').value,
+      anonymous: $('#sv-anonymous').checked,
+      rosterRaw: $('#sv-roster') ? $('#sv-roster').value : '',
+      keepId: $('#sv-keepid') ? $('#sv-keepid').checked : false,
+      questions: questions.map((q) => ({ ...q, options: Array.isArray(q.options) ? [...q.options] : q.options })),
+    };
+    openTemplateManager(() => {
+      // 关闭模板管理后带着草稿重建发起弹窗（模板列表在弹窗内重新加载）
+      openSurveyModal(draft);
+    });
+  });
+
+  // 添加问题
+  $('#sv-add-q').addEventListener('click', () => {
+    questions.push({ question: '', qtype: 'single', options: ['选项1', '选项2'], required: true });
+    questionCount++;
+    refreshModalContent();
+  });
+
+  // 从模板创建
+  $('#sv-template').addEventListener('change', (e) => {
+    const idx = e.target.value;
+    if (idx === '') return;
+    const template = templates[parseInt(idx)];
+    if (!template) return;
+    if (questions.length > 0 && !confirm('使用模板将覆盖当前所有问题，确定继续吗？')) {
+      e.target.value = '';
+      return;
+    }
+    // 应用模板
+    $('#sv-title').value = template.title;
+    $('#sv-desc').value = template.description;
+    questions.length = 0;
+    template.questions.forEach((q) => {
+      questions.push({ ...q, description: q.description || '' });
+    });
+    questionCount = questions.length;
+    refreshModalContent();
+    e.target.value = '';
+    toast('已从模板创建 ' + questionCount + ' 个问题');
+  });
+
+  // 保存当前输入框的值到 questions 数组（openModal 的结构是 .backdrop > .modal，没有 .modal-body）
+  function saveCurrentInputs() {
+    const modalBody = document.querySelector('#modal-root .modal');
+    if (!modalBody) return;
+    
+    modalBody.querySelectorAll('[data-q-text]').forEach((input) => {
+      const idx = parseInt(input.dataset.qText);
+      if (questions[idx]) questions[idx].question = input.value;
+    });
+    modalBody.querySelectorAll('[data-q-desc]').forEach((textarea) => {
+      const idx = parseInt(textarea.dataset.qDesc);
+      if (questions[idx]) questions[idx].description = textarea.value;
+    });
+    modalBody.querySelectorAll('[data-q-opts]').forEach((textarea) => {
+      const idx = parseInt(textarea.dataset.qOpts);
+      if (questions[idx]) questions[idx].options = textarea.value.split('\n').map(o => o.trim()).filter(o => o);
+    });
+    modalBody.querySelectorAll('[data-q-req]').forEach((checkbox) => {
+      const idx = parseInt(checkbox.dataset.qReq);
+      if (questions[idx]) questions[idx].required = checkbox.checked;
+    });
+  }
+
+  // 刷新弹窗内容
+  function refreshModalContent() {
+    // 先保存当前输入值到 questions 数组
+    saveCurrentInputs();
+    
+    const listEl = $('#sv-questions-list');
+    if (listEl) {
+      listEl.innerHTML = renderQuestions();
+      // 重新绑定事件
+      listEl.querySelectorAll('[data-q-del]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          saveCurrentInputs(); // 保存当前输入
+          const idx = parseInt(btn.dataset.qDel);
+          questions.splice(idx, 1);
+          questionCount--;
+          refreshModalContent();
+        });
+      });
+      listEl.querySelectorAll('[data-q-type]').forEach((sel) => {
+        sel.addEventListener('change', () => {
+          saveCurrentInputs(); // 保存当前输入
+          const idx = parseInt(sel.dataset.qType);
+          questions[idx].qtype = sel.value;
+          refreshModalContent();
+        });
+      });
+      // 绑定输入框的实时保存
+      listEl.querySelectorAll('[data-q-text]').forEach((input) => {
+        input.addEventListener('input', () => {
+          const idx = parseInt(input.dataset.qText);
+          questions[idx].question = input.value;
+        });
+      });
+      listEl.querySelectorAll('[data-q-desc]').forEach((textarea) => {
+        textarea.addEventListener('input', () => {
+          const idx = parseInt(textarea.dataset.qDesc);
+          questions[idx].description = textarea.value;
+        });
+      });
+      listEl.querySelectorAll('[data-q-opts]').forEach((textarea) => {
+        textarea.addEventListener('input', () => {
+          const idx = parseInt(textarea.dataset.qOpts);
+          questions[idx].options = textarea.value.split('\n').map(o => o.trim()).filter(o => o);
+        });
+      });
+      listEl.querySelectorAll('[data-q-req]').forEach((checkbox) => {
+        checkbox.addEventListener('change', () => {
+          const idx = parseInt(checkbox.dataset.qReq);
+          questions[idx].required = checkbox.checked;
+        });
+      });
+      
+      // 拖拽排序事件
+      let dragSrcEl = null;
+      listEl.querySelectorAll('[data-q-idx]').forEach((card) => {
+        card.addEventListener('dragstart', (e) => {
+          dragSrcEl = card;
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', card.dataset.qIdx);
+          setTimeout(() => card.style.opacity = '0.4', 0);
+        });
+        
+        card.addEventListener('dragend', () => {
+          card.style.opacity = '1';
+          listEl.querySelectorAll('[data-q-idx]').forEach((c) => c.classList.remove('drop-above', 'drop-below'));
+        });
+        
+        card.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          const rect = card.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          listEl.querySelectorAll('[data-q-idx]').forEach((c) => c.classList.remove('drop-above', 'drop-below'));
+          if (e.clientY < midY) card.classList.add('drop-above');
+          else card.classList.add('drop-below');
+        });
+        
+        card.addEventListener('drop', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!dragSrcEl || dragSrcEl === card) return;
+
+          // 先把 DOM 里的当前输入收进数组再移动：splice 之后 DOM 与数组下标错位，
+          // refreshModalContent 里再 saveCurrentInputs 会把题面/选项写到别的题上
+          saveCurrentInputs();
+          const fromIdx = parseInt(dragSrcEl.dataset.qIdx);
+          const toIdx = parseInt(card.dataset.qIdx);
+          const rect = card.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          let insertIdx = e.clientY < midY ? toIdx : toIdx + 1;
+
+          if (fromIdx < insertIdx) insertIdx--;
+
+          const [moved] = questions.splice(fromIdx, 1);
+          questions.splice(insertIdx, 0, moved);
+
+          refreshModalContent();
+        });
+      });
+    }
+    // 更新计数
+    const countEl = document.querySelector('#sv-q-count'); // #sv-add-q 的父级是按钮排，h3 在外层，原先按 parentElement 永远找不到
+    if (countEl) countEl.textContent = `问题列表（${questionCount} 题）`;
+  }
+
+  // 保存问卷
+  $('#sv-save').addEventListener('click', async () => {
+    const title = $('#sv-title').value.trim();
+    if (!title) { toast('请填写问卷标题', 'error'); return; }
+    
+    const ros = readRoster('sv', 'ref');
+    if (!ros.libId && !ros.raw.trim()) { toast('请设置答题名单', 'error'); return; }
+
+    // 先把 DOM 里的当前输入收回 questions 数组再校验：选项框只有选择题才渲染，
+    // 按 NodeList 位置对位会在数字/日期题上取错甚至取到 undefined
+    saveCurrentInputs();
+    if (questions.length === 0) { toast('请至少添加一个问题', 'error'); return; }
+    if (questions.length > 50) { toast('最多支持 50 个问题', 'error'); return; }
+
+    const questionsData = [];
+    for (let i = 0; i < questions.length; i++) {
+      const item = questions[i];
+      const question = String(item.question || '').trim();
+      if (!question) { toast(`问题 ${i + 1} 的内容不能为空`, 'error'); return; }
+
+      const qtype = item.qtype;
+      let options = [];
+      if (['single', 'multiple', 'rating'].includes(qtype)) {
+        options = (item.options || []).map((o) => String(o).trim()).filter((o) => o);
+        if (options.length < 2) { toast(`问题 ${i + 1} 至少需要 2 个选项`, 'error'); return; }
+      }
+
+      questionsData.push({ question, description: String(item.description || '').trim(), qtype, options, required: !!item.required });
+    }
+
+    try {
+      const body = {
+        title,
+        description: $('#sv-desc').value.trim(),
+        deadline: valToDt($('#sv-deadline').value),
+        rosterId: ros.libId || null,
+        rosterRaw: ros.raw,
+        keepId: ros.keepId,
+        anonymous: $('#sv-anonymous').checked,
+        questions: questionsData
+      };
+      await api('/api/survey', { method: 'POST', body });
+      closeModal();
+      toast('问卷已发起', 'success');
+      loadSurveys();
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  });
 }
 
 async function loadBirthdays() {
@@ -2658,19 +3771,19 @@ async function loadBirthdays() {
     : `<div class="bd-calm">${icon('birthday')} 今天没有寿星${nearest ? `，最近的是 <b>${esc(nearest.name)}</b>（${nearest.month} 月 ${nearest.day} 日，还有 ${nearest.daysUntil} 天）` : ''}，每一天都值得被温柔对待</div>`;
 
   const upCards = data.items.filter((m) => !m.isToday).map((m, i) => `
-    <div class="bd-card${m.pending ? ' pending' : (m.daysUntil <= 7 ? ' soon' : '')}${canEdit() ? ' has-acts' : ''}" style="animation-delay:${Math.min(i * 45, 600)}ms">
+    <div class="bd-card${m.pending ? ' pending' : (m.daysUntil <= 7 ? ' soon' : '')}${isSysAdmin() ? ' has-acts' : ''}" style="animation-delay:${Math.min(i * 45, 600)}ms">
       <div class="bd-ava" style="background:${m.pending ? 'var(--hover)' : bdAvaColor(m)}">${m.pending ? '?' : esc(Array.from(m.name || '?')[0])}</div>
       <div class="bd-uinfo">
         <div class="bd-uname">${esc(m.name)}</div>
         <div class="bd-usub">${m.pending ? '生日待填' : `${icon('birthday')} ${m.month} 月 ${m.day} 日${m.turningAge != null ? ' · 将满 ' + m.turningAge + ' 岁' : ''}`}</div>
       </div>
       <div class="bd-dayspill">${m.pending ? '<span style="font-size:12px">待填</span>' : `<b>${m.daysUntil}</b><span>天后</span>`}</div>
-      ${canEdit() ? `<div class="bd-acts"><button class="mini" data-bd-edit="${m.id}" title="编辑">${icon('edit')}</button><button class="mini danger" data-bd-del="${m.id}" title="删除">${icon('trash')}</button></div>` : ''}
+      ${isSysAdmin() ? `<div class="bd-acts"><button class="mini" data-bd-edit="${m.id}" title="编辑">${icon('edit')}</button><button class="mini danger" data-bd-del="${m.id}" title="删除">${icon('trash')}</button></div>` : ''}
     </div>`).join('');
 
   // 班级名单导入控件
   let libHtml = '';
-  if (canEdit()) {
+  if (isSysAdmin()) {
     let lib = [];
     try { lib = (await api('/api/rosters')).items; } catch (e) { /* 忽略 */ }
     if (seq !== loadSeq) return; // 班级名单慢响应期间切走视图，不再覆盖
@@ -2686,7 +3799,7 @@ async function loadBirthdays() {
     }
   }
   // 班徽背景管理
-  const badgeHtml = canEdit() ? `
+  const badgeHtml = isSysAdmin() ? `
     <div class="jl-actions" style="margin-top:6px">
       <label class="ghost" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px">${icon('image')} 上传班徽背景<input id="bd-badge-file" type="file" accept="image/*" style="display:none"></label>
       ${data.hasBadge ? '<button class="ghost" id="bd-badge-del">移除班徽</button>' : ''}
@@ -2700,10 +3813,10 @@ async function loadBirthdays() {
     ${todayWrap}
     <div class="panel">
       <div class="jl-head" style="margin:0 0 4px"><h3 style="margin:0">${icon('birthday')} 生日倒计时（${data.items.filter((x) => !x.isToday).length} 人）</h3></div>
-      ${upCards ? `<div class="bd-grid">${upCards}</div>` : `<div class="empty"><div class="big">${icon('birthday')}</div>还没有成员<br>${canEdit() ? '先在「班级名单」保存名单，再从下面一键导入' : '等老师添加成员后，这里就会热闹起来'}</div>`}
+      ${upCards ? `<div class="bd-grid">${upCards}</div>` : `<div class="empty"><div class="big">${icon('birthday')}</div>还没有成员<br>${isSysAdmin() ? '先在「班级名单」保存名单，再从下面导入' : '班级名单里还没有成员，请让管理员添加'}</div>`}
       ${libHtml}
       ${badgeHtml}
-      ${canEdit() ? `<div class="jl-actions"><button class="primary" id="btn-bd-add">${icon('plus')} 添加成员</button></div>` : ''}
+      ${isSysAdmin() ? `<div class="jl-actions"><button class="primary" id="btn-bd-add">${icon('plus')} 添加成员</button></div>` : ''}
     </div>
     </div>`;
   setNavBadge('birthday', data.todayCount, { bday: true });
@@ -2800,6 +3913,9 @@ function fmtMoney(n) {
 async function loadFunds() {
   const seq = loadSeq;
   const view = $('#view');
+  // 搜索框在 #view 内部，整页重绘会把它替换掉、焦点和光标跟着丢——记住焦点状态，渲染完还回去
+  const hadSearchFocus = $('#fund-q') === document.activeElement;
+  const caret = $('#fund-q') ? $('#fund-q').selectionStart : null;
   view.innerHTML = '<div class="loading">加载中…</div>';
   const p = new URLSearchParams();
   if (state.fund.type) p.set('type', state.fund.type);
@@ -2816,20 +3932,20 @@ async function loadFunds() {
     const inner = isImg(a.mime)
       ? `<a class="fund-thumb" href="${url}" target="_blank" rel="noopener" title="${esc(a.orig_name)}"><img loading="lazy" src="${url}" alt="${esc(a.orig_name)}"></a>`
       : `<a class="fund-file" href="${url}" target="_blank" rel="noopener">${icon('paperclip')} ${esc(a.orig_name)}</a>`;
-    const del = canEdit() ? `<button class="fund-file-del" data-fatt-del="${a.id}" title="删除凭证">${icon('trash')}</button>` : '';
+    const del = isSysAdmin() ? `<button class="fund-file-del" data-fatt-del="${a.id}" title="删除凭证">${icon('trash')}</button>` : '';
     return `<span class="fund-filewrap">${inner}${del}</span>`;
   };
   const rows = data.items.map((r) => {
     const files = r.attachments || [];
-    const filesHtml = (canEdit() || files.length)
-      ? `<div class="fund-files">${files.map((a) => fileChip(r, a)).join('')}${canEdit() ? `<label class="fund-upl">${icon('upload')} 上传凭证<input type="file" accept="image/*,.pdf" multiple hidden data-fund-upload="${r.id}"></label>` : ''}</div>` : '';
+    const filesHtml = (isSysAdmin() || files.length)
+      ? `<div class="fund-files">${files.map((a) => fileChip(r, a)).join('')}${isSysAdmin() ? `<label class="fund-upl">${icon('upload')} 上传凭证<input type="file" accept="image/*,.pdf" multiple hidden data-fund-upload="${r.id}"></label>` : ''}</div>` : '';
     return `<div class="fund-item">
-      <div class="fund-row${canEdit() ? ' has-acts' : ''}">
+      <div class="fund-row${isSysAdmin() ? ' has-acts' : ''}">
         <span class="fund-date">${esc(r.happened_at)}</span>
         <span class="fund-tag ${r.type}">${r.type === 'income' ? '收' : '支'}</span>
         <span class="fund-note" title="${esc(r.note || '')}">${esc(r.note || '')}${files.length ? ` <span class="fund-fcount">${icon('paperclip')}${files.length}</span>` : ''}</span>
         <span class="fund-amt ${r.type}">${r.type === 'income' ? '+' : '−'}¥${fmtMoney(r.amount)}</span>
-        ${canEdit() ? `<span class="fund-acts"><button class="mini" data-fund-edit="${r.id}" title="编辑">${icon('edit')}</button><button class="mini danger" data-fund-del="${r.id}" title="删除">${icon('trash')}</button></span>` : ''}
+        ${isSysAdmin() ? `<span class="fund-acts"><button class="mini" data-fund-edit="${r.id}" title="编辑">${icon('edit')}</button><button class="mini danger" data-fund-del="${r.id}" title="删除">${icon('trash')}</button></span>` : ''}
       </div>
       ${filesHtml}
     </div>`;
@@ -2855,11 +3971,11 @@ async function loadFunds() {
         <span class="fund-dash">→</span>
         <input id="fund-to" type="date" value="${esc(state.fund.to)}" aria-label="截止日期" title="截止日期">
         <button class="ghost" id="fund-export">${icon('download')} 导出 CSV</button>
-        ${canEdit() ? `<button class="primary" id="btn-fund-add">${icon('plus')} 记一笔</button>` : ''}
+        ${isSysAdmin() ? `<button class="primary" id="btn-fund-add">${icon('plus')} 记一笔</button>` : ''}
       </div>
       <div class="panel">
         <div class="jl-head" style="margin:0 0 6px"><h3 style="margin:0">${icon('fund')} 收支明细（${s.count} 笔${state.fund.type || state.fund.q || state.fund.from || state.fund.to ? '，已筛选' : ''}）</h3></div>
-        ${rows || `<div class="empty"><div class="big">${icon('fund')}</div>还没有记账记录<br>${canEdit() ? '点右上角「记一笔」，把第一笔班费收支记进来' : '管理员记录后会出现在这里'}</div>`}
+        ${rows || `<div class="empty"><div class="big">${icon('fund')}</div>还没有记账记录<br>${isSysAdmin() ? '点右上角「记一笔」，把第一笔班费收支记进来' : '管理员记录后会出现在这里'}</div>`}
       </div>
     </div>`;
 
@@ -2869,6 +3985,11 @@ async function loadFunds() {
   bind('#fund-export', 'click', () => window.open('/api/funds/export?' + p, '_blank'));
   let qt = null;
   bind('#fund-q', 'input', (e) => { clearTimeout(qt); qt = setTimeout(() => { state.fund.q = e.target.value.trim(); loadFunds().catch((x) => toast(x.message, 'error')); }, 350); });
+  // 搜索触发的重绘把输入框换了个新元素，把焦点和光标位置接回去，打字才不会断
+  if (hadSearchFocus) {
+    const q = $('#fund-q');
+    if (q) { q.focus(); try { q.setSelectionRange(caret, caret); } catch (e) { /* type=search 个别浏览器可能拒绝 */ } }
+  }
   bind('#fund-from', 'change', (e) => { state.fund.from = e.target.value; renderView().catch(() => {}); });
   bind('#fund-to', 'change', (e) => { state.fund.to = e.target.value; renderView().catch(() => {}); });
   $$('[data-fund-edit]').forEach((b) => b.addEventListener('click', () => {
@@ -2930,6 +4051,7 @@ function openFundModal(r) {
     const n = filesInp.files.length;
     preview.innerHTML = n ? `<span class="ok-t">${icon('paperclip')} 已选 ${n} 个文件，保存后自动上传</span>` : '';
   });
+  let created = null; // 新建成功后记住 id：凭证上传失败重试时走 PUT 补传，不再重复 POST 记一笔
   $('#fund-save').addEventListener('click', async () => {
     const body = {
       type: ($('#modal-root input[name="fund-type"]:checked') || {}).value || 'expense',
@@ -2940,21 +4062,28 @@ function openFundModal(r) {
     if (!(body.amount > 0)) { toast('请填写大于 0 的金额', 'error'); return; }
     if (!body.happened_at) { toast('请选择日期', 'error'); return; }
     try {
-      const rec = r ? await api('/api/funds/' + r.id, { method: 'PUT', body }) : await api('/api/funds', { method: 'POST', body });
+      const rec = r ? await api('/api/funds/' + r.id, { method: 'PUT', body })
+        : (created ? await api('/api/funds/' + created, { method: 'PUT', body }) : await api('/api/funds', { method: 'POST', body }));
+      if (rec && rec.id) created = rec.id;
       const chosen = [...filesInp.files];
       if (rec && rec.id && chosen.length) {
         const fd = new FormData();
         chosen.forEach((f) => fd.append('files', f, f.name));
         await api('/api/funds/' + rec.id + '/attachment', { method: 'POST', body: fd });
+        filesInp.value = ''; // 上传成功就清掉：失败重试只补记录，不重复传同一批凭证
       }
       closeModal();
       toast('已保存 ✓');
       renderView().catch(() => {});
-    } catch (e) { toast(e.message, 'error'); }
+    } catch (e) {
+      if (created) toast('记录已保存，但凭证没传上：' + e.message + '（再点一次保存只补传凭证）', 'error');
+      else toast(e.message, 'error');
+    }
   });
 }
 
-/* ========= 留言寄语（寄语墙 + 弹幕 + 点赞） ========= */
+/* ========= 思维碰撞（点子 / 留言两个标签；点子带状态与回复，留言保留点赞与弹幕） ========= */
+const IDEA_STATUS = { open: '待看', accepted: '采纳', done: '已实现', dropped: '搁置' };
 function gbStopTimer() { if (gbTimer) { clearInterval(gbTimer); gbTimer = null; } }
 const GB_DAN_COLORS = ['rgba(79,110,242,.85)', 'rgba(7,193,96,.85)', 'rgba(249,115,22,.85)', 'rgba(139,92,246,.85)', 'rgba(239,68,68,.85)', 'rgba(14,165,233,.85)'];
 let gbDanStage = null, gbDanList = [], gbDanInited = false;
@@ -2986,11 +4115,265 @@ function gbApplyDanmaku() {
     gbTimer = setInterval(gbSpawnDan, 2600);
   }
 }
+// 模块入口：征集列表 / 留言墙 / 某个征集的详情
 async function loadGuestbook() {
+  if (state.gb.campaign) return loadCampaignDetail();
+  if (state.gb.tab === 'note') return loadNoteWall();
+  return loadCampaignList();
+}
+// 「征集活动 / 留言」两个标签（详情页不显示，靠返回按钮）
+function gbTabsHtml(active) {
+  return `<div class="gb-tabs">
+    <button data-gb-tab="campaign" class="${active === 'campaign' ? 'on' : ''}">${icon('bulb')} 征集活动</button>
+    <button data-gb-tab="note" class="${active === 'note' ? 'on' : ''}">${icon('guestbook')} 留言</button>
+  </div>`;
+}
+function gbBindTabs() {
+  $$('[data-gb-tab]').forEach((b) => b.addEventListener('click', () => {
+    if (state.gb.tab === b.dataset.gbTab) return;
+    state.gb.tab = b.dataset.gbTab;
+    state.gb.campaign = null;
+    state.gb.files = [];
+    state.gb.topic = ''; state.gb.status = '';
+    renderView().catch(() => {});
+  }));
+}
+function openCampaign(id) {
+  state.gb.campaign = id;
+  state.gb.status = '';
+  state.gb.files = [];
+  renderView().catch((e) => toast(e.message, 'error'));
+}
+
+/* ---------- 征集列表 ---------- */
+async function loadCampaignList() {
   const seq = loadSeq;
   const view = $('#view');
   view.innerHTML = '<div class="loading">加载中…</div>';
-  const gbq = (off) => '/api/guestbook?limit=30&offset=' + off + '&sort=' + state.gb.sort + (state.gb.topic ? '&topic=' + encodeURIComponent(state.gb.topic) : '');
+  const data = await api('/api/campaigns');
+  if (seq !== loadSeq) return;
+  const admin = isSysAdmin();
+  const items = data.items || [];
+  const cards = items.map((c) => {
+    const closed = c.closed || c.closedNow;
+    return `<div class="panel camp-card">
+      <div class="jl-head"><h2>${esc(c.title)}</h2>${closed ? '<span class="jl-badge off">已结束</span>' : '<span class="jl-badge on">收集中</span>'}
+        <span class="camp-vis${c.visibility === 'private' ? ' private' : ''}">${c.visibility === 'private' ? icon('lock') + ' 仅我与提交人可见' : icon('users') + ' 全班可见'}</span></div>
+      ${c.description ? `<p class="jl-desc">${esc(c.description.length > 120 ? c.description.slice(0, 120) + '…' : c.description)}</p>` : ''}
+      <div class="jl-meta">
+        <span>${c.deadline ? '截止 ' + esc(c.deadline) : '不限截止'}</span>
+        <span>已收到 ${c.count} 份</span>
+        ${c.myCount ? `<span>我提交了 ${c.myCount} 份</span>` : ''}
+      </div>
+      <div class="jl-actions">
+        <button class="primary" data-camp-open="${c.id}">${closed ? '查看' : '进入征集'}</button>
+        <button class="ghost" data-camp-copy="${c.id}">${icon('link')} 复制链接</button>
+        ${admin ? `<button class="ghost" data-camp-edit="${c.id}">${icon('edit')} 编辑</button>
+        <button class="ghost danger" data-camp-del="${c.id}">${icon('trash')} 删除</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+  view.innerHTML = `
+    <div class="gb-page">
+      <div class="jl-head"><h2>${icon('bulb')} 思维碰撞</h2></div>
+      <p class="hint">发起一次征集（比如「下周活动想做什么」「有什么问题值得我反思」），同学把点子和文件交上来；公开征集大家能互相看，私密征集只有发起人与提交人看得到内容。</p>
+      ${gbTabsHtml('campaign')}
+      ${admin ? `<div class="jl-actions"><button class="primary" id="btn-camp-new">${icon('plus')} 发起征集</button></div>` : ''}
+      ${items.length ? cards : `<div class="empty"><div class="big">${icon('bulb')}</div>还没有征集<br>${admin ? '点上面「发起征集」，把想听的问题发出去' : '发起后会出现在这里'}</div>`}
+    </div>`;
+  const nb = $('#btn-camp-new');
+  if (nb) nb.addEventListener('click', () => openCampaignModal(null));
+  $$('[data-camp-open]').forEach((b) => b.addEventListener('click', () => openCampaign(b.dataset.campOpen)));
+  $$('[data-camp-copy]').forEach((b) => b.addEventListener('click', () => {
+    const c = items.find((x) => x.id === b.dataset.campCopy);
+    jlCopy(location.origin + '/c/' + b.dataset.campCopy, '征集链接已复制，发到班群即可'
+      + (c && c.visibility === 'private' ? '（私密征集：内容只有发起人与提交人看得到）' : ''));
+  }));
+  $$('[data-camp-edit]').forEach((b) => b.addEventListener('click', () => {
+    const c = items.find((x) => x.id === b.dataset.campEdit);
+    if (c) openCampaignModal(c);
+  }));
+  $$('[data-camp-del]').forEach((b) => b.addEventListener('click', async () => {
+    const c = items.find((x) => x.id === b.dataset.campDel);
+    if (!confirm(`确定删除征集「${c ? c.title : ''}」？已收到的 ${c ? c.count : 0} 份提交会一起删掉，不可恢复！`)) return;
+    try { await api('/api/campaigns/' + b.dataset.campDel, { method: 'DELETE' }); toast('征集已删除'); renderView().catch(() => {}); }
+    catch (e) { toast(e.message, 'error'); }
+  }));
+  gbBindTabs();
+}
+
+/* ---------- 征集详情：提交 + 已收到的点子 ---------- */
+async function loadCampaignDetail() {
+  const seq = loadSeq;
+  const view = $('#view');
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  let d;
+  try { d = await api('/api/campaigns/' + state.gb.campaign); }
+  catch (e) {
+    if (seq !== loadSeq) return;
+    state.gb.campaign = null;
+    toast(e.message, 'error');
+    return loadGuestbook();
+  }
+  if (seq !== loadSeq) return;
+  const closed = d.closed || d.closedNow;
+  const link = location.origin + '/c/' + d.id;
+  const liked = gbLiked();
+  const items = d.items || [];
+  const byId = new Map(items.map((m) => [m.id, m]));
+  const shown = state.gb.status ? items.filter((m) => (m.status || 'open') === state.gb.status) : items;
+  view.innerHTML = `
+    <div class="gb-page">
+      <button class="ghost jl-back" id="camp-back">← 返回征集列表</button>
+      <div class="jl-head"><h2>${esc(d.title)}</h2>${closed ? '<span class="jl-badge off">已结束</span>' : '<span class="jl-badge on">收集中</span>'}
+        <span class="camp-vis${d.visibility === 'private' ? ' private' : ''}">${d.visibility === 'private' ? icon('lock') + ' 仅我与提交人可见' : icon('users') + ' 全班可见'}</span></div>
+      ${d.description ? `<p class="jl-desc">${esc(d.description)}</p>` : ''}
+      <div class="jl-meta">
+        ${d.deadline ? `<span>截止：${esc(d.deadline)}</span>` : '<span>不限截止</span>'}
+        <span>已收到 ${d.count} 份${d.visibility === 'private' && !d.canManage ? '（这里只显示你自己的与匿名公开的）' : ''}</span>
+        ${d.myCount ? `<span>我提交了 ${d.myCount} 份</span>` : ''}
+      </div>
+      <div class="jl-linkrow"><input readonly value="${esc(link)}"><button class="ghost" id="camp-copy">${icon('link')} 复制链接</button></div>
+      ${closed
+        ? `<div class="jl-banner">这次征集已经结束，不能再提交。${d.canManage ? '要重新收的话，去列表里编辑并「重新开放」。' : ''}</div>`
+        : `<div class="panel gb-composer">
+        <textarea id="gb-content" rows="4" maxlength="500" placeholder="写下你的点子或问题（最多 500 字；也可以只传附件）"></textarea>
+        <div class="gb-composer-foot">
+          ${d.visibility === 'private'
+            ? '<label class="gb-anon" title="勾上后这一条会匿名出现在全班同学看到的征集里，附件也能被下载"><input type="checkbox" id="gb-share" style="width:auto"> 匿名展示给全班</label>'
+            : '<label class="gb-anon"><input type="checkbox" id="gb-anon" style="width:auto"> 匿名</label>'}
+          <label class="gb-filepick" title="添加附件（单个 ≤ 20MB，最多 5 个）">${icon('paperclip')} 附件<input type="file" id="gb-files" multiple hidden></label>
+          <div class="gb-composer-right">
+            <span class="gb-count"><span id="gb-len">0</span>/500</span>
+            <button class="primary" id="gb-send">${icon('plus')} 提交</button>
+          </div>
+        </div>
+        <div id="gb-filelist" class="gb-filelist"></div>
+      </div>`}
+      ${d.canManage ? `<div class="gb-topics gb-statuschips">
+        <button class="gb-topic-chip${state.gb.status === '' ? ' on' : ''}" data-camp-status="">全部 <b>${items.length}</b></button>
+        ${Object.keys(IDEA_STATUS).map((k) => `<button class="gb-topic-chip${state.gb.status === k ? ' on' : ''}" data-camp-status="${k}">${IDEA_STATUS[k]} <b>${(d.statusCounts || {})[k] || 0}</b></button>`).join('')}
+      </div>` : ''}
+      <div class="gb-toolbar"><span class="gb-total">${d.canManage ? `共 ${items.length} 份` : `我的提交（${items.length} 份）`}</span></div>
+      <div id="gb-list">${shown.length ? `<div class="gb-wall">${shown.map((m) => ideaCard(m, liked, d.canManage, d.visibility === 'private')).join('')}</div>`
+        : `<div class="empty"><div class="big">${icon('bulb')}</div>${d.canManage ? '还没有人提交' : '你还没有提交过'}</div>`}</div>
+    </div>`;
+  $('#camp-back').addEventListener('click', () => { state.gb.campaign = null; renderView().catch(() => {}); });
+  $('#camp-copy').addEventListener('click', () => jlCopy(link, '征集链接已复制，发到班群即可'));
+  $$('[data-camp-status]').forEach((b) => b.addEventListener('click', () => {
+    const s = b.dataset.campStatus || '';
+    if (state.gb.status === s) return;
+    state.gb.status = s;
+    renderView().catch(() => {});
+  }));
+  const contentEl = $('#gb-content');
+  const lenEl = $('#gb-len');
+  if (contentEl) contentEl.addEventListener('input', () => { if (lenEl) lenEl.textContent = String(contentEl.value.length); });
+  // 待传附件先存 state（切换筛选 / 重渲染不丢），提交时和正文一起走 multipart
+  const fileListEl = $('#gb-filelist');
+  const renderFiles = () => {
+    if (!fileListEl) return;
+    fileListEl.innerHTML = (state.gb.files || []).map((f, i) =>
+      `<span class="gb-file">${icon('paperclip')} ${esc(f.name)} <i>${fmtSize(f.size)}</i><button type="button" data-gb-file-del="${i}" title="移除">×</button></span>`).join('');
+    $$('[data-gb-file-del]').forEach((b) => b.addEventListener('click', () => {
+      state.gb.files.splice(Number(b.dataset.gbFileDel), 1);
+      renderFiles();
+    }));
+  };
+  const fileInput = $('#gb-files');
+  if (fileInput) fileInput.addEventListener('change', () => {
+    for (const f of fileInput.files) {
+      if (state.gb.files.length >= 5) { toast('最多 5 个附件', 'error'); break; }
+      if (f.size > 20 * 1024 * 1024) { toast('「' + f.name + '」超过 20MB', 'error'); continue; }
+      state.gb.files.push(f);
+    }
+    fileInput.value = '';
+    renderFiles();
+  });
+  renderFiles();
+  const send = async () => {
+    const content = contentEl.value.trim();
+    const files = state.gb.files;
+    if (!content && !files.length) { toast('写点什么，或者选一个文件', 'error'); return; }
+    // 公开征集：匿名只管名字；私密征集：勾「匿名展示给全班」这一条才会放给全班看（仍是匿名）
+    const anon = !!($('#gb-anon') && $('#gb-anon').checked);
+    const share = !!($('#gb-share') && $('#gb-share').checked);
+    let body;
+    if (files.length) {
+      // 有附件走 multipart：提交与文件在服务端同一个事务里落库，不会留下半截
+      body = new FormData();
+      body.append('kind', 'idea');
+      body.append('campaign', d.id);
+      body.append('content', content);
+      body.append('anonymous', anon ? 'true' : 'false');
+      body.append('public_share', share ? 'true' : 'false');
+      files.forEach((f) => body.append('files', f, f.name));
+    } else {
+      body = { kind: 'idea', campaign: d.id, content, anonymous: anon, public_share: share };
+    }
+    const btn = $('#gb-send'); if (btn) btn.disabled = true;
+    try {
+      await api('/api/guestbook', { method: 'POST', body });
+      state.gb.files = [];
+      toast(files.length ? '已提交，附件也传上去了 ✓' : '已提交 ✓');
+      renderView().catch(() => {});
+    } catch (e) { toast(e.message, 'error'); btn.disabled = false; }
+  };
+  const sendBtn = $('#gb-send'); if (sendBtn) sendBtn.addEventListener('click', send);
+  if (contentEl) contentEl.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') send(); });
+  function bindIdea() {
+    $$('[data-idea-edit]').forEach((b) => {
+      if (b._ibound) return; b._ibound = true;
+      b.addEventListener('click', () => { const m = byId.get(Number(b.dataset.ideaEdit)); if (m) openIdeaModal(m); });
+    });
+  }
+  function bindLike() {
+    $$('[data-gb-like]').forEach((b) => {
+      if (b._bound) return; b._bound = true;
+      b.addEventListener('click', async () => {
+        const id = Number(b.dataset.gbLike);
+        if (gbLiked().has(id)) { toast('已经赞过啦'); return; }
+        b.disabled = true;
+        try {
+          const r = await api('/api/guestbook/' + id + '/like', { method: 'POST' });
+          gbMarkLiked(id);
+          b.classList.add('on');
+          const sp = b.querySelector('span'); if (sp) sp.textContent = r.likes;
+        } catch (e) { b.disabled = false; toast(e.message, 'error'); }
+      });
+    });
+  }
+  function bindDel() {
+    $$('[data-gb-del]').forEach((b) => {
+      if (b._dbound) return; b._dbound = true;
+      b.addEventListener('click', async () => {
+        if (!confirm('删除这条提交？')) return;
+        try { await api('/api/guestbook/' + b.dataset.gbDel, { method: 'DELETE' }); toast('已删除'); renderView().catch(() => {}); }
+        catch (e) { toast(e.message, 'error'); }
+      });
+    });
+  }
+  function bindAttDel() {
+    $$('[data-gb-att-del]').forEach((b) => {
+      if (b._atbound) return; b._atbound = true;
+      b.addEventListener('click', async () => {
+        if (!confirm('移除这个附件？')) return;
+        try { await api('/api/idea-attachments/' + b.dataset.gbAttDel, { method: 'DELETE' }); toast('附件已移除'); renderView().catch(() => {}); }
+        catch (e) { toast(e.message, 'error'); }
+      });
+    });
+  }
+  bindIdea(); bindAttDel(); bindLike(); bindDel();
+}
+
+/* ---------- 留言墙（原来的寄语墙：昵称 / 点赞 / 主题 / 弹幕） ---------- */
+async function loadNoteWall() {
+  const seq = loadSeq;
+  const view = $('#view');
+  view.innerHTML = '<div class="loading">加载中…</div>';
+  gbStopTimer();
+  const gbq = (off) => '/api/guestbook?limit=30&offset=' + off + '&sort=' + state.gb.sort
+    + (state.gb.topic ? '&topic=' + encodeURIComponent(state.gb.topic) : '');
   const data = await api(gbq(0));
   if (seq !== loadSeq) return;
   state.gb.total = data.total; state.gb.loaded = data.items.length;
@@ -3001,11 +4384,11 @@ async function loadGuestbook() {
     gbDanInited = true;
   }
   const liked = gbLiked();
-  const card = (m) => {
+  const gbCard = (m) => {
     const tint = 'gb-t' + (m.id % 6);
     const initial = esc(Array.from(m.nickname || '匿名')[0] || '?');
     return `<div class="gb-card ${tint}">
-      ${canEdit() ? `<button class="gb-del" data-gb-del="${m.id}" title="删除">${icon('trash')}</button>` : ''}
+      ${canPost() ? `<button class="gb-del" data-gb-del="${m.id}" title="删除">${icon('trash')}</button>` : ''}
       <div class="gb-head"><span class="gb-ava">${initial}</span>
         <div class="gb-who"><span class="gb-nick">${esc(m.nickname || '匿名')}</span><span class="gb-time">${esc(fmtReceived(m.created_at))}</span></div>
       </div>
@@ -3015,12 +4398,13 @@ async function loadGuestbook() {
     </div>`;
   };
   const wallHtml = data.items.length
-    ? `<div class="gb-wall" id="gb-wall">${data.items.map(card).join('')}</div>`
+    ? `<div class="gb-wall" id="gb-wall">${data.items.map(gbCard).join('')}</div>`
     : `<div class="empty"><div class="big">${icon('guestbook')}</div>还没有留言<br>写下第一句寄语，或给这堂课留个评价吧</div>`;
   view.innerHTML = `
     <div class="gb-page">
-      <div class="jl-head"><h2>${icon('guestbook')} 留言寄语</h2></div>
-      <p class="hint">写下给自己的寄语、课后的感想，或任何想说的话——人人可发、即时上墙，顶部弹幕飘过大家的心声。管理员可删除不当留言。</p>
+      <div class="jl-head"><h2>${icon('bulb')} 思维碰撞</h2></div>
+      <p class="hint">想随便说两句、留个寄语，就写在这面墙上；想提活动建议或值得我反思的问题，去「征集活动」交给对应的那次征集。</p>
+      ${gbTabsHtml('note')}
       <div class="gb-stage-wrap" id="gb-stage-wrap">
         <div class="gb-stage" id="gb-stage" aria-hidden="true"></div>
         <button class="mini gb-dan-toggle" id="gb-dan-toggle" title="开关弹幕">${state.gb.danmaku ? '弹幕 开' : '弹幕 关'}</button>
@@ -3058,17 +4442,16 @@ async function loadGuestbook() {
   const lenEl = $('#gb-len');
   if (contentEl) contentEl.addEventListener('input', () => { if (lenEl) lenEl.textContent = String(contentEl.value.length); });
   const send = async () => {
-    const nickname = ($('#gb-nick').value || '').trim();
-    const topic = ($('#gb-topic').value || '').trim();
     const content = contentEl.value.trim();
+    const topic = ($('#gb-topic').value || '').trim();
     if (!content) { toast('写点什么再发吧', 'error'); return; }
+    const body = { kind: 'note', content, topic, nickname: ($('#gb-nick').value || '').trim() };
     const btn = $('#gb-send'); if (btn) btn.disabled = true;
     try {
-      await api('/api/guestbook', { method: 'POST', body: { nickname, content, topic } });
+      await api('/api/guestbook', { method: 'POST', body });
       toast('已发布 ✓');
       renderView().catch(() => {});
-    } catch (e) { toast(e.message, 'error'); }
-    finally { if (btn) btn.disabled = false; }
+    } catch (e) { toast(e.message, 'error'); btn.disabled = false; }
   };
   const sendBtn = $('#gb-send'); if (sendBtn) sendBtn.addEventListener('click', send);
   if (contentEl) contentEl.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') send(); });
@@ -3088,7 +4471,7 @@ async function loadGuestbook() {
       const fresh = d.items.filter((m) => !state.gb.shown.has(m.id));
       fresh.forEach((m) => state.gb.shown.add(m.id));
       state.gb.loaded += d.items.length;
-      $('#gb-wall').insertAdjacentHTML('beforeend', fresh.map(card).join(''));
+      $('#gb-wall').insertAdjacentHTML('beforeend', fresh.map(gbCard).join(''));
       bindLike(); bindTopicBadge(); bindDel();
       if (state.gb.loaded >= state.gb.total || !d.items.length) moreBtn.closest('.morebar').remove();
     } catch (e) { toast(e.message, 'error'); }
@@ -3132,16 +4515,114 @@ async function loadGuestbook() {
     });
   }
   bindTopicBadge(); bindLike(); bindDel();
+  gbBindTabs();
+}
+
+// 一条提交的卡片：状态徽章、附件、回复、点赞；处理按钮只在有管理权时出现
+function ideaCard(m, liked, canManage, privateCampaign) {
+  return `<article class="gb-card idea s-${esc(m.status || 'open')}">
+    ${canManage ? `<button class="gb-del" data-gb-del="${m.id}" title="删除">${icon('trash')}</button>` : ''}
+    <div class="gb-head">
+      <span class="gb-ava">${esc(Array.from(m.nickname || '匿名')[0] || '?')}</span>
+      <div class="gb-who"><span class="gb-nick">${esc(m.nickname || '匿名')}${m.mine ? ' <b class="idea-mine">我提的</b>' : ''}</span><span class="gb-time">${esc(fmtReceived(m.created_at))}</span></div>
+      <span class="idea-badge">${IDEA_STATUS[m.status] || '待看'}</span>${(privateCampaign && m.public_share) ? '<span class="idea-share" title="提交人选择匿名公开给全班">匿名公开</span>' : ''}
+    </div>
+    ${m.content ? `<div class="gb-text">${esc(m.content)}</div>` : ''}
+    ${(m.attachments || []).length ? `<div class="gb-atts">${m.attachments.map((a) => `
+      <span class="gb-att"><a href="/api/idea-attachments/${a.id}/download" target="_blank" rel="noopener">${icon('file')} <span>${esc(a.orig_name)}</span> <i>${fmtSize(a.size)}</i></a>${(canManage || m.mine) ? `<button class="gb-att-del" data-gb-att-del="${a.id}" title="移除附件">×</button>` : ''}</span>`).join('')}</div>` : ''}
+    ${m.reply ? `<div class="idea-reply"><b>回复</b><span>${esc(m.reply)}</span>${m.reply_at ? `<i>${esc(fmtReceived(m.reply_at))}</i>` : ''}</div>` : ''}
+    <div class="idea-foot">
+      <button class="gb-like${liked.has(m.id) ? ' on' : ''}" data-gb-like="${m.id}" ${liked.has(m.id) ? 'disabled' : ''}>${icon('heart')}<span>${m.likes || 0}</span></button>
+      ${canManage ? `<button class="mini" data-idea-edit="${m.id}">${icon('edit')} 状态 / 回复</button>` : ''}
+    </div>
+  </article>`;
+}
+
+
+/* 处理一条点子：改状态 + 写公开回复。点名看到的提交人只有系统管理员拿得到（匿名点子的真名不下发给别人） */
+function openIdeaModal(m) {
+  const opts = Object.keys(IDEA_STATUS).map((k) =>
+    `<option value="${k}"${(m.status || 'open') === k ? ' selected' : ''}>${IDEA_STATUS[k]}</option>`).join('');
+  openModal(`
+    <h2>${icon('bulb')} 处理点子</h2>
+    ${m.content ? `<div class="idea-quote">${esc(m.content)}</div>` : ''}
+    ${(m.attachments || []).length ? `<div class="gb-atts">${m.attachments.map((a) => `<a class="gb-att" href="/api/idea-attachments/${a.id}/download" target="_blank" rel="noopener">${icon('file')} <span>${esc(a.orig_name)}</span> <i>${fmtSize(a.size)}</i></a>`).join('')}</div>` : ''}
+    <div class="hint" style="margin:6px 0 10px">${esc(m.nickname || '匿名')}${m.sid ? '（' + esc(m.sid) + '）' : ''} · ${esc(fmtReceived(m.created_at))}</div>
+    <div class="form">
+      <label>状态</label>
+      <select id="idea-status">${opts}</select>
+      <label>公开回复（同学都看得到）</label>
+      <textarea id="idea-reply" rows="3" maxlength="500" placeholder="比如：这个主意好，下周班会上定；或：记下了，我先想想怎么落地">${esc(m.reply || '')}</textarea>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" id="btn-cancel">取消</button>
+      <button class="primary" id="idea-save">${icon('check')} 保存</button>
+    </div>`);
+  $('#idea-save').addEventListener('click', async () => {
+    try {
+      await api('/api/guestbook/' + m.id, { method: 'PUT', body: { status: $('#idea-status').value, reply: $('#idea-reply').value } });
+      closeModal();
+      toast('已更新 ✓');
+      renderView().catch(() => {});
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+/* 发起 / 编辑一次征集：标题、说明、截止、公开或私密 */
+function openCampaignModal(c) {
+  const vis = c && c.visibility === 'private' ? 'private' : 'public';
+  openModal(`
+    <h2>${icon('bulb')} ${c ? '编辑征集' : '发起征集'}</h2>
+    <div class="form">
+      <label>征集标题</label>
+      <input id="camp-title" maxlength="60" value="${c ? esc(c.title) : ''}" placeholder="如：下周班级活动想做什么？">
+      <label>说明（选填）</label>
+      <textarea id="camp-desc" rows="3" maxlength="1000" placeholder="想听哪方面的意见、有什么背景或要求…">${c ? esc(c.description || '') : ''}</textarea>
+      <label>截止时间（选填，到点自动停止收集）</label>
+      <input id="camp-deadline" type="datetime-local" value="${c ? dtToVal(c.deadline) : ''}">
+      <label>谁能看到提交内容</label>
+      <select id="camp-vis">
+        <option value="public"${vis === 'public' ? ' selected' : ''}>全班可见（大家能互相看、点赞）</option>
+        <option value="private"${vis === 'private' ? ' selected' : ''}>仅我与提交人可见（适合反思类问题）</option>
+      </select>
+      ${c ? `<label class="splitline"><input type="checkbox" id="camp-closed"${c.closed ? ' checked' : ''}> 停止收集（不再接收提交）</label>` : ''}
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" id="btn-cancel">取消</button>
+      <button class="primary" id="camp-save">${c ? '保存修改' : '发起征集'}</button>
+    </div>`);
+  $('#camp-save').addEventListener('click', async () => {
+    const title = $('#camp-title').value.trim();
+    if (!title) { toast('请填写征集标题', 'error'); return; }
+    const body = {
+      title, description: $('#camp-desc').value, deadline: valToDt($('#camp-deadline').value) || '',
+      visibility: $('#camp-vis').value,
+    };
+    if (c) body.closed = $('#camp-closed').checked;
+    try {
+      if (c) {
+        await api('/api/campaigns/' + c.id, { method: 'PUT', body });
+        toast('已保存');
+      } else {
+        const r = await api('/api/campaigns', { method: 'POST', body });
+        state.gb.tab = 'campaign';
+        state.gb.campaign = r.id;
+        toast('征集已发起 ✓');
+      }
+      closeModal();
+      renderView().catch(() => {});
+    } catch (e) { toast(e.message, 'error'); }
+  });
 }
 
 /* ========= 命令面板（Ctrl/⌘+K，参考 Linear 的 cmdk 交互） ========= */
 const CMDK_VIEWS = [
-  ['feed', '信息中心', 'feed'], ['inbox', '等待审核', 'inbox'], ['tasks', '待办任务', 'check'],
+  ['feed', '信息中心', 'feed'], ['tasks', '待办任务', 'check'], ['inbox', '等待审核', 'inbox'],
+  ['files', '文件中心', 'file'], ['stats', '统计', 'chart'],
   ['jielong', '活动接龙', 'jielong'], ['draw', '抽签点名', 'draw'], ['vote', '投票表决', 'vote'], ['birthday', '生日祝福', 'birthday'],
   ['funds', '班费收支', 'fund'],
-  ['guestbook', '留言寄语', 'guestbook'],
-  ['calendar', '日历详情', 'calendar'], ['files', '文件中心', 'file'], ['stats', '统计接入', 'chart'],
-  ['rosters', '班级名单', 'users'],
+  ['guestbook', '思维碰撞', 'bulb'],
+  ['rosters', '账号名单', 'users'], ['audit', '操作记录', 'clock'], ['settings', '设置', 'settings'],
 ];
 let cmdkItems = [], cmdkIndex = 0, cmdkSearchTimer = null, cmdkSeq = 0;
 
@@ -3165,18 +4646,30 @@ function cmdkOpen() {
   setTimeout(() => q.focus(), 30);
 }
 
+// 当前身份能去的视图：命令面板与 1–9 快捷键共用，别让同学跳到只有管理员 / 班委能看的页
+function visibleViews() {
+  return CMDK_VIEWS.filter(([v]) => {
+    if (['rosters', 'audit', 'settings'].includes(v) && !isSysAdmin()) return false;
+    if (v === 'inbox' && !canPost()) return false;
+    return true;
+  });
+}
 function cmdkCommands() {
-  // 班级名单是管理功能（访客隐藏入口），命令面板同步按权限过滤
-  const views = canEdit() ? CMDK_VIEWS : CMDK_VIEWS.filter(([v]) => v !== 'rosters');
+  // 班级管理（账号名单 / 操作记录 / 设置）与待审核按身份过滤
+  const views = visibleViews();
   const cmds = views.map(([v, label, ic]) => ({
     iconHtml: icon(ic), label: '转到：' + label, hint: '视图',
     run: () => { state.view = v; renderView().catch((e) => toast(e.message, 'error')); },
   }));
-  if (canEdit()) {
+  if (canPost()) {
     cmds.push(
       { iconHtml: icon('plus'), label: '添加信息', hint: '操作', run: () => openMessageModal(null) },
       { iconHtml: icon('jielong'), label: '发起接龙', hint: '操作', run: () => { state.view = 'jielong'; renderView().catch(() => {}); setTimeout(openJielongCreateModal, 80); } },
       { iconHtml: icon('draw'), label: '新建签箱', hint: '操作', run: () => { state.view = 'draw'; renderView().catch(() => {}); setTimeout(openDrawCreateModal, 80); } },
+    );
+  }
+  if (isSysAdmin()) {
+    cmds.push(
       { iconHtml: icon('birthday'), label: '添加生日成员', hint: '操作', run: () => { state.view = 'birthday'; renderView().catch(() => {}); setTimeout(() => openBdayModal(null), 80); } },
       { iconHtml: icon('download'), label: '导出 JSON 备份', hint: '操作', run: () => window.open('/api/export') },
       { iconHtml: icon('calendar'), label: '导出日历（.ics）', hint: '操作', run: () => window.open('/api/calendar.ics') },
@@ -3184,7 +4677,14 @@ function cmdkCommands() {
   }
   cmds.push(
     { iconHtml: icon('clock'), label: '切换外观（浅色 / 深色 / 自动）', hint: '操作', run: () => $('#btn-theme').click() },
-    { iconHtml: icon('search'), label: '聚焦搜索框', hint: '操作', run: () => $('#search').focus() },
+    { iconHtml: icon('search'), label: '聚焦搜索框', hint: '操作', run: () => {
+      const sw = $('.searchwrap');
+      if (sw && sw.style.display === 'none') {
+        state.view = 'feed';
+        renderView().catch(() => {});
+      }
+      setTimeout(() => $('#search').focus(), 60);
+    } },
   );
   return cmds;
 }
@@ -3252,7 +4752,7 @@ function cmdkRun(i) {
   if (!it) return;
   closeModal();
   if (it.type === 'msg') {
-    if (canEdit()) api('/api/messages/' + it.it.id).then(openMessageModal).catch((e) => toast(e.message, 'error'));
+    if (isSysAdmin()) api('/api/messages/' + it.it.id).then(openMessageModal).catch((e) => toast(e.message, 'error'));
     else toast('访客只读，登录后可编辑信息');
   } else it.run();
 }
@@ -3265,7 +4765,7 @@ function openHelpModal() {
       <kbd class="kbd">/</kbd><span>聚焦搜索框</span>
       <kbd class="kbd">Ctrl / ⌘ + K</kbd><span>打开命令面板（跳转、操作、搜信息）</span>
       <kbd class="kbd">N</kbd><span>添加信息（管理员）</span>
-      <kbd class="kbd">1 – 9</kbd><span>切换视图（信息 / 待审 / 待办 / 接龙 / 抽签 / 生日 / 日历 / 文件 / 统计）</span>
+      <kbd class="kbd">1 – 9</kbd><span>切换视图（信息 / 待办 / 待审核 / 文件 / 统计 / 接龙 / 抽签 / 投票 / 生日）</span>
       <kbd class="kbd">Esc</kbd><span>关闭弹窗或面板</span>
       <kbd class="kbd">Ctrl / ⌘ + Enter</kbd><span>保存正在编辑的信息</span>
     </div>
@@ -3275,8 +4775,36 @@ function openHelpModal() {
 /* ========= 视图切换 ========= */
 // 顶栏控件只在适用的页面显示：排序只在信息流有用；统计页不响应群筛选
 function syncTopbar() {
-  $('#group-sel').style.display = (state.view === 'stats' || state.view === 'jielong' || state.view === 'draw' || state.view === 'vote' || state.view === 'birthday' || state.view === 'funds' || state.view === 'guestbook' || state.view === 'rosters') ? 'none' : '';
+  // 搜索、群筛选、排序都只作用于信息中心（信息流 / 待办 / 待审核 / 文件），其他模块不显示
+  const info = ['feed', 'tasks', 'files', 'inbox'].includes(state.view);
+  const sw = $('.searchwrap');
+  if (sw) sw.style.display = info ? '' : 'none';
+  $('#group-sel').style.display = info ? '' : 'none';
   $('#sortsel').style.display = state.view === 'feed' ? '' : 'none';
+}
+/* ========= 合并后的导航：信息中心 / 班级管理 ========= */
+// 信息中心装 信息流 / 待办 / 待审核 / 文件 / 统计；班级管理装 账号名单 / 操作记录 / 设置。
+// state.view 仍然用原来的子视图名，只是导航与标签把它们归了组。
+const FEED_VIEWS = ['feed', 'tasks', 'inbox', 'files', 'stats'];
+const ADMIN_VIEWS = ['rosters', 'audit', 'settings'];
+const NAV_ALIAS = { tasks: 'feed', inbox: 'feed', files: 'feed', stats: 'feed', audit: 'rosters', settings: 'rosters' };
+const FEED_TABS = [['feed', '信息流'], ['tasks', '待办'], ['inbox', '待审核'], ['files', '文件'], ['stats', '统计']];
+const ADMIN_TABS = [['rosters', '账号名单'], ['audit', '操作记录'], ['settings', '设置']];
+function hubTabsHtml(active, tabs) {
+  return `<div class="hub-tabs">${tabs.filter(([v]) => v !== 'inbox' || canPost()).map(([v, label]) =>
+    `<button data-hub-tab="${v}" class="${active === v ? 'on' : ''}">${label}${v === 'inbox' && state.inboxTotal ? ` <b>${state.inboxTotal > 99 ? '99+' : state.inboxTotal}</b>` : ''}</button>`).join('')}</div>`;
+}
+function renderHubBar() {
+  const bar = $('#hub-bar');
+  if (!bar) return;
+  if (FEED_VIEWS.includes(state.view)) bar.innerHTML = hubTabsHtml(state.view, FEED_TABS);
+  else if (ADMIN_VIEWS.includes(state.view)) bar.innerHTML = hubTabsHtml(state.view, ADMIN_TABS);
+  else { bar.innerHTML = ''; return; }
+  $$('[data-hub-tab]', bar).forEach((b) => b.addEventListener('click', () => {
+    if (state.view === b.dataset.hubTab) return;
+    state.view = b.dataset.hubTab;
+    renderView().catch((e) => toast(e.message, 'error'));
+  }));
 }
 // 视图加载代次：renderView 每次自增并传给视图加载器。加载器的响应回来时若代次已变
 // （用户已切换视图 / 改了筛选），直接丢弃，防止慢的旧请求覆盖新界面
@@ -3288,6 +4816,7 @@ async function renderView() {
   const seq = ++loadSeq;
   saveFilters();
   syncNavActive();
+  renderHubBar();
   syncTopbar();
   renderChips();
   const view = $('#view');
@@ -3298,12 +4827,14 @@ async function renderView() {
     else if (state.view === 'jielong') await loadJielong();
     else if (state.view === 'draw') await loadDraw();
     else if (state.view === 'vote') await loadVotes();
+    else if (state.view === 'survey') await loadSurveys();
     else if (state.view === 'birthday') await loadBirthdays();
     else if (state.view === 'funds') await loadFunds();
     else if (state.view === 'guestbook') await loadGuestbook();
-    else if (state.view === 'calendar') await loadCalendar();
     else if (state.view === 'files') await loadFiles();
     else if (state.view === 'rosters') await loadRosters();
+    else if (state.view === 'audit') await loadAudit();
+    else if (state.view === 'settings') await loadSettings();
     else await loadStats();
     window.scrollTo(0, 0);
   } catch (e) {
@@ -3329,12 +4860,16 @@ async function refresh() {
 // 所有导航按钮（侧栏 + 底栏 + 更多面板）统一同步活动态；
 // 「更多」按钮在当前视图属于低频视图时也点亮
 const NAV_SEL = '#mainnav button, #tabbar button, #tabsheet button';
-const MORE_VIEWS = ['inbox', 'calendar', 'files', 'stats', 'rosters', 'vote', 'funds', 'guestbook'];
+// 「更多」面板里的条目（手机底栏放不下的模块）
+const MORE_VIEWS = ['funds', 'guestbook', 'rosters', 'audit', 'settings'];
 function syncNavActive() {
+  // 合并后：待办 / 待审核 / 文件 / 统计 都归到「信息中心」，操作记录 / 设置 归到「班级管理」
+  const navView = NAV_ALIAS[state.view] || state.view;
   $$(NAV_SEL).forEach((b) => {
-    b.classList.toggle('active', b.dataset.view === state.view);
+    const on = !!b.dataset.view && b.dataset.view === navView;
+    b.classList.toggle('active', on);
     if (b.dataset.view) {
-      if (b.dataset.view === state.view) b.setAttribute('aria-current', 'page');
+      if (on) b.setAttribute('aria-current', 'page');
       else b.removeAttribute('aria-current');
     }
   });
@@ -3383,7 +4918,8 @@ function bindEvents() {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
       state.q = e.target.value.trim();
-      if (state.view !== 'stats') renderView().catch((e2) => toast(e2.message, 'error'));
+      // 只有用得上搜索词的视图才重画；统计 / 设置 / 账号 / 记录不吃搜索
+      if (['feed', 'tasks', 'files', 'inbox'].includes(state.view)) renderView().catch((e2) => toast(e2.message, 'error'));
     }, 250);
   });
 
@@ -3407,18 +4943,18 @@ function bindEvents() {
     renderView().catch((e2) => toast(e2.message, 'error'));
   });
   $('#grouplist').addEventListener('dblclick', (e) => {
-    if (!canEdit()) return;
+    if (!isSysAdmin()) return;
     const gi = e.target.closest('.gitem');
     if (!gi || !gi.dataset.gid) return;
     const g = state.groups.find((x) => String(x.id) === gi.dataset.gid);
     if (g) openGroupModal(g);
   });
 
-  if (canEdit()) {
+  if (canPost()) {
     $('#btn-add').addEventListener('click', () => openMessageModal(null));
     $('#fab').addEventListener('click', () => openMessageModal(null));
-    $('#btn-add-group').addEventListener('click', () => openGroupModal(null));
   }
+  if (isSysAdmin()) $('#btn-add-group').addEventListener('click', () => openGroupModal(null));
   const loginBtn = $('#btn-login');
   if (loginBtn) loginBtn.addEventListener('click', () => { location.href = '/login'; });
 
@@ -3460,15 +4996,18 @@ function bindEvents() {
 
     if (e.key === '/') {
       e.preventDefault();
-      $('#search').focus();
+      const sw = $('.searchwrap');
+      if (sw && sw.style.display !== 'none') { $('#search').focus(); return; }
+      state.view = 'feed';
+      renderView().catch(() => {}).then(() => $('#search').focus());
     } else if (e.key === '?') {
       e.preventDefault();
       openHelpModal();
-    } else if ((e.key === 'n' || e.key === 'N') && canEdit()) {
+    } else if ((e.key === 'n' || e.key === 'N') && canPost()) {
       e.preventDefault();
       openMessageModal(null);
     } else if (/^[1-9]$/.test(e.key)) {
-      const v = CMDK_VIEWS[Number(e.key) - 1];
+      const v = visibleViews()[Number(e.key) - 1];
       if (v && v[0] !== state.view) {
         state.view = v[0];
         renderView().catch((e2) => toast(e2.message, 'error'));
@@ -3510,7 +5049,7 @@ function bindEvents() {
     // 文件中心：点"来自：xxx"打开对应信息编辑
     const fmsg = e.target.closest('.fmsg');
     if (fmsg && fmsg.dataset.msg) {
-      if (!canEdit()) return;
+      if (!isSysAdmin()) return;
       try {
         const item = await api('/api/messages/' + fmsg.dataset.msg);
         openMessageModal(item);
@@ -3584,9 +5123,13 @@ function applyTheme(mode) {
     btn.innerHTML = ic;
     btn.title = '外观：' + (mode === 'auto' ? '自动（19:00–次日 7:00 深色，当前' + (t === 'dark' ? '深色' : '浅色') + '）' : mode === 'dark' ? '深色' : '浅色') + '，点击切换';
   }
-  // 手机状态栏 / 浏览器标签框颜色跟随主题
+  // 手机状态栏 / 浏览器标签框颜色跟随主题。
+  // 从令牌现取而不是再抄一份字面色：抄的那份在 --bg 改成 #11161f 后没跟上，手机上状态栏和页面顶边会有一条色差
   const mt = document.querySelector('meta[name="theme-color"]');
-  if (mt) mt.content = t === 'dark' ? '#141922' : '#4f6ef2';
+  if (mt) {
+    const v = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+    mt.content = (t === 'dark' ? v('--bg') : v('--primary')) || (t === 'dark' ? '#11161f' : '#4f6ef2');
+  }
 }
 function onBellClick() {
   localStorage.setItem('infohub-notif-dismissed', '1');
@@ -3687,8 +5230,10 @@ function initExtras() {
   // 弹窗里有没保存的内容时，关闭/刷新页面先提醒（覆盖信息、接龙、签箱、生日等所有表单弹窗）
   window.addEventListener('beforeunload', (e) => {
     const modal = $('.modal');
-    const dirtyFields = modal && $$('.modal input[type=text], .modal input[type=number], .modal input[type=datetime-local], .modal input[type=password], .modal textarea', modal)
-      .some((el) => el.value.trim());
+    // input[type=text] 是属性选择器，匹配不到省略 type 的输入框（弹窗里的标题/备注大多没写 type）；
+    // 反向排除法才能全覆盖
+    const dirtyFields = modal && $$('.modal input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=hidden]):not([type=submit]):not([type=button]), .modal textarea, .modal select', modal)
+      .some((el) => String(el.value || '').trim());
     if (state.pendingFiles.length > 0 || dirtyFields) { e.preventDefault(); e.returnValue = ''; }
   });
   $('#btn-bell').addEventListener('click', onBellClick);
@@ -3711,10 +5256,12 @@ function setNavBadge(viewName, n, opts = {}) {
   });
 }
 async function updateInboxBadge() {
-  if (!canEdit()) return;
+  if (!canPost()) return;   // 待审核入口对班委也开着，所以他们同样要看到数字
   try {
     const d = await api('/api/inbox?limit=1');
-    setNavBadge('inbox', d.total || 0);
+    state.inboxTotal = d.total || 0;
+    // 角标现在长在信息中心的「待审核」标签上：在这个合并页里就直接重画标签
+    if (FEED_VIEWS.includes(state.view)) renderHubBar();
   } catch (e) { /* 只读访客无权限，静默 */ }
 }
 
@@ -3722,7 +5269,7 @@ async function updateInboxBadge() {
 bindEvents();
 initExtras();
 restoreFilters();
-// 管理链接委托入口：/?jl=接龙ID&t=管理令牌 → 直接打开该接龙的管理页（班委无需登录）
+// 直达某条接龙的管理页：/?jl=接龙ID（历史 ?t= 管理令牌已随账号体系退役，能否管理只看登录身份）
 (function jlInitFromUrl() {
   try {
     const q = new URLSearchParams(location.search);
@@ -3732,6 +5279,18 @@ restoreFilters();
       state.view = 'jielong';
       state.jl = { id, token: t };
       history.replaceState(null, '', location.pathname);
+    }
+  } catch (e) { /* 忽略 */ }
+})();
+// 征集链接入口：/c/征集ID → 打开这次征集（未登录会先跳登录页，登录后回到这个地址）
+(function ideaInitFromUrl() {
+  try {
+    const m = /^\/c\/([a-z0-9]+)\/?$/.exec(location.pathname);
+    if (m) {
+      state.view = 'guestbook';
+      state.gb.tab = 'campaign';
+      state.gb.campaign = m[1];
+      history.replaceState(null, '', '/');
     }
   } catch (e) { /* 忽略 */ }
 })();

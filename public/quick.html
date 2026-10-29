@@ -103,7 +103,7 @@ $('#q-text').addEventListener('input',()=>{
 });
 
 $('#q-save').addEventListener('click',async()=>{
-  if(qReadOnly){location.href='/login';return;}
+  if(qReadOnly){qtoast('当前账号只能浏览，记录通知需要班委或管理员账号');return;}
   const text=$('#q-text').value.trim();
   if(!text){qtoast('请先粘贴或输入内容');return;}
   const btn=$('#q-save');btn.disabled=true;btn.textContent='保存中…';
@@ -147,11 +147,13 @@ async function loadToday(){
 
 let qReadOnly=false;
 fetch('/api/me').then(r=>r.json()).then(me=>{
-  if(me&&me.readOnly){
+  // 这个页面对已登录的人开放；班级账号里只有班委与系统管理员能记录，同学只能看今日事项
+  const canWrite=me&&(me.role==='admin'||me.role==='officer');
+  if(me&&!canWrite){
     qReadOnly=true;
-    // 不 disable：保持按钮可点，点击后在保存逻辑里跳登录页
-    $('#q-save').textContent='管理员登录后可记录';
-    $('#q-text').placeholder='浏览模式：快速记录仅管理员可用';
+    // 不 disable：保持按钮可点，点击后提示去换账号（页面本身就要求登录，跳登录页没用）
+    $('#q-save').textContent='当前账号只能浏览';
+    $('#q-text').placeholder='浏览模式：记录通知需要班委或管理员账号';
   }
 }).catch(e=>{});
 loadGroups();
