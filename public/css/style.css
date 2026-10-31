@@ -489,80 +489,62 @@ body.readonly .side-foot { display: none !important; }
 .dw-round .dw-rname{background:var(--tag-bg);color:var(--primary);border-radius:6px;padding:1px 8px;font-size:12.5px}
 
 /* ---------- 班级生日 ---------- */
-/* 页面级背景只留极淡的暖色洗染，氛围集中在当天的 hero 卡上 */
-.bd-page{background:linear-gradient(180deg,rgba(255,240,245,.55) 0%,rgba(255,240,245,0) 220px);border-radius:var(--radius-md);padding:4px 8px 0;margin:0 -8px}
-:root[data-theme="dark"] .bd-page{background:linear-gradient(180deg,rgba(48,36,52,.4) 0%,rgba(48,36,52,0) 220px)}
-.bd-bunting{display:flex;justify-content:center;gap:16px;margin-bottom:8px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.1))}
-.bd-bunting i{width:0;height:0;border-left:13px solid transparent;border-right:13px solid transparent;border-top:22px solid var(--c);transform-origin:top center;animation:bd-sway 3.2s ease-in-out infinite}
-.bd-bunting i:nth-child(1){--c:#f472b6}
-.bd-bunting i:nth-child(2){--c:#fbbf24;animation-delay:.4s}
-.bd-bunting i:nth-child(3){--c:#60a5fa;animation-delay:.8s}
-.bd-bunting i:nth-child(4){--c:#4ade80;animation-delay:1.2s}
-.bd-bunting i:nth-child(5){--c:#f472b6;animation-delay:1.6s}
-.bd-bunting i:nth-child(6){--c:#fbbf24;animation-delay:2s}
-.bd-bunting i:nth-child(7){--c:#60a5fa;animation-delay:2.4s}
-@keyframes bd-sway{0%,100%{transform:rotate(-5deg)}50%{transform:rotate(5deg)}}
-.bd-date{font-size:13px;color:var(--muted);margin-bottom:2px}
-.bd-grid .bd-card{animation:bd-in .5s ease both}
-@keyframes bd-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
-.bd-hero{position:relative;overflow:hidden;border-radius:var(--radius-lg);margin:14px 0;padding:46px 24px 38px;text-align:center;
-  background:linear-gradient(135deg,#ffd9e8 0%,#fff1dc 38%,#ffe8f0 62%,#e8ddff 100%);
-  box-shadow:0 18px 50px rgba(233,120,160,.30), inset 0 0 0 1px rgba(255,255,255,.55)}
-.bd-hero .bd-mark{position:absolute;inset:0;background-position:center;background-repeat:no-repeat;background-size:contain;opacity:.16;pointer-events:none;filter:saturate(.9)}
-:root[data-theme="dark"] .bd-hero .bd-mark{opacity:.22;filter:grayscale(.3) brightness(1.6)}
-/* 生日角标：弹跳的 🎂 小徽章（区别于待办数字的红色角标） */
-.navbadge.bday{background:#ffeef5;color:#d63384;font-size:12px;line-height:16px;box-shadow:0 0 0 1px rgba(214,51,132,.30),0 2px 8px rgba(214,51,132,.30);animation:bd-bounce 2.2s ease-in-out infinite}
-:root[data-theme="dark"] .navbadge.bday{background:#3a2540;color:#f6a5c8;box-shadow:0 0 0 1px rgba(246,165,200,.4),0 2px 8px rgba(0,0,0,.4)}
-:root[data-theme="dark"] .bd-hero{
-  background:linear-gradient(135deg,#3c2440 0%,#322a4d 45%,#3f2540 100%);
-  box-shadow:0 18px 50px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.08);
-}
-.bd-hero .bd-cake{font-size:62px;line-height:1;display:inline-block;animation:bd-bounce 2.2s ease-in-out infinite;filter:drop-shadow(0 8px 16px rgba(240,120,160,.45))}
-.bd-todaylabel{margin-top:12px;font-size:12.5px;letter-spacing:6px;color:#b4638a}
-:root[data-theme="dark"] .bd-todaylabel{color:#d9a7c4}
-.bd-name{font-family:Georgia,'STSong','SimSun',serif;font-size:40px;font-weight:700;letter-spacing:4px;color:#b0185c;margin:4px 0 8px;text-shadow:0 2px 16px rgba(214,51,132,.30)}
-:root[data-theme="dark"] .bd-name{color:#f6a5c8;text-shadow:0 2px 16px rgba(246,165,200,.3)}
-.bd-role{margin-bottom:4px}
-.bd-wish{max-width:440px;margin:14px auto 0;font-size:16px;line-height:1.95;color:#4a3b45}
-:root[data-theme="dark"] .bd-wish{color:#d8c7d4}
-.bd-from{margin-top:12px;font-size:12.5px;color:var(--muted);letter-spacing:2px}
-.bd-actions{margin-top:14px}
-.bd-actions .ghost{background:linear-gradient(135deg,#f472b6,#fb923c);color:#fff;border:0;border-radius:999px;padding:10px 24px;font-size:13.5px;font-weight:600}
-.bd-actions .ghost:hover{opacity:.92}
-.bd-balloon{position:absolute;bottom:-50px;font-size:26px;opacity:.7;animation:bd-float 9s linear infinite;pointer-events:none}
-@keyframes bd-float{0%{transform:translateY(0) rotate(-6deg);opacity:.7}90%{opacity:.5}100%{transform:translateY(-320px) rotate(8deg);opacity:0}}
-.bd-cf{position:absolute;top:-12px;width:8px;height:13px;border-radius:2px;opacity:.75;animation:bd-fall 5.5s linear infinite;pointer-events:none}
-@keyframes bd-fall{0%{transform:translateY(0) rotate(0)}100%{transform:translateY(380px) rotate(320deg);opacity:0}}
-.bd-spark{position:absolute;font-size:17px;animation:bd-twinkle 2.4s ease-in-out infinite;pointer-events:none}
-@keyframes bd-twinkle{0%,100%{opacity:.15;transform:scale(.7)}50%{opacity:1;transform:scale(1.15)}}
+/* 今日祝福卡：粉紫极光渐变 + 白色大字 + 漂浮光斑（爆款生日页的主视觉），深浅色各有一套底 */
+.bd-page{border-radius:var(--radius-md);padding:4px 8px 0;margin:0 -8px}
+.bd-hero{position:relative;overflow:hidden;border-radius:var(--radius-lg);margin:14px 0;padding:46px 24px 36px;text-align:center;
+  background:
+    radial-gradient(120% 90% at 15% 0%,rgba(236,72,153,.30),transparent 55%),
+    radial-gradient(120% 90% at 85% 10%,rgba(129,90,255,.32),transparent 55%),
+    radial-gradient(100% 80% at 50% 100%,rgba(251,146,60,.16),transparent 60%),
+    linear-gradient(160deg,#7c3aed 0%,#c026d3 55%,#db2777 100%);
+  box-shadow:0 14px 40px -12px rgba(147,51,234,.45)}
+:root[data-theme="dark"] .bd-hero{background:
+    radial-gradient(120% 90% at 15% 0%,rgba(236,72,153,.30),transparent 55%),
+    radial-gradient(120% 90% at 85% 10%,rgba(129,90,255,.32),transparent 55%),
+    radial-gradient(100% 80% at 50% 100%,rgba(251,146,60,.12),transparent 60%),
+    linear-gradient(160deg,#3b1a6e 0%,#6d21a8 55%,#9d174d 100%);
+  box-shadow:0 14px 40px -12px rgba(0,0,0,.6)}
+/* 漂浮光斑：纯 CSS，缓慢上浮 */
+.bd-hero::before,.bd-hero::after{content:'';position:absolute;border-radius:50%;filter:blur(2px);
+  background:radial-gradient(circle at 35% 35%,rgba(255,255,255,.55),rgba(255,255,255,.05));
+  animation:bd-float 7s ease-in-out infinite alternate;pointer-events:none}
+.bd-hero::before{width:96px;height:96px;left:7%;bottom:-20px}
+.bd-hero::after{width:58px;height:58px;right:11%;bottom:-8px;animation-delay:2.2s}
+.bd-hero .bd-mark{position:absolute;inset:0;background-position:center;background-repeat:no-repeat;background-size:contain;opacity:.16;pointer-events:none}
+.bd-hero .bd-cake{font-size:56px;line-height:1;animation:bd-bob 3.4s ease-in-out infinite;filter:drop-shadow(0 8px 18px rgba(0,0,0,.28))}
+.bd-kicker{margin-top:10px;font-size:12px;letter-spacing:6px;color:rgba(255,255,255,.78)}
+.bd-name{font-size:42px;font-weight:800;letter-spacing:6px;color:#fff;margin:6px 0 8px;text-shadow:0 3px 18px rgba(0,0,0,.22)}
+.bd-badges{margin-bottom:2px}
+.bd-badges .jl-badge{background:rgba(255,255,255,.22);color:#fff}
+.bd-wish{max-width:460px;margin:12px auto 0;font-size:15.5px;line-height:1.9;color:rgba(255,255,255,.92)}
+.bd-from{margin-top:10px;font-size:12.5px;color:rgba(255,255,255,.6);letter-spacing:2px}
+.bd-actions{margin-top:16px}
+.bd-actions .ghost{background:#fff;color:#a21caf;border:0;border-radius:999px;padding:10px 26px;font-size:13.5px;font-weight:700;box-shadow:0 6px 20px rgba(0,0,0,.22)}
+.bd-actions .ghost:hover{transform:translateY(-1px)}
+@keyframes bd-bob{0%,100%{transform:translateY(0) rotate(-3deg)}50%{transform:translateY(-8px) rotate(3deg)}}
 .bd-calm{background:var(--card);border-radius:var(--radius-md);box-shadow:var(--shadow);padding:20px;margin:14px 0;font-size:14.5px;color:var(--muted);text-align:center}
 .bd-calm b{color:var(--text)}
-.bd-calm .icon{width:20px;height:20px;vertical-align:-4px;stroke-width:1.8;opacity:.7;color:#d63384}
-:root[data-theme="dark"] .bd-calm .icon{color:#f6a5c8}
+.bd-calm .icon{width:20px;height:20px;vertical-align:-4px;stroke-width:1.8;opacity:.7;color:var(--primary)}
 .bd-todaygrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:14px 0}
-.bd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(245px,1fr));gap:14px;margin-top:10px}
-.bd-card{position:relative;background:linear-gradient(135deg,#fdf8fa,#f8fafd);border-radius:var(--radius-md);padding:14px;display:flex;gap:12px;align-items:center;padding-right:20px;min-height:76px;border:1px solid var(--line);box-shadow:var(--shadow);transition:transform .2s,box-shadow .2s}
-.bd-card.soon{background:linear-gradient(135deg,#fff6e3,#ffe9ef);border-color:rgba(255,150,80,.4)}
-.bd-card.pending{background:var(--hover);opacity:.7}
-.bd-card.has-acts{padding-bottom:42px}
-@media(hover:hover){.bd-card:hover{transform:translateY(-2px);box-shadow:0 10px 26px rgba(240,150,180,.25)}}
-/* 深色模式：贺卡随主题走深色系，不再保留浅色纸卡 */
-:root[data-theme="dark"] .bd-card:not(.pending){background:linear-gradient(135deg,#252e40,#1f2735)}
-:root[data-theme="dark"] .bd-card.soon{background:linear-gradient(135deg,#3d2e2a,#3a3040);border-color:rgba(255,150,80,.35)}
-:root[data-theme="dark"] .bd-usub{color:var(--muted)}
-:root[data-theme="dark"] .bd-uname{color:var(--text)}
-.bd-ava{width:46px;height:46px;border-radius:50%;flex:0 0 46px;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;color:#fff;box-shadow:inset 0 -2px 6px rgba(0,0,0,.12),0 0 0 2px rgba(255,255,255,.7)}
-.bd-uinfo{flex:1;min-width:0}
-.bd-uname{font-weight:600;word-break:break-all}
-.bd-usub{font-size:12px;color:#5b4a56;margin-top:3px}
-:root[data-theme="dark"] .bd-usub{color:#b8aec6}
-.bd-dayspill{flex:0 0 auto;background:rgba(255,255,255,.8);border-radius:999px;padding:5px 12px;font-size:11px;color:var(--muted);text-align:center;line-height:1.15;box-shadow:0 1px 5px rgba(0,0,0,.08)}
-.bd-dayspill b{display:block;font-size:19px;color:#d63384;font-variant-numeric:tabular-nums}
-:root[data-theme="dark"] .bd-dayspill{background:rgba(255,255,255,.16)}
-:root[data-theme="dark"] .bd-dayspill b{color:#f6a5c8}
-.bd-card.soon .bd-dayspill{background:linear-gradient(135deg,#f472b6,#fb923c)}
-.bd-card.soon .bd-dayspill b,.bd-card.soon .bd-dayspill span{color:#fff}
-.bd-acts{position:absolute;left:16px;bottom:9px;display:flex;gap:6px}
+/* 倒计时：按月份分组，大号日期数字 + 细字月份（爆款倒计时排版） */
+.bd-list{margin-top:10px}
+.bd-month{font-size:12.5px;font-weight:600;color:var(--muted);letter-spacing:2px;margin:16px 0 8px;padding-left:2px}
+.bd-row{display:flex;gap:14px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:var(--radius-md);padding:10px 16px;margin:0 0 8px;box-shadow:var(--elev-1)}
+.bd-row.soon{border-color:color-mix(in srgb,var(--warn) 50%,var(--line));background:color-mix(in srgb,var(--warn) 7%,var(--card))}
+.bd-row.pending{opacity:.62}
+.bd-datebox{flex:0 0 58px;text-align:center;line-height:1.05}
+.bd-datebox b{display:block;font-size:26px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
+.bd-datebox span{font-size:11px;color:var(--muted)}
+.bd-row.soon .bd-datebox b{color:var(--warn)}
+.bd-who{flex:1;min-width:0}
+.bd-who b{font-weight:600;word-break:break-all}
+.bd-who span{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+.bd-count{flex:0 0 auto;font-size:12px;color:var(--muted);background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:5px 13px;font-variant-numeric:tabular-nums}
+.bd-count.hot{background:var(--brand-grad);color:#fff;border:0;font-weight:600;box-shadow:0 4px 14px -4px rgba(79,110,242,.55)}
+.bd-row .bd-acts{display:flex;gap:6px;margin-left:4px}
+.bd-select{max-width:260px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--card);color:var(--text)}
+.bd-upload{cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.bd-upload input{display:none}
 .bd-feedbanner{display:flex;align-items:center;gap:10px;background:linear-gradient(135deg,#fff5f7,#fff0fb);border:1px solid #ffd6e2;border-radius:var(--radius-sm);padding:12px 16px;margin:10px 0;font-size:14px;flex-wrap:wrap}
 :root[data-theme="dark"] .bd-feedbanner{background:linear-gradient(135deg,#2b1f2e,#3a2440);border-color:#5c3a54}
 .bd-feedbanner a{color:var(--primary);text-decoration:none;cursor:pointer}
@@ -864,3 +846,6 @@ html{scrollbar-width:thin;scrollbar-color:rgba(100,116,139,.4) transparent}
 .ad-table tr:last-child td{border-bottom:0}
 .ad-detail{max-width:560px;word-break:break-word;line-height:1.55}
 @media(max-width:760px){.ad-detail{max-width:240px}}
+
+/* 邮件催办选人弹窗的逐人行 */
+.mail-pick-row{display:block;margin:6px 0}

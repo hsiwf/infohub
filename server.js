@@ -18,6 +18,7 @@ const { db, DATA_DIR, UPLOAD_DIR } = require('./db');
 const { smartParse, hasNoticeSignal } = require('./lib/smartparse');
 const { parseMultipart } = require('./lib/multipart');
 const JL = require('./lib/jielong');
+const { createMailer } = require('./lib/mailer');
 const AUTH = require('./lib/auth');
 const safeJson = JL.safeJson; // 投票的 roster / options / choices 均为 JSON 文本字段，读取统一走安全解析
 
@@ -98,10 +99,16 @@ function loadConfig() {
     adminsOnly: false, // true = 只收录群主/管理员（通常是老师）的发言
     smart: false,      // true = 智能过滤：像通知/任务（有分类信号或截止时间）才收录
   }, c.onebot.filter || {});
+  // 邮件催办（手动，接龙 / 投票详情按钮）：发到未完成同学的 QQ 邮箱（users.qq_id@qq.com）。
+  // host/user/pass/from 齐全才真正发信；baseOrigin 是邮件里学生链接的站点地址（如 https://jike.jxau.top）
+  c.smtp = Object.assign({ host: '', port: 465, user: '', pass: '', from: '', fromName: '班级信息汇总', baseOrigin: '' }, c.smtp || {});
   try { fs.writeFileSync(p, JSON.stringify(c, null, 2)); } catch (e) { /* 写不了就用内存值 */ }
   return c;
 }
 const CONFIG = loadConfig();
+// 邮件发送器：自检模式（INFOHUB_SELFTEST=1）走 dryRun——邮件记进内存供自检断言，不碰真实 SMTP
+const MAILER = createMailer(CONFIG.smtp, { dryRun: process.env.INFOHUB_SELFTEST === '1' });
+const MAIL_LOG = path.join(DATA_DIR, 'logs', 'mail.log');
 // 管理密码是否已设置：升级后明文字段消失，判定要看散列
 function adminPwOn() { return !!(CONFIG.password_hash || CONFIG.password); }
 
@@ -796,6 +803,7 @@ route('GET', '/api/me', (ctx) => {
   const s = sessionOf(ctx.req);
   const open = !accessControlOn();
   const byToken = tokenAdminOk(ctx.req);
+  const urow = s && s.sid ? db.prepare('SELECT qq_id FROM users WHERE sid = ?').get(s.sid) : null;
   return {
     authRequired: !open,
     loggedIn: open || !!s || byToken,
@@ -804,6 +812,7 @@ route('GET', '/api/me', (ctx) => {
     name: s ? s.name : (open ? '开放访问' : ''),
     sid: s ? s.sid : '',
     mustChange: !!(s && s.mustChange),
+    qq: (urow && urow.qq_id) || '',
   };
 });
 // 本人改密（学生 / 班委 / 管理员都走这里；管理员没有账号记录，只回会话标记）
@@ -829,6 +838,82 @@ route('POST', '/api/password', async (ctx) => {
   audit(ctx, '修改密码', u.name + '（' + u.sid + '）' + (u.must_change ? ' 首次改掉初始密码' : '，同账号其他会话已退出'));
   return { ok: true };
 });
+/* ---------- 本人提醒邮箱：QQ 号或完整邮箱，修改必须过邮件验证码 ----------
+ * 发码 60 秒冷却（内存 Map，进程级）；码 6 位、10 分钟有效、错 5 次作废，只存 sha256 散列。
+ * 验证通过前旧绑定原样保留；清空（解除绑定）不需要验证。管理员批量导入是代录，不走验证。 */
+const qqCodeSentAt = new Map();
+function remindNormalize(raw) {
+  const v = String(raw || '').trim();
+  // 自助绑定只收完整邮箱（纯 QQ 号由管理员批量导入代录，发送时自动补 @qq.com）
+  if (/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(v)) return { store: v.toLowerCase(), target: v.toLowerCase() };
+  return null;
+}
+route('POST', '/api/me/qq/code', async (ctx) => {
+  const s = sessionOf(ctx.req);
+  if (!s || !s.sid) throw new HttpError(400, '请先用学号登录');
+  const norm = remindNormalize((ctx.body || {}).qq);
+  if (!norm) throw new HttpError(400, '请填完整邮箱地址，例如 123456@qq.com');
+  const last = qqCodeSentAt.get(s.sid) || 0;
+  if (Date.now() - last < 60 * 1000) throw new HttpError(429, '验证码 60 秒内只能发一次，请稍后再试');
+  qqCodeSentAt.set(s.sid, Date.now());
+  const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+  const codeHash = crypto.createHash('sha256').update(code + '|' + s.sid).digest('hex');
+  db.prepare('INSERT OR REPLACE INTO email_verify (sid, target, code_hash, expires_at, attempts, last_sent_at) VALUES (?,?,?,?,?,?)')
+    .run(s.sid, norm.target, codeHash, Date.now() + 10 * 60 * 1000, 0, Date.now());
+  await MAILER.sendMail({
+    to: norm.target,
+    subject: '【验证码】绑定提醒邮箱',
+    text: '你的验证码是：' + code + '\n\n10 分钟内有效，只有输入这个验证码，提醒邮件才会发到这个邮箱。\n如果不是你本人操作，请忽略这封邮件。\n（班级信息汇总）',
+  });
+  const out = { ok: true, target: norm.target, cooldown: 60 };
+  if (SELFTEST_TAG) out.devCode = code; // 自检模式把验证码带回给脚本断言，生产不返回
+  return out;
+});
+// 本人绑定提醒邮箱：验证码通过才生效；qq 留空 = 解除绑定（清空不需要验证）
+route('PUT', '/api/me/qq', (ctx) => {
+  const s = sessionOf(ctx.req);
+  if (!s || !s.sid) throw new HttpError(400, '请先用学号登录');
+  const raw = String((ctx.body || {}).qq || '').trim();
+  if (!raw) {
+    db.prepare('UPDATE users SET qq_id = ?, updated_at = ? WHERE sid = ?').run('', nowStr(), s.sid);
+    db.prepare('DELETE FROM email_verify WHERE sid = ?').run(s.sid);
+    audit(ctx, '解除提醒邮箱', s.name + '（' + s.sid + '）');
+    return { ok: true, qq: '' };
+  }
+  const norm = remindNormalize(raw);
+  if (!norm) throw new HttpError(400, '请填完整邮箱地址，例如 123456@qq.com');
+  const row = db.prepare('SELECT * FROM email_verify WHERE sid = ?').get(s.sid);
+  if (!row || row.target !== norm.target) throw new HttpError(400, '请先对「' + norm.target + '」发送验证码');
+  if (Date.now() > row.expires_at) { db.prepare('DELETE FROM email_verify WHERE sid = ?').run(s.sid); throw new HttpError(400, '验证码已过期，请重新发送'); }
+  if (row.attempts >= 5) { db.prepare('DELETE FROM email_verify WHERE sid = ?').run(s.sid); throw new HttpError(400, '错误次数过多，请重新发送验证码'); }
+  const given = crypto.createHash('sha256').update(String((ctx.body || {}).code || '') + '|' + s.sid).digest('hex');
+  const match = given.length === row.code_hash.length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(row.code_hash));
+  if (!match) {
+    db.prepare('UPDATE email_verify SET attempts = attempts + 1 WHERE sid = ?').run(s.sid);
+    const left = 5 - row.attempts - 1;
+    throw new HttpError(400, left > 0 ? '验证码不对，还可尝试 ' + left + ' 次' : '错误次数过多，请重新发送验证码');
+  }
+  db.prepare('UPDATE users SET qq_id = ?, updated_at = ? WHERE sid = ?').run(norm.store, nowStr(), s.sid);
+  db.prepare('DELETE FROM email_verify WHERE sid = ?').run(s.sid);
+  audit(ctx, '绑定提醒邮箱', s.name + '（' + s.sid + '）经邮件验证码确认');
+  return { ok: true, qq: norm.store };
+});
+// 管理员批量导入提醒邮箱：每行「学号 邮箱」（空格/逗号/制表符分隔），只收完整邮箱；学号须已在账号表中
+route('POST', '/api/users/qq-import', (ctx) => {
+  if (!isSysAdmin(ctx)) throw new HttpError(403, '仅系统管理员');
+  const lines = String((ctx.body || {}).text || '').split(/\r?\n/);
+  let updated = 0; const bad = [];
+  const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+  for (const line of lines) {
+    const m = line.match(/^\s*(\d{5,12})[\s,，\t]+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\s*$/);
+    if (!m) { if (line.trim()) bad.push(line.trim().slice(0, 30)); continue; }
+    const u = db.prepare('SELECT sid FROM users WHERE sid = ?').get(m[1]);
+    if (!u) { bad.push(m[1]); continue; }
+    if (db.prepare('UPDATE users SET qq_id = ?, updated_at = ? WHERE sid = ?').run(m[2].toLowerCase(), nowStr(), m[1]).changes > 0) updated++;
+  }
+  audit(ctx, '批量导入提醒邮箱', '更新 ' + updated + ' 人' + (bad.length ? '，' + bad.length + ' 行无效或未匹配到账号' : ''));
+  return { ok: true, updated, bad: bad.slice(0, 20) };
+});
 
 /* ---------- 账号管理（仅管理员）：从班级名单开号、设班委、重置、停用 ---------- */
 const USER_ROLES = ['student', 'officer'];
@@ -838,7 +923,7 @@ function dropUserSessions(sid) {
 }
 route('GET', '/api/users', (ctx) => {
   if (!authOk(ctx.req)) throw new HttpError(401, '需要管理员登录');
-  const items = db.prepare('SELECT sid, name, role, must_change, disabled, created_at, last_login FROM users ORDER BY sid').all();
+  const items = db.prepare('SELECT sid, name, role, must_change, disabled, created_at, last_login, qq_id FROM users ORDER BY sid').all();
   return { total: items.length, items };
 });
 route('POST', '/api/users/sync', async (ctx) => {
@@ -1602,7 +1687,7 @@ function jlCanEdit(ctx) { return canPostOk(ctx.req); }
 // 名单原文只能由系统管理员整份替换：班委看到的名单是脱敏版（只有姓名），
 // 让他保存一次就会把学号静默洗掉、已有记录全部转成"名单外"。
 function rejectRosterRewrite(ctx) {
-  if (!jielongAdminOk(ctx)) throw new HttpError(403, '名单不能这样整份替换：你看到的是去掉学号的名单，保存会把学号冲掉');
+  if (!jielongAdminOk(ctx)) throw new HttpError(403, '名单修改仅限系统管理员');
 }
 // 下发给某个会话的接龙视图：本人那条按会话学号定位（客户端不必拿姓名去猜），
 // 非系统管理员一律去掉学号——GET 与 PUT 的响应必须走同一个函数，否则编辑响应会绕过脱敏漏出整班学号
@@ -1611,11 +1696,13 @@ function jielongViewFor(ctx, a) {
   const me = sessionOf(ctx.req) || {};
   view.mine = me.sid ? (a.entries.find((e) => String(e.id || '') === String(me.sid)) || null) : null;
   view.inList = !a.roster.length || a.roster.some((r) => me.sid && String(r.id || '') === String(me.sid));
-  if (!jielongAdminOk(ctx)) {
-    // 学号只给系统管理员：接龙的参与者名单是全班可见的，但带上学号就成了整班个人信息外泄
+  if (!canPostOk(ctx.req)) {
+    // 学号只给班委及以上（2026-10-31 口径调整）：普通同学只看姓名
     view.roster = view.roster.map((r) => ({ name: r.name }));
     view.entries = view.entries.map((e) => ({ rid: e.rid, name: e.name, values: e.values, remark: e.remark, time: e.time, outside: e.outside }));
     if (view.missing) view.missing = view.missing.map((m) => ({ name: m.name }));
+  } else if (view.missing) {
+    view.missing = view.missing.map((m) => ({ ...m, bound: remindSlotBound({ id: m.id, name: m.name }) }));
   }
   return view;
 }
@@ -1831,8 +1918,8 @@ route('GET', '/api/jielong/:id/export', (ctx) => {
   const a = getJielong(ctx.params.id);
   if (!a) throw new HttpError(404, '接龙不存在');
   if (!jlCanEdit(ctx)) throw new HttpError(401, '需要管理员或班委登录');
-  // 导出给班委时同样不带学号（与页面下发同一口径），其余列不变
-  const body = JL.buildCsv(a, jielongAdminOk(ctx));
+  // 导出与页面下发同一口径：班委及以上带学号（2026-10-31 口径调整）
+  const body = JL.buildCsv(a, canPostOk(ctx.req));
   const res = ctx.res;
   res.wrote = true;
   res.writeHead(200, {
@@ -1845,20 +1932,14 @@ route('GET', '/api/jielong/:id/export', (ctx) => {
 
 /* ---------- 班级名单库（名单存一份，创建接龙 / 签箱时直接选用） ---------- */
 route('GET', '/api/rosters', (ctx) => {
-  // 名单全文（学号姓名）只归系统管理员；班委发起接龙 / 投票 / 问卷需要用到名单，
-  // 返回名称与人数的元数据供选用——选用后由服务器按 id 读取名单，学号内容不经过班委
+  // 名单全文（学号姓名）班委及以上可见（2026-10-31 口径调整）；学生无权访问，名单修改仍仅系统管理员
   const role = roleOf(ctx.req);
   if (role !== 'admin' && role !== 'officer') throw new HttpError(401, '需要管理员或班委登录');
-  const metaOnly = role === 'officer';
   return {
   items: db.prepare('SELECT * FROM rosters ORDER BY updated_at DESC, id DESC').all().map((r) => {
     const keepId = !!r.keep_id;
     const count = JL.parseRoster(r.roster, keepId).list.length;
-    if (metaOnly) return { id: r.id, name: r.name, count, updated_at: r.updated_at };
-    return {
-      id: r.id, name: r.name, roster: r.roster, keepId,
-      count, updated_at: r.updated_at,
-    };
+    return { id: r.id, name: r.name, roster: r.roster, keepId, count, updated_at: r.updated_at };
   }),
   };
 });
@@ -1961,7 +2042,7 @@ function drawMask(list) {
 function drawView(d, withIds) {
   const remaining = drawRemaining(d);
   // 学号 = 登录名，初始密码 = 学号后 6 位，所以整班学号外泄等于把账号接管链摆上桌。
-  // 与接龙、投票同一口径：名单里的人名给全体看，学号只有系统管理员能拿（班委能抽签，也看不到学号）
+  // 与接龙、投票同一口径：名单里的人名给全体看，学号给班委及以上（2026-10-31 口径调整）
   const names = (list) => withIds ? list : drawMask(list);
   return {
     id: d.id, title: d.title, perDraw: d.perDraw, createdAt: d.createdAt,
@@ -2009,7 +2090,7 @@ route('POST', '/api/draw', (ctx) => {
 route('GET', '/api/draw/:id', (ctx) => {
   const d = getDraw(ctx.params.id);
   if (!d) throw new HttpError(404, '抽签不存在');
-  return drawView(d, authOk(ctx.req));
+  return drawView(d, canPostOk(ctx.req));
 });
 
 route('POST', '/api/draw/:id/go', (ctx) => {
@@ -2043,7 +2124,7 @@ route('POST', '/api/draw/:id/go', (ctx) => {
   const who = picked.map((p) => auditBrief(p && p.name != null ? p.name : p, 20) + (p && p.id ? '（' + p.id + '）' : '')).join('、');
   audit(ctx, '抽签点名', ctx.auditSubject + ' 第 ' + d.rounds.length + ' 轮抽中 ' + auditBrief(who, 150)
     + '，剩 ' + left + '/' + d.roster.length + ' 人' + (reset ? '（箱内抽空，自动开新一轮）' : ''));
-  return { ok: true, picked: authOk(ctx.req) ? picked : drawMask(picked), count: n, remainingCount: left, total: d.roster.length, reset };
+  return { ok: true, picked: canPostOk(ctx.req) ? picked : drawMask(picked), count: n, remainingCount: left, total: d.roster.length, reset };
 });
 
 route('POST', '/api/draw/:id/undo', (ctx) => {
@@ -2057,7 +2138,7 @@ route('POST', '/api/draw/:id/undo', (ctx) => {
   audit(ctx, '撤销抽签', ctx.auditSubject + ' 放回 ' + auditBrief(back, 150) + '（共 ' + restored.length + ' 人）');
   // 从库中重读再算剩余，避免用过期的内存状态
   const fresh = drawFromRow(db.prepare('SELECT * FROM draws WHERE id = ?').get(d.id));
-  return { ok: true, restored: authOk(ctx.req) ? restored : drawMask(restored), remainingCount: drawRemaining(fresh).length };
+  return { ok: true, restored: canPostOk(ctx.req) ? restored : drawMask(restored), remainingCount: drawRemaining(fresh).length };
 });
 
 route('POST', '/api/draw/:id/reset', (ctx) => {
@@ -2090,7 +2171,7 @@ route('PUT', '/api/draw/:id', (ctx) => {
   db.prepare('UPDATE draws SET title = ?, roster = ?, per_draw = ? WHERE id = ?')
     .run(title, JSON.stringify(roster), perDraw, d.id);
   d.title = title; d.roster = roster; d.perDraw = perDraw;
-  return drawView(d, authOk(ctx.req));   // 按角色脱敏：班委拿不到学号，管理员编辑后要带学号回去，别让保存把学号洗掉
+  return drawView(d, canPostOk(ctx.req));   // 班委及以上带学号（2026-10-31 口径调整）；编辑后带学号回去，别让保存把学号洗掉
 });
 
 route('DELETE', '/api/draw/:id', (ctx) => {
@@ -2284,15 +2365,15 @@ route('GET', '/api/vote/:id', (ctx) => {
     // 管理员：整班资格名单 + 未投名单（带学号，重名能区分）
     base.roster = roster;
     base.missing = roster
-      .map((r, i) => ({ i, id: r.id, name: r.name }))
+      .map((r, i) => ({ i, id: r.id, name: r.name, bound: remindSlotBound(r) }))
       .filter((r) => !rows.some((b) => b.rid === r.i));
   } else if (nag) {
-    // 班委的催票视角：只有"谁还没投"的姓名。投给谁、整班名单与学号都不下发——
-    // 未投名单推不出任何人的选择，催票够用；学号仍只留在 /api/rosters（管理员）那一处
+    // 班委催办视角（2026-10-31 口径调整）：可见整班资格名单（含学号）与未投槽位序号；投给谁仍不下发（匿名投票的选票明细依旧只有管理员能看）
+    base.roster = roster;
     base.missing = roster
-      .map((r, i) => ({ name: r.name, voted: rows.some((b) => b.rid === i) }))
+      .map((r, i) => ({ i, id: r.id, name: r.name, bound: remindSlotBound(r), voted: rows.some((b) => b.rid === i) }))
       .filter((r) => !r.voted)
-      .map((r) => ({ name: r.name }));
+      .map((r) => ({ i: r.i, id: r.id, name: r.name, bound: r.bound }));
   }
   if (showBallots && showTally) {
     base.ballots = rows.map((b) => ({
@@ -3576,8 +3657,12 @@ route('DELETE', '/api/guestbook/:id', (ctx) => {
   if (!Number.isInteger(id)) throw new HttpError(400, '参数错误');
   const row = db.prepare('SELECT * FROM guestbook WHERE id = ?').get(id);
   if (!row) throw new HttpError(404, '内容不存在');
-  // 删留言 / 点子：公开征集归管理员与班委（值班时清掉不当内容），私密征集只归系统管理员
-  if (!ideaManageOk(row, ctx)) throw new HttpError(401, '需要管理员或班委登录');
+  // 删留言 / 点子：管理权归管理员与班委（值班时清掉不当内容）；提交人也能删自己发的内容
+  // （发错了自己撤回，匿名提交同样可以——服务端知道是谁发的）。其余人一律拒绝。
+  const s = sessionOf(ctx.req) || {};
+  const mine = !!(s.sid && row.sid && s.sid === row.sid);
+  const manager = ideaManageOk(row, ctx);
+  if (!manager && !mine) throw new HttpError(401, s.sid ? '只能删除自己提交的内容' : '需要管理员或班委登录');
   // 点子可能带附件：数据库记录在事务里一起清，磁盘文件提交后再删（文件被占用时留给清扫任务）
   const files = transact(() => {
     const names = db.prepare('SELECT stored_name FROM idea_attachments WHERE idea_id = ?').all(id).map((a) => a.stored_name);
@@ -3590,7 +3675,7 @@ route('DELETE', '/api/guestbook/:id', (ctx) => {
     try { if (fp.startsWith(UPLOAD_DIR + path.sep) && fs.existsSync(fp)) fs.unlinkSync(fp); } catch (e) { /* 忽略 */ }
   }
   audit(ctx, row.kind === 'idea' ? '删除点子' : '删除留言', (ctx.auditSubject || 'id=' + id)
-    + (files.length ? ' 连带 ' + files.length + ' 个附件' : ''));
+    + (files.length ? ' 连带 ' + files.length + ' 个附件' : '') + (mine && !manager ? '（提交人自删）' : ''));
   return { ok: true };
 });
 
@@ -4330,21 +4415,24 @@ const server = http.createServer(async (req, res) => {
     // （发起 / 编辑 / 停止 / 删除 / 抽人 / 撤销 / 重置，问卷含模板管理）、删除留言；清单之外一律要管理员（班费、名单、账号、备份、操作记录）。
     // 这份清单只回答"能不能做这件事"；"能不能看到全班学号、匿名选票明细"另有按管理员收窄的下发脱敏，
     // 两处彼此独立——班委能管接龙投票抽签，但拿不到整班学号，也看不到匿名投票谁投给谁。
-    // 接龙填写 / 投票选票 / 留言发布点赞 / 本人改密是登录用户各自的提交动作，走 SUBMIT_API 通道，
+    // 接龙填写 / 投票选票 / 留言发布点赞 / 本人改密 / 本人绑定提醒邮箱是登录用户各自的提交动作，走 SUBMIT_API 通道，
     // 各自在接口内校验身份（改密要求会话里有学号，管理员密码没有，走 config.json）。
     // 解析文本与查重只读不写库，任何登录用户都能用（班委发通知前也得查重）。
-    const SUBMIT_API = /^\/api\/(jielong\/[a-z0-9]+\/join|vote\/[a-z0-9]+\/ballot|survey\/[a-z0-9]+\/submit|guestbook(\/\d+\/like)?|idea-attachments\/\d+|password)$/;
+    const SUBMIT_API = /^\/api\/(jielong\/[a-z0-9]+\/join|vote\/[a-z0-9]+\/ballot|survey\/[a-z0-9]+\/submit|guestbook(\/\d+\/like)?|idea-attachments\/\d+|password|me\/qq|me\/qq\/code)$/;
     const HELPER_API = /^\/api\/(parse|similar)$/;
+    const OWNER_DELETE = /^DELETE \/api\/guestbook\/\d+$/;   // 删自己的留言 / 点子：是否本人由接口内按提交人判定
     const OFFICER_WRITE = [
       /^POST \/api\/(messages|upload|vote|jielong|draw|survey|survey-template|inbox\/accept-all)$/,
       /^POST \/api\/inbox\/\d+\/accept$/,
       /^POST \/api\/messages\/\d+\/(toggle|pin)$/,
-      /^POST \/api\/(vote|jielong|draw|survey)\/[a-z0-9]+\/(stop|close|go|undo|reset)$/,
+      /^POST \/api\/(vote|jielong|draw|survey)\/[a-z0-9]+\/(stop|close|go|undo|reset|import)$/,
+      /^POST \/api\/(vote|jielong|survey)\/[a-z0-9]+\/remind-mail$/,   // 邮件催办未完成（与"复制未投名单"同权限档）
       /^(PUT|DELETE) \/api\/(vote|jielong|draw|survey|survey-template)\/[a-z0-9]+$/,
       /^PUT \/api\/guestbook\/\d+$/,   // 改点子的状态 / 回复（管理员与班委）
       /^DELETE \/api\/(jielong\/[a-z0-9]+\/entry|guestbook\/\d+|inbox(\/\d+)?)$/,
     ];
     if (req.method !== 'GET' && !PUBLIC_API.includes(norm) && !SUBMIT_API.test(norm) && !HELPER_API.test(norm)
+      && !OWNER_DELETE.test(req.method + ' ' + norm)
       && !authOk(req) && !(canPostOk(req) && OFFICER_WRITE.some((re) => re.test(req.method + ' ' + norm)))) {
       sendJSON(res, 401, { error: '需要管理员或班委登录', authRequired: true });
       return;
@@ -4422,6 +4510,137 @@ server.on('error', (e) => {
 server.on('clientError', (err, socket) => {
   try { if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n'); } catch (e) { /* 忽略 */ }
 });
+/* ---------- 邮件催办（手动：接龙 / 投票详情的「邮件催办」按钮，管理员与班委） ----------
+ * 收件人 = 当前未完成同学的 QQ 邮箱（users.qq_id@qq.com，账号面板自助绑定 / 管理员批量导入）。
+ * 只对有名单的活动生效——没有名单就没有"未完成"。同一人 30 分钟内不重复（reminder_sent 存档）。
+ * 邮件里的学生链接用 CONFIG.smtp.baseOrigin（部署时配置），请求没带 Origin 时兜底。 */
+const REMIND_LABEL = { jielong: '接龙', vote: '投票', survey: '问卷' };
+const REMIND_PATH = { jielong: '/j/', vote: '/v/', survey: '/s/' };
+// 名单槽位 → 账号：学号（槽位 id）优先，姓名唯一才兜底——重名宁可漏发不误发
+function remindUserOf(slot) {
+  if (slot.id) {
+    const bySid = db.prepare('SELECT * FROM users WHERE sid = ?').get(String(slot.id));
+    if (bySid) return bySid;
+  }
+  const byName = db.prepare("SELECT * FROM users WHERE name = ? AND IFNULL(qq_id,'') <> ''").all(String(slot.name || ''));
+  return byName.length === 1 ? byName[0] : null;
+}
+function remindMailAddr(u) {
+  const v = String((u && u.qq_id) || '').trim();
+  return /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(v) ? v : null; // 只认完整邮箱
+}
+// 名单槽位是否已绑定提醒邮箱（催办选人弹窗置灰用）
+function remindSlotBound(slot) {
+  const u = remindUserOf(slot);
+  return u ? !!remindMailAddr(u) : false;
+}
+function remindText(kind, item, base) {
+  const lines = [];
+  const overdue = item.deadline && Date.now() > (JL.deadlineDate(item.deadline) || 0).getTime();
+  const when = overdue ? '已过截止时间（' + item.deadline + '）' : (item.deadline ? '截止时间 ' + item.deadline : '需要你完成');
+  lines.push('「' + item.title + '」（' + (REMIND_LABEL[kind] || kind) + '）' + when + '，名单里还没有你的记录。');
+  const link = (base || '') + REMIND_PATH[kind] + item.id;
+  lines.push(base ? '请尽快打开完成：' + link : '请登录班级信息汇总尽快完成。');
+  lines.push('');
+  lines.push('（系统自动提醒；若已完成请忽略。）');
+  return lines.join('\n');
+}
+// 手动催办共用执行体：不管截止时间，立刻给"当前未完成"的人发邮件；同一人 30 分钟内不重复
+async function remindNow(kind, id, ctx) {
+  if (!MAILER.enabled) throw new HttpError(400, '邮件提醒未启用：请在 data/config.json 配置 smtp 段');
+  const table = { jielong: 'jielongs', vote: 'votes', survey: 'surveys' }[kind];
+  const row = db.prepare('SELECT * FROM ' + table + ' WHERE id = ?').get(id);
+  if (!row) throw new HttpError(404, '活动不存在');
+  const roster = JL.safeJson(row.roster, []);
+  if (!roster.length) throw new HttpError(400, '这份' + (REMIND_LABEL[kind] || kind) + '没有名单，无法按名单催办');
+  let doneRids = null, doneSids = new Set(), doneNames = new Set();
+  if (kind === 'jielong') {
+    doneRids = new Set(db.prepare('SELECT rid, outside FROM jielong_entries WHERE jielong_id = ?').all(row.id)
+      .filter((e) => !e.outside && e.rid != null).map((e) => e.rid));
+  } else if (kind === 'vote') {
+    const ballots = db.prepare('SELECT sid, name FROM vote_ballots WHERE vote_id = ?').all(row.id);
+    doneSids = new Set(ballots.map((b) => String(b.sid || '')));
+    doneNames = new Set(ballots.map((b) => b.name).filter(Boolean));
+  } else {
+    const res = db.prepare('SELECT sid, name FROM survey_responses WHERE survey_id = ?').all(row.id);
+    doneSids = new Set(res.map((r) => String(r.sid || '')));
+    doneNames = new Set(res.map((r) => r.name).filter(Boolean));
+  }
+  const base = CONFIG.smtp.baseOrigin || String(ctx.req.headers.origin || '').replace(/\/$/, '');
+  const out = { sent: 0, noQQ: 0, skipped: 0, noQQNames: [], mails: [] };
+  // 管理员与班委都可勾选收件人（slots = 名单槽位序号）；不传仍发全体
+  const selRaw = Array.isArray((ctx.body || {}).slots) ? (ctx.body || {}).slots : null;
+  const sel = selRaw && canPostOk(ctx.req) ? new Set(selRaw.map(Number).filter((x) => Number.isInteger(x) && x >= 0 && x < roster.length)) : null;
+  for (let i = 0; i < roster.length; i++) {
+    const slot = roster[i] || {};
+    if (kind === 'jielong') { if (doneRids.has(i)) continue; }
+    else if ((slot.id && doneSids.has(String(slot.id))) || (!slot.id && doneNames.has(slot.name))) continue;
+    if (sel && !sel.has(i)) continue;
+    const u = remindUserOf(slot);
+    const addr = remindMailAddr(u);
+    if (!addr) { out.noQQ++; if (slot.name && out.noQQNames.length < 30) out.noQQNames.push(slot.name); continue; }
+    const recent = db.prepare("SELECT sent_at FROM reminder_sent WHERE kind=? AND item_id=? AND stage='manual' AND sid=? ORDER BY sent_at DESC LIMIT 1")
+      .get(kind, row.id, u.sid);
+    if (recent && Date.now() - new Date(recent.sent_at.replace(' ', 'T')).getTime() < 30 * 60 * 1000) { out.skipped++; continue; }
+    db.prepare("INSERT OR REPLACE INTO reminder_sent (kind,item_id,stage,sid,sent_at) VALUES (?,?,?,?,?)")
+      .run(kind, row.id, 'manual', u.sid, nowStr());
+    const subject = '【催办提醒】' + (REMIND_LABEL[kind] || kind) + '「' + row.title + '」';
+    try {
+      await MAILER.sendMail({ to: addr, subject, text: remindText(kind, { id: row.id, title: row.title, deadline: row.deadline }, base) });
+      out.sent++;
+      if (MAILER.dryRun) out.mails.push({ to: addr, subject });
+    } catch (e) {
+      out.skipped++;
+      try { fs.appendFileSync(MAIL_LOG, nowStr() + ' 催办发送失败 to=' + addr + ' ' + kind + ':' + row.id + ' ' + e.message + '\n'); } catch (e2) { /* 忽略 */ }
+    }
+  }
+  audit(ctx, '邮件催办', '「' + String(row.title).slice(0, 40) + '」' + (sel ? '勾选 ' + sel.size + ' 人，' : '') + '发出 ' + out.sent + ' 封'
+    + (out.noQQ ? '，' + out.noQQ + ' 人未绑定邮箱' : '') + (out.skipped ? '，' + out.skipped + ' 人 30 分钟内已催过' : ''));
+  return out;
+}
+route('POST', '/api/jielong/:id/remind-mail', async (ctx) => remindNow('jielong', ctx.params.id, ctx));
+// 批量导入已接：班委把 QQ 接龙原文粘进来，按学号→姓名匹配名单槽位记为已接（备注"代录"）；已接跳过，匹配不上的原样回报
+route('POST', '/api/jielong/:id/import', async (ctx) => {
+  const row = db.prepare('SELECT * FROM jielongs WHERE id = ?').get(ctx.params.id);
+  if (!row) throw new HttpError(404, '接龙不存在');
+  const roster = JL.safeJson(row.roster, []);
+  if (!roster.length) throw new HttpError(400, '本次接龙没有名单，无法按名单导入');
+  const parsed = JL.parseRoster(String((ctx.body || {}).text || ''), true).list;
+  if (!parsed.length) throw new HttpError(400, '没有解析到任何名字，请粘贴每行一个（或序号 / 顿号分隔）的名单');
+  const doneRids = new Set(db.prepare('SELECT rid, outside FROM jielong_entries WHERE jielong_id = ?').all(row.id)
+    .filter((e) => !e.outside && e.rid != null).map((e) => e.rid));
+  const used = new Set();
+  let imported = 0, already = 0;
+  const unmatched = [];
+  const now = Date.now();
+  let seq = db.prepare('SELECT MAX(seq) m FROM jielong_entries WHERE jielong_id = ?').get(row.id).m || 0;
+  for (const p of parsed) {
+    let hit = -1;
+    if (p.id) hit = roster.findIndex((r) => String(r.id || '') === String(p.id));
+    if (hit < 0) {
+      const nameHits = [];
+      roster.forEach((r, i) => { if (r.name === p.name) nameHits.push(i); });
+      if (nameHits.length === 1) hit = nameHits[0];
+      else if (nameHits.length > 1) {
+        const freeHits = nameHits.filter((i) => !doneRids.has(i) && !used.has(i));
+        hit = freeHits.length ? freeHits[0] : nameHits[0]; // 重名优先占未接的槽位
+      }
+    }
+    if (hit < 0) { unmatched.push((p.id ? p.id + ' ' : '') + p.name); continue; }
+    if (doneRids.has(hit) || used.has(hit)) { already++; continue; }
+    used.add(hit);
+    seq++;
+    db.prepare('INSERT INTO jielong_entries (jielong_id, rid, sid, name, values_json, remark, outside, time, seq) VALUES (?,?,?,?,?,?,0,?,?)')
+      .run(row.id, hit, String(roster[hit].id || ''), roster[hit].name, '{}', '代录', now, seq);
+    imported++;
+  }
+  audit(ctx, '批量导入已接', '「' + String(row.title).slice(0, 40) + '」导入 ' + imported + ' 人'
+    + (already ? '，' + already + ' 人已接跳过' : '') + (unmatched.length ? '，未匹配 ' + unmatched.length + ' 人' : ''));
+  return { ok: true, imported, already, unmatchedCount: unmatched.length, unmatched: unmatched.slice(0, 30) };
+});
+route('POST', '/api/vote/:id/remind-mail', async (ctx) => remindNow('vote', ctx.params.id, ctx));
+route('POST', '/api/survey/:id/remind-mail', async (ctx) => remindNow('survey', ctx.params.id, ctx));
+
 // 后台长期运行：意外错误记日志但不退出（SQLite 操作是同步的，状态不会坏）
 process.on('uncaughtException', (e) => { log('未捕获异常（已忽略，继续运行）:', (e && e.stack) || String(e)); });
 process.on('unhandledRejection', (e) => { log('未处理的 Promise 拒绝:', (e && (e.stack || e.message)) || String(e)); });
@@ -4433,6 +4652,7 @@ setInterval(() => {
   for (const [ip, rec] of loginFails) if (now - rec.t > 10 * 60 * 1000) loginFails.delete(ip); // 10 分钟无新失败即清
   for (const [ip, arr] of gbPosts) { const kept = arr.filter((t) => now - t < 60000); if (kept.length) gbPosts.set(ip, kept); else gbPosts.delete(ip); }
   for (const [ip, arr] of gbLikes) { const kept = arr.filter((t) => now - t < 60000); if (kept.length) gbLikes.set(ip, kept); else gbLikes.delete(ip); }
+  for (const [k, t] of qqCodeSentAt) if (now - t > 60 * 60 * 1000) qqCodeSentAt.delete(k); // 验证码发码冷却一小时后自动清
 }, 60 * 60 * 1000);
 // systemd / Docker 停止时优雅关闭：先停接新连接，3 秒后强制退出兜底
 process.on('SIGTERM', () => {

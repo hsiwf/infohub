@@ -312,6 +312,27 @@ if (!acols.some((c) => c.name === 'downloads')) db.exec('ALTER TABLE attachments
 // 轻量迁移：接龙记录补 seq 列（保持首次提交顺序，修改后不重排）
 const jecols = db.prepare('PRAGMA table_info(jielong_entries)').all();
 if (!jecols.some((c) => c.name === 'seq')) db.exec('ALTER TABLE jielong_entries ADD COLUMN seq INTEGER DEFAULT 0');
+// 轻量迁移：账号补 qq_id 列（接收截止提醒邮件的 QQ 号，发到 QQ号@qq.com）
+const ucols = db.prepare('PRAGMA table_info(users)').all();
+if (!ucols.some((c) => c.name === 'qq_id')) db.exec("ALTER TABLE users ADD COLUMN qq_id TEXT DEFAULT ''");
+// 截止提醒去重：同一活动同一阶段同一学号只发一次；手动催办单独一档（stage='manual'），由接口自己做 30 分钟限频
+db.exec(`CREATE TABLE IF NOT EXISTS reminder_sent (
+  kind TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  stage TEXT NOT NULL,
+  sid TEXT NOT NULL,
+  sent_at TEXT DEFAULT '',
+  PRIMARY KEY (kind, item_id, stage, sid)
+)`);
+// 提醒邮箱验证：待验证地址 + 验证码散列（明文只在邮件里出现一次），过期 / 错五次作废
+db.exec(`CREATE TABLE IF NOT EXISTS email_verify (
+  sid TEXT PRIMARY KEY,
+  target TEXT NOT NULL,
+  code_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  attempts INTEGER DEFAULT 0,
+  last_sent_at INTEGER DEFAULT 0
+)`);
 // 轻量迁移：生日成员去掉 role 列（生日面前人人平等，不再划分身份）
 const bdcols = db.prepare('PRAGMA table_info(birthdays)').all();
 if (bdcols.length && bdcols.some((c) => c.name === 'role')) db.exec('ALTER TABLE birthdays DROP COLUMN role');

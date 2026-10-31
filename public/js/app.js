@@ -215,7 +215,9 @@ async function api(path, opts = {}) {
       toast(msg, 'error');
       setTimeout(() => { location.href = '/login'; }, 900);
     }
-    throw new Error(msg);
+    const err = new Error(msg);
+    err.status = r.status; // 调用方区分网络抖动（无 status / 5xx）与资源已删除（404）
+    throw err;
   }
   return r.json();
 }
@@ -895,10 +897,11 @@ function usRow(name, sid, u) {
       <button class="mini" data-us-reset="${esc(sid)}" data-name="${esc(name)}">重置密码</button>
       <button class="mini ${u.disabled ? '' : 'danger'}" data-us-disable="${esc(sid)}" data-off="${u.disabled ? '0' : '1'}">${u.disabled ? '恢复' : '停用'}</button></span>`;
   return `<tr><td>${esc(name)}</td><td class="hint">${esc(sid || '—')}</td>
+      <td class="hint">${u ? esc(u.qq_id || '—') : '—'}</td>
       <td>${u ? esc(US_ROLE[u.role] || u.role) : '—'}</td><td>${status}</td>
       <td class="hint">${u ? esc(u.last_login || '从未登录') : '—'}</td><td>${acts}</td></tr>`;
 }
-const US_HEAD = '<thead><tr><th>姓名</th><th>学号</th><th>身份</th><th>状态</th><th>最近登录</th><th></th></tr></thead>';
+const US_HEAD = '<thead><tr><th>姓名</th><th>学号</th><th>提醒邮箱</th><th>身份</th><th>状态</th><th>最近登录</th><th></th></tr></thead>';
 // 成员表：只列这份名单里的人；名单改过之后残留的账号另有收口，否则那些账号在界面上管不到
 function rosterMemberTable(r, accBySid) {
   const parsed = jlParseRoster(r.roster, r.keepId);
@@ -907,7 +910,8 @@ function rosterMemberTable(r, accBySid) {
   const opened = parsed.list.filter((m) => m.id && accBySid.get(String(m.id))).length;
   const noSid = parsed.list.filter((m) => !m.id).length;
   return `<div class="us-sum">已开号 <b>${opened}</b> / ${parsed.list.length} 人${noSid ? ` · <span class="warn-t">${noSid} 人缺学号开不出账号</span>` : ''}
-    ${isSysAdmin() ? `<button class="ghost" data-us-sync="${r.id}">${icon('plus')} 按这份名单开通账号</button>` : ''}</div>
+    ${isSysAdmin() ? `<button class="ghost" data-us-sync="${r.id}">${icon('plus')} 按这份名单开通账号</button>
+    <button class="ghost" data-us-csv="${r.id}">${icon('download')} 导出成员表</button>` : ''}</div>
     <div class="ad-wrap"><table class="ad-table">${US_HEAD}<tbody>${rows}</tbody></table></div>`;
 }
 function orphanAccountsPanel(items, accBySid) {
@@ -935,7 +939,7 @@ async function loadRosters() {
   view.innerHTML = `
     <div class="jl-head"><h2>${icon('users')} 账号名单</h2></div>
     <p class="hint">${items.length} 份名单 · ${accBySid.size} 个账号。名单存一份，发起接龙、抽签点名、生日导入时直接复用；学号也是登录名，初始密码是学号后 6 位</p>
-    ${isSysAdmin() ? `<div class="jl-actions"><button class="primary" id="btn-roster-new">${icon('plus')} 新建名单</button></div>` : ''}
+    ${isSysAdmin() ? `<div class="jl-actions"><button class="primary" id="btn-roster-new">${icon('plus')} 新建名单</button><button class="ghost" id="btn-qq-import">${icon('upload')} 导入提醒邮箱</button></div>` : ''}
     ${items.map((r) => `
       <div class="panel" data-rid="${r.id}">
         <div class="jl-head"><h2>${esc(r.name)}</h2><span class="hint">${r.count} 人${r.keepId ? ' · 含学号' : ''} · ${esc(fmtReceived(r.updated_at))}</span></div>
@@ -952,6 +956,25 @@ async function loadRosters() {
   const newBtn = $('#btn-roster-new');
   if (newBtn) newBtn.addEventListener('click', () => openRosterModal(null));
   const reload = () => renderView().catch(() => {});
+  $$('[data-us-csv]').forEach((b) => b.addEventListener('click', () => {
+    const r = items.find((x) => String(x.id) === b.dataset.usCsv);
+    if (!r) return;
+    const parsed = jlParseRoster(r.roster, r.keepId).list;
+    const lines = [['姓名', '学号', '提醒邮箱', '身份', '状态', '最近登录'].join(',')];
+    for (const m of parsed) {
+      const u = m.id ? accBySid.get(String(m.id)) : null;
+      const cell = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+      lines.push([cell(m.name || ''), cell(m.id || ''), cell(u && u.qq_id ? u.qq_id : ''), cell(u ? (US_ROLE[u.role] || u.role) : '未开号'),
+        cell(u ? (u.disabled ? '已停用' : (u.must_change ? '未改初始密码' : '正常')) : '—'), cell(u ? (u.last_login || '从未登录') : '—')].join(','));
+    }
+    const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (r.name || '成员') + '-成员表.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('成员表已导出 ✓（含提醒邮箱列）');
+  }));
   const putUser = async (sid, body, msg) => {
     try { await api('/api/users/' + encodeURIComponent(sid), { method: 'PUT', body }); toast(msg); reload(); }
     catch (e) { toast(e.message, 'error'); }
@@ -964,6 +987,23 @@ async function loadRosters() {
       reload();
     } catch (e) { toast(e.message, 'error'); b.disabled = false; }
   }));
+  const qqImportBtn = $('#btn-qq-import');
+  if (qqImportBtn) qqImportBtn.addEventListener('click', () => {
+    openModal(`
+      <h2>${icon('upload')} 导入提醒邮箱</h2>
+      <p class="hint">每行一条：<code>学号 邮箱</code>（空格 / 逗号分隔均可，须填完整邮箱如 123456@qq.com）。同学也可以在自己「账号」面板里自助修改（需邮件验证码确认）。</p>
+      <div class="form"><textarea id="qq-import-text" rows="8" placeholder="2023001 123456@qq.com&#10;2023002 stu2023002@example.com"></textarea></div>
+      <div class="modal-foot"><button class="ghost" id="btn-cancel">取消</button><button class="primary" id="qq-import-ok">${icon('check')} 导入</button></div>`);
+    $('#qq-import-ok').addEventListener('click', async () => {
+      const text = $('#qq-import-text').value;
+      try {
+        const r = await api('/api/users/qq-import', { method: 'POST', body: { text } });
+        closeModal();
+        toast('已更新 ' + r.updated + ' 人' + (r.bad && r.bad.length ? '；' + r.bad.length + ' 行未匹配到账号' : ''), r.updated ? undefined : 'error');
+        reload();
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  });
   $$('[data-us-role]').forEach((b) => b.addEventListener('click', () => {
     const to = b.dataset.to;
     putUser(b.dataset.usRole, { role: to }, to === 'officer' ? '已设为班委（该同学需重新登录生效）' : '已降为同学');
@@ -1053,10 +1093,19 @@ function openAccountModal() {
       <label>原密码</label><input id="pw-old" type="password" maxlength="64" autocomplete="current-password">
       <label>新密码（至少 6 位）</label><input id="pw-new" type="password" maxlength="64" autocomplete="new-password">
       <label>再输一遍新密码</label><input id="pw-new2" type="password" maxlength="64" autocomplete="new-password">
+    </div>
+    <div class="form" style="margin-top:10px">
+      <label>接收提醒的邮箱（填完整邮箱，如 123456@qq.com；修改需输入邮件验证码确认）</label>
+      <div class="jl-linkrow"><input id="acct-qq" inputmode="email" maxlength="80" value="${esc(me.qq || '')}" placeholder="例如 123456@qq.com"><button class="ghost" id="qq-code">${icon('bell')} 发送验证码</button></div>
+      <div class="form" id="qq-code-row" hidden>
+        <label>邮件验证码（10 分钟内有效）</label>
+        <input id="acct-qq-code" inputmode="numeric" maxlength="6" placeholder="6 位数字">
+      </div>
     </div>` : `<div class="hint acct-note">管理员密码写在部署时的 <code>data/config.json</code> 的 password 里，不在班级账号表中，改它要编辑那个文件并重启服务。</div>`}
     <div class="modal-foot">
       <button class="ghost danger" id="acct-logout">${icon('logout')} 退出登录</button>
       <button class="ghost" id="btn-cancel">关闭</button>
+      ${isAcct ? `<button class="ghost" id="qq-save">${icon('check')} 确认绑定</button>` : ''}
       ${isAcct ? `<button class="primary" id="pw-save">${icon('check')} 改密码</button>` : ''}
     </div>`);
   $('#acct-logout').addEventListener('click', () => { closeModal(); doLogout(); });
@@ -1073,6 +1122,38 @@ function openAccountModal() {
       toast('密码已修改 ✓');
       state.me.mustChange = false;
       loadMe().catch(() => {});
+    } catch (e) { toast(e.message, 'error'); }
+  });
+  const qqCodeBtn = $('#qq-code');
+  if (qqCodeBtn) qqCodeBtn.addEventListener('click', async () => {
+    const qq = ($('#acct-qq') ? $('#acct-qq').value : '').trim();
+    if (!qq) { toast('先填完整邮箱再发送验证码', 'error'); return; }
+    qqCodeBtn.disabled = true;
+    try {
+      const r = await api('/api/me/qq/code', { method: 'POST', body: { qq } });
+      const row = $('#qq-code-row');
+      if (row) row.hidden = false;
+      const codeInput = $('#acct-qq-code');
+      if (codeInput) { codeInput.value = ''; codeInput.focus(); }
+      toast('验证码已发送到 ' + r.target);
+      let left = 60;
+      const t = setInterval(() => {
+        left--;
+        qqCodeBtn.textContent = left > 0 ? '重发(' + left + 's)' : '发送验证码';
+        if (left <= 0) { clearInterval(t); qqCodeBtn.disabled = false; }
+      }, 1000);
+    } catch (e) { toast(e.message, 'error'); qqCodeBtn.disabled = false; }
+  });
+  const qqSave = $('#qq-save');
+  if (qqSave) qqSave.addEventListener('click', async () => {
+    const qq = ($('#acct-qq') ? $('#acct-qq').value : '').trim();
+    const code = ($('#acct-qq-code') ? $('#acct-qq-code').value : '').trim();
+    if (qq && !code) { toast('修改邮箱需要先点「发送验证码」并填入邮件里的验证码', 'error'); return; }
+    try {
+      const r = await api('/api/me/qq', { method: 'PUT', body: { qq, code } });
+      state.me.qq = r.qq;
+      toast(qq ? '提醒邮箱已绑定 ✓（' + r.qq + '）' : '已取消提醒邮件 ✓');
+      closeModal();
     } catch (e) { toast(e.message, 'error'); }
   });
 }
@@ -1184,21 +1265,26 @@ async function loadVotes() {
   }));
   $$('[data-vid-copy]').forEach((b) => b.addEventListener('click', () => jlCopy(location.origin + '/v/' + b.dataset.vidCopy, '学生链接已复制，可发到班群')));
 }
-async function loadVoteDetail() {
+async function loadVoteDetail(quiet) {
   if (!state.vote) return;
   const seq = loadSeq;
   const view = $('#view');
-  view.innerHTML = '<div class="loading">加载中…</div>';
+  const silent = !!view.querySelector('[data-vote-detail="' + state.vote + '"]'); // 已在本详情页：轮询走静默
   let d;
   try { d = await api('/api/vote/' + state.vote); }
   catch (e) {
     if (seq !== loadSeq) return;
+    if ((silent || quiet) && e.status !== 404) return; // 网络抖动：原地静默；404 = 投票已被删除，照常退出
     vStopTimer(); // 投票已不存在，别让空转的轮询定时器留在内存里
     state.vote = null;
     toast(e.message, 'error');
     return loadVotes();
   }
   if (seq !== loadSeq) return; // 等待期间已切换视图，丢弃旧响应
+  // 静默刷新：数据没变化就不动 DOM——阅读、勾选、滚动位置全保留
+  const sig = JSON.stringify([d, canPost()]);
+  if (silent && sig === view.dataset.voteSig) return;
+  view.dataset.voteSig = sig;
   const fmtTs = (ts) => {
     const dt = new Date(ts);
     const p2 = (n) => String(n).padStart(2, '0');
@@ -1231,7 +1317,7 @@ async function loadVoteDetail() {
         <button class="mini" id="vote-copy-stu2">${icon('copy')} 复制</button></div>
     </div>`;
   view.innerHTML = `
-    <button class="ghost jl-back" id="vote-back">← 返回投票列表</button>
+    <button class="ghost jl-back" id="vote-back" data-vote-detail="${d.id}">← 返回投票列表</button>
     <div class="panel">
       <div class="jl-head"><h2>${esc(d.title)}</h2>${voteStatusBadge(d)}</div>
       ${d.description ? `<p class="jl-desc">${esc(d.description)}</p>` : ''}
@@ -1255,7 +1341,7 @@ async function loadVoteDetail() {
     <div class="panel">
       <div class="jl-head"><h2 style="font-size:15px">完成统计</h2><span class="hint">已投 ${d.done} / ${d.rosterSize} 人，未投 ${d.missing.length} 人</span></div>
       ${d.missing.length ? d.missing.map((m) => `<span class="jl-chip">${esc(m.id ? m.id + ' ' : '')}${esc(m.name)}</span>`).join('') : '<span class="hint">全部投完 ✓</span>'}
-      ${d.missing.length ? `<div class="card-actions"><button class="ghost" id="vote-copy-miss">${icon('copy')} 复制未投名单提醒</button></div>` : ''}
+      ${d.missing.length ? `<div class="card-actions"><button class="ghost" id="vote-copy-miss">${icon('copy')} 复制未投名单提醒</button><button class="ghost" id="vote-mail-miss">${icon('bell')} 邮件催办未投</button></div>` : ''}
     </div>` : ''}
     ${Array.isArray(d.ballots) ? `
     <div class="panel">
@@ -1300,6 +1386,14 @@ async function loadVoteDetail() {
   if (copyMiss) copyMiss.addEventListener('click', () => {
     const lines = (d.missing || []).map((m) => (m.id ? m.id + ' ' : '') + m.name);
     jlCopy('以下同学还没完成投票「' + d.title + '」，请尽快：\n' + lines.join('\n') + '\n投票入口：' + stuLink, '未投名单提醒已复制');
+  });
+  const mailMiss = $('#vote-mail-miss');
+  if (mailMiss) mailMiss.addEventListener('click', () => {
+    if (!d.missing || !d.missing.length) { toast('全部都已投完'); return; }
+    openMailPickModal(d.missing.map((m) => ({ i: m.i, label: (m.id ? m.id + ' ' : '') + m.name, bound: !!m.bound })), async (slots) => {
+      const r = await api('/api/vote/' + d.id + '/remind-mail', { method: 'POST', body: { slots } });
+      toast('已发 ' + r.sent + ' 封' + (r.noQQ ? '，' + r.noQQ + ' 人未绑定邮箱' : '') + (r.skipped ? '，' + r.skipped + ' 人 30 分钟内已催过' : ''), r.sent ? undefined : 'error');
+    });
   });
   const stopBtn = $('#vote-stop');
   if (stopBtn) stopBtn.addEventListener('click', async () => {
@@ -2242,16 +2336,33 @@ async function loadJielong() {
   $$('[data-jl-copy]').forEach((b) => b.addEventListener('click', () => jlCopy(location.origin + '/j/' + b.dataset.jlCopy, '学生链接已复制，可发到班群')));
 }
 
+/* 邮件催办选人弹窗：people = [{ i, label, bound, known }]，未绑定邮箱的置灰（发了也收不到） */
+function openMailPickModal(people, onSend) {
+  openModal(`
+    <h2>${icon('bell')} 邮件催办</h2>
+    <p class="hint">勾选要提醒的同学（默认全选）。标「未绑定」的还没绑定提醒邮箱，发了也收不到。</p>
+    <div class="form" id="mail-pick-list">
+      ${people.map((p) => `<label class="mail-pick-row"><input type="checkbox" data-i="${p.i}" ${p.bound ? 'checked' : 'disabled'}> ${esc(p.label)}${p.bound ? '' : ' <span class="jl-badge off">未绑定</span>'}</label>`).join('')}
+    </div>
+    <div class="modal-foot"><button class="ghost" id="btn-cancel">取消</button><button class="primary" id="mail-pick-ok">${icon('bell')} 发送</button></div>`);
+  $('#mail-pick-ok').addEventListener('click', async () => {
+    const slots = $$('#mail-pick-list input[type=checkbox]:checked').map((c) => Number(c.dataset.i)).filter((x) => !Number.isNaN(x));
+    if (!slots.length) { toast('没有勾选任何人', 'error'); return; }
+    try { await onSend(slots); closeModal(); } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
 /* ---------- 接龙详情（管理台） ---------- */
-async function loadJielongDetail() {
+async function loadJielongDetail(quiet) {
   if (!state.jl) return; // 轮询回调可能在用户退出详情后才回来，此时不能再覆盖视图
   const seq = loadSeq;
   const view = $('#view');
-  view.innerHTML = '<div class="loading">加载中…</div>';
+  const silent = !!view.querySelector('[data-jl-detail="' + state.jl.id + '"]'); // 已在本详情页：轮询走静默
   let a;
   try { a = await api('/api/jielong/' + state.jl.id); }
   catch (e) {
     if (seq !== loadSeq) return;
+    if ((silent || quiet) && e.status !== 404) return; // 网络抖动：原地静默；404 = 接龙已被删除，照常退出
     state.jl = null;
     toast(e.message, 'error');
     return loadJielong();
@@ -2261,25 +2372,14 @@ async function loadJielongDetail() {
   const stuLink = location.origin + '/j/' + a.id;
 
   const withId = (a.roster || []).some((r) => r.id) || a.entries.some((e) => e.id);
-  const jlFullText = () => {
-    const lines = ['【' + a.title + '】'];
-    if (a.description) lines.push(a.description);
-    lines.push('— 已接龙 ' + (a.hasRoster ? a.done + '/' + a.total + ' 人' : a.count + ' 人') + ' —');
-    a.entries.forEach((e, i) => {
-      const parts = a.fields.map((f) => e.values[f.key]).filter(Boolean);
-      let txt = parts.join('，');
-      if (e.remark) txt += (txt ? '，' : '') + '备注：' + e.remark;
-      lines.push((i + 1) + '. ' + jlSlotLabel(e) + (e.outside ? '（名单外）' : '') + (txt ? '：' + txt : ''));
-    });
-    if (a.hasRoster && (a.missing || []).length) {
-      lines.push('— 未接龙 ' + a.missing.length + ' 人 —');
-      lines.push(a.missing.map(jlSlotLabel).join('、'));
-    }
-    return lines.join('\n');
-  };
+
+  // 静默刷新：数据没变化就不动 DOM——阅读、勾选、滚动位置、文字选中全保留
+  const sig = JSON.stringify([a, canEdit, stuLink, withId]);
+  if (silent && sig === view.dataset.jlSig) return;
+  view.dataset.jlSig = sig;
 
   view.innerHTML = `
-    <button class="ghost jl-back" id="jl-back">← 返回接龙列表</button>
+    <button class="ghost jl-back" id="jl-back" data-jl-detail="${a.id}">← 返回接龙列表</button>
     ${state.jlBanner ? `<div class="jl-banner">${icon('check')} 接龙创建成功！把「学生链接」发到班群即可；本页可随时查看进度、复制提醒文案。<b>这条接龙的入口保存在本浏览器</b>，换设备登录后从「活动接龙」进入。</div>` : ''}
     <div class="panel">
       <div class="jl-head"><h2>${esc(a.title)}</h2>${jlStatusBadge(a)}</div>
@@ -2293,7 +2393,8 @@ async function loadJielongDetail() {
         <button class="ghost" id="jl-show-qr">二维码</button></div>
       <div class="jl-actions">
         <button class="ghost" id="jl-copy-miss">${icon('copy')} 复制未接名单</button>
-        <button class="ghost" id="jl-copy-full">${icon('doc')} 复制接龙全文</button>
+        <button class="ghost" id="jl-mail-miss">${icon('bell')} 邮件催办未接</button>
+        <button class="ghost" id="jl-import-done">${icon('upload')} 批量导入已接</button>
         <a class="ghost" id="jl-export" href="/api/jielong/${a.id}/export" download>${icon('download')} 导出 CSV</a>
         <button class="ghost" id="jl-edit">${icon('edit')} 编辑</button>
         <button class="ghost" id="jl-close">${a.closed ? `${icon('refresh')} 重新开启` : `${icon('clock')} 停止接龙`}</button>
@@ -2325,23 +2426,20 @@ async function loadJielongDetail() {
   state.jlBanner = false;
   $('#jl-back').addEventListener('click', () => { state.jl = null; renderView().catch(() => {}); });
 
-  // 每 5 秒原地刷新（弹窗打开或正在输入时不打扰）
+  // 每 5 秒静默刷新：数据没变就不动页面；弹窗打开或正在输入时不打扰
   jlStopTimer();
   jlTimer = setInterval(async () => {
     if ($('#modal-root').children.length) return;
     const el = document.activeElement;
     if (el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return;
-    try {
-      await api('/api/jielong/' + state.jl.id); // 先探活，接口挂了就静默跳过本轮
-    } catch (e) { /* 静默 */ return; }
-    if (!state.jl || state.view !== 'jielong') return; // 探活期间已退出详情页，别再覆盖视图
+    if (!state.jl || state.view !== 'jielong') return; // 已退出详情页，别再覆盖视图
     const y = window.scrollY; // 在替换 DOM 前捕获，替换后内容高度变化可能重置滚动
     const cur = view.innerHTML;
     state.jlQuiet = true;
     try {
-      await loadJielongDetail();
+      await loadJielongDetail(true); // quiet：接口挂了原地静默，本轮跳过
     } catch (e) { /* 静默 */ } finally { state.jlQuiet = false; }
-    if (view.innerHTML !== cur) window.scrollTo(0, y);
+    if (view.innerHTML !== cur) window.scrollTo(0, y); // 只有数据真的变了才需要恢复滚动
   }, 5000);
   if (!state.jlQuiet) window.scrollTo(0, 0);
 
@@ -2356,7 +2454,32 @@ async function loadJielongDetail() {
     jlCopy('【' + a.title + '】还没有接龙的同学（' + missing.length + '人）：\n' +
       missing.map(jlSlotLabel).join('、') + '\n请点击链接完成接龙：' + stuLink, '已复制，可粘贴到班群提醒大家');
   });
-  $('#jl-copy-full').addEventListener('click', () => jlCopy(jlFullText(), '接龙全文已复制，可粘贴到班群'));
+  $('#jl-mail-miss').addEventListener('click', () => {
+    const missing = a.missing || [];
+    if (!a.hasRoster) { toast('本次接龙未设置名单'); return; }
+    if (!missing.length) { toast('全部都已接龙'); return; }
+    openMailPickModal(missing.map((m) => ({ i: m.i, label: (m.id ? m.id + ' ' : '') + m.name, bound: !!m.bound })), async (slots) => {
+      const r = await api('/api/jielong/' + a.id + '/remind-mail', { method: 'POST', body: { slots } });
+      toast('已发 ' + r.sent + ' 封' + (r.noQQ ? '，' + r.noQQ + ' 人未绑定邮箱' : '') + (r.skipped ? '，' + r.skipped + ' 人 30 分钟内已催过' : ''), r.sent ? undefined : 'error');
+      loadJielongDetail();
+    });
+  });
+  $('#jl-import-done').addEventListener('click', () => {
+    openModal(`
+      <h2>${icon('upload')} 批量导入已接</h2>
+      <p class="hint">把 QQ 接龙原文粘进来（每行一个 / 序号 / 顿号分隔都认，带学号更准）。按名单匹配后标记为已接（备注「代录」）；已接过的自动跳过，不在名单里的会原样列出。</p>
+      <div class="form"><textarea id="jl-import-text" rows="8" placeholder="1. 张三&#10;2. 李四&#10;或：张三、李四、王五"></textarea></div>
+      <div class="modal-foot"><button class="ghost" id="btn-cancel">取消</button><button class="primary" id="jl-import-ok">${icon('check')} 导入</button></div>`);
+    $('#jl-import-ok').addEventListener('click', async () => {
+      const text = $('#jl-import-text').value;
+      try {
+        const r = await api('/api/jielong/' + a.id + '/import', { method: 'POST', body: { text } });
+        closeModal();
+        toast('已导入 ' + r.imported + ' 人' + (r.already ? '，' + r.already + ' 人已接跳过' : '') + (r.unmatchedCount ? '；未匹配：' + r.unmatched.join('、') : ''), r.imported ? undefined : 'error');
+        loadJielongDetail();
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  });
   $('#jl-edit').addEventListener('click', () => openJielongEditModal(a));
   $('#jl-close').addEventListener('click', async () => {
     const target = !a.closed;
@@ -3765,26 +3888,17 @@ async function loadBirthdays() {
   if (seq !== loadSeq) return;
   const wishes = {};
   const wishOf = (m) => { if (!wishes[m.id]) wishes[m.id] = bdWish(m); return wishes[m.id]; };
-  const bdAvaColor = (m) => ['linear-gradient(135deg,#f783ac,#f9c74f)', 'linear-gradient(135deg,#a78bfa,#60a5fa)', 'linear-gradient(135deg,#4ade80,#38bdf8)', 'linear-gradient(135deg,#fb923c,#f472b6)'][(m.name || '?').charCodeAt(0) % 4];
-  const bdWeek = (d) => '周' + '日一二三四五六'[new Date(d + 'T00:00:00').getDay()];
+  const wk = (dateStr) => '周' + '日一二三四五六'[new Date(dateStr + 'T00:00:00').getDay()];
+  const dstr = (m) => m.nextDate ? m.nextDate.slice(5, 10).replace('-', '/') : `${m.month}/${String(m.day).padStart(2, '0')}`;
+  const admin = isSysAdmin();
 
   const todayCards = data.today.map((m) => `
     <div class="bd-hero">
-      <div class="bd-bunting"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-      ${data.today.length === 1 ? `<div class="bd-date">${bdWeek(m.nextDate.slice(0, 10))} · ${esc(m.nextDate.slice(0, 10))}</div>` : ''}
       ${data.hasBadge ? `<div class="bd-mark" style="background-image:url('/api/class-badge?r=${Date.now()}')"></div>` : ''}
-      <span class="bd-balloon" style="left:5%;animation-delay:0s">🎈</span>
-      <span class="bd-balloon" style="left:15%;animation-delay:2.6s;font-size:16px">🎈</span>
-      <span class="bd-balloon" style="left:88%;animation-delay:1.2s">🎈</span>
-      <span class="bd-balloon" style="left:78%;animation-delay:3.4s;font-size:15px">🎈</span>
-      <span class="bd-spark" style="left:12%;top:18%">✨</span>
-      <span class="bd-spark" style="left:85%;top:26%;animation-delay:1.1s">✨</span>
-      <span class="bd-spark" style="left:70%;top:12%;animation-delay:1.8s;font-size:13px">✨</span>
-      ${['#f9a8d4', '#fcd34d', '#a5b4fc', '#86efac'].map((c, i) => `<i class="bd-cf" style="left:${8 + i * 22}%;background:${c};animation-delay:${i * 0.9}s"></i>`).join('')}
       <div class="bd-cake">🎂</div>
-      <div class="bd-todaylabel">今 天 过 生 日</div>
+      <div class="bd-kicker">今 天 过 生 日 · ${m.month} 月 ${m.day} 日 · ${wk(m.nextDate.slice(0, 10))}</div>
       <div class="bd-name">${esc(m.name)}</div>
-      ${m.turningAge != null ? `<div class="bd-role"><span class="jl-badge on">将满 ${m.turningAge} 岁的生日</span></div>` : ''}
+      ${m.turningAge != null ? `<div class="bd-badges"><span class="jl-badge on">将满 ${m.turningAge} 岁</span></div>` : ''}
       <div class="bd-wish">「${esc(wishOf(m))}」</div>
       <div class="bd-from">—— 全班同学 ——</div>
       <div class="bd-actions"><button class="ghost" data-bd-copy="${m.id}">${icon('copy')} 复制祝福发到班群</button></div>
@@ -3794,54 +3908,51 @@ async function loadBirthdays() {
     ? `<div class="bd-todaygrid">${todayCards}</div>`
     : `<div class="bd-calm">${icon('birthday')} 今天没有寿星${nearest ? `，最近的是 <b>${esc(nearest.name)}</b>（${nearest.month} 月 ${nearest.day} 日，还有 ${nearest.daysUntil} 天）` : ''}，每一天都值得被温柔对待</div>`;
 
-  const upCards = data.items.filter((m) => !m.isToday).map((m, i) => `
-    <div class="bd-card${m.pending ? ' pending' : (m.daysUntil <= 7 ? ' soon' : '')}${isSysAdmin() ? ' has-acts' : ''}" style="animation-delay:${Math.min(i * 45, 600)}ms">
-      <div class="bd-ava" style="background:${m.pending ? 'var(--hover)' : bdAvaColor(m)}">${m.pending ? '?' : esc(Array.from(m.name || '?')[0])}</div>
-      <div class="bd-uinfo">
-        <div class="bd-uname">${esc(m.name)}</div>
-        <div class="bd-usub">${m.pending ? '生日待填' : `${icon('birthday')} ${m.month} 月 ${m.day} 日${m.turningAge != null ? ' · 将满 ' + m.turningAge + ' 岁' : ''}`}</div>
-      </div>
-      <div class="bd-dayspill">${m.pending ? '<span style="font-size:12px">待填</span>' : `<b>${m.daysUntil}</b><span>天后</span>`}</div>
-      ${isSysAdmin() ? `<div class="bd-acts"><button class="mini" data-bd-edit="${m.id}" title="编辑">${icon('edit')}</button><button class="mini danger" data-bd-del="${m.id}" title="删除">${icon('trash')}</button></div>` : ''}
-    </div>`).join('');
+  // 倒计时列表：按月份分组，行式布局；7 天内高亮
+  const upcoming = data.items.filter((m) => !m.isToday);
+  let rows = '';
+  let lastMonth = null;
+  for (const m of upcoming) {
+    if (m.month !== lastMonth) { lastMonth = m.month; rows += `<div class="bd-month">${m.month} 月</div>`; }
+    const soon = !m.pending && m.daysUntil != null && m.daysUntil <= 7;
+    const sub = m.pending ? '生日待填' : [m.turningAge != null ? '将满 ' + m.turningAge + ' 岁' : '', m.note ? esc(m.note) : ''].filter(Boolean).join(' · ');
+    rows += `
+      <div class="bd-row${soon ? ' soon' : ''}${m.pending ? ' pending' : ''}">
+        <div class="bd-datebox">${m.pending ? '<span>—</span>' : `<b>${m.day}</b><span>${m.month} 月</span>`}</div>
+        <div class="bd-who"><b>${esc(m.name)}</b><span>${sub || '&nbsp;'}</span></div>
+        <div class="bd-count${soon ? ' hot' : ''}">${m.pending ? '待填' : m.daysUntil + ' 天后'}</div>
+        ${admin ? `<div class="bd-acts"><button class="mini" data-bd-edit="${m.id}" title="编辑">${icon('edit')}</button><button class="mini danger" data-bd-del="${m.id}" title="删除">${icon('trash')}</button></div>` : ''}
+      </div>`;
+  }
 
-  // 班级名单导入控件
-  let libHtml = '';
-  if (isSysAdmin()) {
+  // 管理工具条：添加成员 / 名单导入 / 班徽背景，收进一行
+  let adminBar = '';
+  if (admin) {
     let lib = [];
     try { lib = (await api('/api/rosters')).items; } catch (e) { /* 忽略 */ }
     if (seq !== loadSeq) return; // 班级名单慢响应期间切走视图，不再覆盖
-    if (lib.length) {
-      libHtml = `
+    adminBar = `
       <div class="jl-actions">
-        <select id="bd-import-lib" style="max-width:260px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text)">
-          ${lib.map((r) => `<option value="${r.id}">${esc(r.name)}（${r.count} 人）</option>`).join('')}
-        </select>
-        <button class="ghost" id="bd-import">${icon('download')} 导入名单</button>
-        <span class="hint" style="margin:0">导入后逐个补填生日即可</span>
-      </div>`;
-    }
+        <button class="primary" id="btn-bd-add">${icon('plus')} 添加成员</button>
+        ${lib.length ? `
+          <select id="bd-import-lib" class="bd-select">${lib.map((r) => `<option value="${r.id}">${esc(r.name)}（${r.count} 人）</option>`).join('')}</select>
+          <button class="ghost" id="bd-import">${icon('download')} 导入名单</button>` : ''}
+        <label class="ghost bd-upload">${icon('image')} 上传班徽<input id="bd-badge-file" type="file" accept="image/*" hidden></label>
+        ${data.hasBadge ? '<button class="ghost" id="bd-badge-del">移除班徽</button>' : ''}
+      </div>
+      <p class="hint">${lib.length ? '导入名单后逐个补填生日即可；班徽作为祝福墙水印背景（半透明）。' : '先在「班级名单」保存名单，再从这里导入生日成员。'}</p>`;
   }
-  // 班徽背景管理
-  const badgeHtml = isSysAdmin() ? `
-    <div class="jl-actions" style="margin-top:6px">
-      <label class="ghost" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px">${icon('image')} 上传班徽背景<input id="bd-badge-file" type="file" accept="image/*" style="display:none"></label>
-      ${data.hasBadge ? '<button class="ghost" id="bd-badge-del">移除班徽</button>' : ''}
-      <span class="hint" style="margin:0">上传后作为生日祝福墙的水印背景（半透明，不挡文字）</span>
-    </div>` : '';
 
   view.innerHTML = `
     <div class="bd-page">
-    <div class="jl-head"><h2>${icon('birthday')} 生日祝福</h2></div>
-    <p class="hint">每一岁都值得庆祝，每一个人都值得被记得。生日当天这里会变成祝福墙，信息页和浏览器通知也会提醒。</p>
-    ${todayWrap}
-    <div class="panel">
-      <div class="jl-head" style="margin:0 0 4px"><h3 style="margin:0">${icon('birthday')} 生日倒计时（${data.items.filter((x) => !x.isToday).length} 人）</h3></div>
-      ${upCards ? `<div class="bd-grid">${upCards}</div>` : `<div class="empty"><div class="big">${icon('birthday')}</div>还没有成员<br>${isSysAdmin() ? '先在「班级名单」保存名单，再从下面导入' : '班级名单里还没有成员，请让管理员添加'}</div>`}
-      ${libHtml}
-      ${badgeHtml}
-      ${isSysAdmin() ? `<div class="jl-actions"><button class="primary" id="btn-bd-add">${icon('plus')} 添加成员</button></div>` : ''}
-    </div>
+      <div class="jl-head"><h2>${icon('birthday')} 生日祝福</h2></div>
+      <p class="hint">每一岁都值得庆祝，每一个人都值得被记得。生日当天这里会变成祝福墙，信息页和浏览器通知也会提醒。</p>
+      ${todayWrap}
+      <div class="panel">
+        <div class="jl-head"><h3>${icon('birthday')} 生日倒计时（${upcoming.length} 人）</h3></div>
+        ${upcoming.length ? `<div class="bd-list">${rows}</div>` : `<div class="empty"><div class="big">${icon('birthday')}</div>还没有成员${admin ? '，从下面导入名单开始' : ''}</div>`}
+        ${adminBar}
+      </div>
     </div>`;
   setNavBadge('birthday', data.todayCount, { bday: true });
 
@@ -4412,7 +4523,7 @@ async function loadNoteWall() {
     const tint = 'gb-t' + (m.id % 6);
     const initial = esc(Array.from(m.nickname || '匿名')[0] || '?');
     return `<div class="gb-card ${tint}">
-      ${canPost() ? `<button class="gb-del" data-gb-del="${m.id}" title="删除">${icon('trash')}</button>` : ''}
+      ${(m.mine || canPost()) ? `<button class="gb-del" data-gb-del="${m.id}" title="${m.mine ? '删除我发的' : '删除'}">${icon('trash')}</button>` : ''}
       <div class="gb-head"><span class="gb-ava">${initial}</span>
         <div class="gb-who"><span class="gb-nick">${esc(m.nickname || '匿名')}</span><span class="gb-time">${esc(fmtReceived(m.created_at))}</span></div>
       </div>
@@ -4545,7 +4656,7 @@ async function loadNoteWall() {
 // 一条提交的卡片：状态徽章、附件、回复、点赞；处理按钮只在有管理权时出现
 function ideaCard(m, liked, canManage, privateCampaign) {
   return `<article class="gb-card idea s-${esc(m.status || 'open')}">
-    ${canManage ? `<button class="gb-del" data-gb-del="${m.id}" title="删除">${icon('trash')}</button>` : ''}
+    ${(canManage || m.mine) ? `<button class="gb-del" data-gb-del="${m.id}" title="${canManage ? '删除' : '删除我提交的'}">${icon('trash')}</button>` : ''}
     <div class="gb-head">
       <span class="gb-ava">${esc(Array.from(m.nickname || '匿名')[0] || '?')}</span>
       <div class="gb-who"><span class="gb-nick">${esc(m.nickname || '匿名')}${m.mine ? ' <b class="idea-mine">我提的</b>' : ''}</span><span class="gb-time">${esc(fmtReceived(m.created_at))}</span></div>

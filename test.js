@@ -60,6 +60,18 @@ async function upost(sid, path, body) {
   let b = null; try { b = await r.json(); } catch (e) { /* 忽略 */ }
   return { status: r.status, body: b || {} };
 }
+async function uput(sid, path, body) {
+  const ck = await userSession(sid);
+  const r = await fetch(BASE + path, { method: 'PUT', headers: { 'Content-Type': 'application/json', Cookie: ck }, body: JSON.stringify(body || {}) });
+  let b = null; try { b = await r.json(); } catch (e) { /* 忽略 */ }
+  return { status: r.status, body: b || {} };
+}
+async function udel(sid, path) {
+  const ck = await userSession(sid);
+  const r = await fetch(BASE + path, { method: 'DELETE', headers: { Cookie: ck } });
+  let b = null; try { b = await r.json(); } catch (e) { /* 忽略 */ }
+  return { status: r.status, body: b || {} };
+}
 async function uget(sid, path) {
   const ck = await userSession(sid);
   const r = await fetch(BASE + path, { headers: { Cookie: ck } });
@@ -1651,10 +1663,10 @@ async function uget(sid, path) {
       const jlWash = await opu('/api/jielong/' + jlid, { rosterRaw: '王五明\n张三', keepId: false });
       ok('班委整份替换名单被拒（403，避免学号被脱敏视图冲掉）', jlWash.status === 403, JSON.stringify([jlWash.status, jlWash.body]));
       const jlOffView = await og('/api/jielong/' + jlid);
-      ok('班委看接龙：有姓名没学号（名单、记录、未接都脱敏）',
-        jlOffView.status === 200 && jlOffView.body.roster.every((x) => !('id' in x))
-        && jlOffView.body.entries.every((e) => !('id' in e))
-        && (jlOffView.body.missing || []).every((m) => !('id' in m)),
+      ok('班委看接龙：名单、记录、未接都带学号（2026-10-31 口径）',
+        jlOffView.status === 200 && jlOffView.body.roster.every((x) => !!x.id)
+        && jlOffView.body.entries.every((e) => !!e.id)
+        && (jlOffView.body.missing || []).every((m) => !!m.id),
         JSON.stringify({ roster: jlOffView.body.roster, entries: jlOffView.body.entries }));
       const jlOffClose = await op(`/api/jielong/${jlid}/close`, { closed: true });
       ok('班委能停止接龙', jlOffClose.status === 200 && jlOffClose.body.closed === true, JSON.stringify(jlOffClose.body));
@@ -1662,9 +1674,9 @@ async function uget(sid, path) {
       ok('班委能删除某条接龙记录', jlOffEntry.status === 200, JSON.stringify(jlOffEntry.body));
       const offCsv = await ogText('/api/jielong/' + jlid + '/export');
       const adCsv = await withCookie('/api/jielong/' + jlid + '/export', {}, cookie).then((x) => x.text());
-      ok('班委能导出 CSV，但导出里没有学号（系统管理员那份才有）',
+      ok('班委能导出 CSV，导出里同样带学号（2026-10-31 口径）',
         offCsv.status === 200 && /csv/.test(offCsv.type) && offCsv.text.includes('张三')
-        && !offCsv.text.includes('2023005') && adCsv.includes('2023005'),
+        && offCsv.text.includes('2023005') && adCsv.includes('2023005'),
         JSON.stringify({ st: offCsv.status, off: offCsv.text.slice(0, 60) }));
       const stuJlEdit = await fetch(BASE + '/api/jielong/' + jlid, { method: 'PUT', headers: { 'Content-Type': 'application/json', Cookie: await userSession('2023001') }, body: JSON.stringify({ title: '同学改不动' }) });
       ok('同学不能改接龙（401）', stuJlEdit.status === 401, 'status=' + stuJlEdit.status);
@@ -1678,14 +1690,14 @@ async function uget(sid, path) {
       ok('班委能新建签箱', dwc.status === 200 && !!dwc.body.id, JSON.stringify(dwc.body));
       const dwid = dwc.body.id;
       const dwGo = await op(`/api/draw/${dwid}/go`, { count: 2 });
-      ok('班委能抽签，抽中名单里没有学号',
-        dwGo.status === 200 && dwGo.body.picked.length === 2 && dwGo.body.picked.every((p) => !('id' in p)),
+      ok('班委能抽签，抽中名单带学号（2026-10-31 口径）',
+        dwGo.status === 200 && dwGo.body.picked.length === 2 && dwGo.body.picked.every((p) => !!p.id),
         JSON.stringify(dwGo.body.picked));
       const dwAd = await j('/api/draw/' + dwid);
       ok('同一轮记录在管理员视角里仍带学号', dwAd.body.rounds[0].picked.every((p) => !!p.id), JSON.stringify(dwAd.body.rounds[0].picked));
       const dwUndo = await op(`/api/draw/${dwid}/undo`, {});
-      ok('班委能撤销上一轮，放回名单也不带学号',
-        dwUndo.status === 200 && dwUndo.body.restored.every((p) => !('id' in p)), JSON.stringify(dwUndo.body.restored));
+      ok('班委能撤销上一轮，放回名单带学号（2026-10-31 口径）',
+        dwUndo.status === 200 && dwUndo.body.restored.every((p) => !!p.id), JSON.stringify(dwUndo.body.restored));
       ok('班委能重置签箱', (await op(`/api/draw/${dwid}/reset`, {})).status === 200);
       const dwEdit = await opu('/api/draw/' + dwid, { title: '班委改的签箱', perDraw: 2 });
       const dwAdEdit = await j('/api/draw/' + dwid);
@@ -1706,13 +1718,15 @@ async function uget(sid, path) {
       await upost('2023005', `/api/vote/${avId}/ballot`, { choices: ['o0'] });
       await upost('2023001', `/api/vote/${avId}/ballot`, { choices: ['o1'] });
       const asOfficer = await og('/api/vote/' + avId);
-      ok('匿名投票：班委看不到是谁投的（无明细、无整班名单）',
+      ok('匿名投票：班委看不到是谁投的（无选票明细）',
         asOfficer.status === 200 && Array.isArray(asOfficer.body.tally) && asOfficer.body.done === 2
-        && asOfficer.body.ballots === undefined && asOfficer.body.roster === undefined,
+        && asOfficer.body.ballots === undefined && Array.isArray(asOfficer.body.roster)
+        && asOfficer.body.roster.every((x) => !!x.id),
         JSON.stringify(Object.keys(asOfficer.body || {})));
-      ok('班委能催票：未投名单只给姓名，不给学号与槽位',
+      ok('班委能催票：未投名单带学号与槽位序号（2026-10-31 口径）',
         Array.isArray(asOfficer.body.missing) && asOfficer.body.missing.length === 1
-        && asOfficer.body.missing[0].name === '李四' && !('id' in asOfficer.body.missing[0]) && !('i' in asOfficer.body.missing[0]),
+        && asOfficer.body.missing[0].name === '李四' && asOfficer.body.missing[0].id === '2023002'
+        && asOfficer.body.missing[0].i === 2 && typeof asOfficer.body.missing[0].bound === 'boolean',
         JSON.stringify(asOfficer.body.missing));
       const asPlain = await uget('2023001', '/api/vote/' + avId);
       ok('普通同学看不到未投名单', asPlain.status === 200 && asPlain.body.missing === undefined, JSON.stringify(Object.keys(asPlain.body || {})));
@@ -1848,12 +1862,38 @@ async function uget(sid, path) {
       ok('征集关闭后不能再提交（400）', closedPost.status === 400, JSON.stringify(closedPost.body));
       await j('/api/campaigns/' + ccId, { method: 'DELETE' });
     }
+    // 提交人自删点子：同学能删自己发的，删别人的被拒（2026-11-01）
+    {
+      const mkRos2 = await post('/api/rosters', { name: '自检自删名单', rosterRaw: '2023001 张三\n2023002 李四', keepId: true });
+      if (mkRos2.body && mkRos2.body.id) created.rosters.push(mkRos2.body.id);
+      await j('/api/users/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rosterId: mkRos2.body.id }) });
+      // 复位 2023001 为普通同学（前面的班委用例可能把它升成了班委），重登录拿新会话
+      await j('/api/users/2023001', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: 'student' }) });
+      delete userSess['2023001'];
+      const cc = await post('/api/campaigns', { title: '自检点子自删' });
+      const ccId = cc.body && cc.body.id;
+      if (ccId) created.campaigns.push(ccId);
+      let mk = { status: 429 }, myId = null;
+      for (let i = 0; i < 6 && mk.status === 429; i++) {
+        mk = await upost('2023002', '/api/guestbook', { kind: 'idea', campaign: ccId, content: '李四发错了内容' });
+        if (mk.status === 429) await new Promise((res) => setTimeout(res, 12000));
+      }
+      myId = mk.body && mk.body.id;
+      ok('学生提交点子', mk.status === 200 && !!myId, JSON.stringify(mk.body).slice(0, 120));
+      const delOther = await udel('2023001', '/api/guestbook/' + myId);
+      ok('同学不能删别人的点子（401）', delOther.status === 401, 'status=' + delOther.status);
+      const delOwn = await udel('2023002', '/api/guestbook/' + myId);
+      ok('提交人能删除自己发的点子', delOwn.status === 200 && delOwn.body.ok === true, JSON.stringify(delOwn.body));
+      const det = await j('/api/campaigns/' + ccId);
+      ok('删除后点子从征集详情消失', ((det.body.ideas || []).every((x) => x.id !== myId)), JSON.stringify((det.body.ideas || []).map((x) => x.id)));
+      await j('/api/campaigns/' + ccId, { method: 'DELETE' });
+    }
     const noDel = await od('/api/messages/' + mkId);
     ok('班委不能删除信息（401）', noDel.status === 401, 'status=' + noDel.status);
     const noRoster = await og('/api/rosters');
     const rosMeta = noRoster.body && Array.isArray(noRoster.body.items) ? noRoster.body.items : null;
-    ok('班委可选用班级名单（只见名称与人数，无学号全文）', noRoster.status === 200
-      && rosMeta !== null && rosMeta.every((x) => x.roster === undefined),
+    ok('班委可选用班级名单（2026-10-31 口径：名单全文对班委可见）', noRoster.status === 200
+      && rosMeta !== null && rosMeta.every((x) => typeof x.roster === 'string'),
       'status=' + noRoster.status);
     const noUsers = await og('/api/users');
     ok('班委看不到账号管理（401）', noUsers.status === 401);
@@ -2181,8 +2221,8 @@ async function uget(sid, path) {
       const rosRes = await fetch(BASE + '/api/rosters', { headers: { Cookie: offCk } });
       const rosList = await rosRes.json();
       const mine = (rosList.items || []).find((x) => x.name === '自检引用名单');
-      ok('班委名单列表只见名称与人数（无学号全文）', rosRes.status === 200 && !!mine
-        && mine.roster === undefined && typeof mine.count === 'number', JSON.stringify(mine));
+      ok('班委名单列表带学号全文（2026-10-31 口径）', rosRes.status === 200 && !!mine
+        && typeof mine.roster === 'string' && mine.roster.indexOf('2023001') >= 0 && typeof mine.count === 'number', JSON.stringify(mine));
       const jl = await fetch(BASE + '/api/jielong', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: offCk }, body: JSON.stringify({ title: '自检引用接龙', rosterId: mkRos.body.id, fields: [{ label: '是否参加', type: 'select', options: ['参加', '不参加'], required: true }] }) }).then(r => r.json());
       ok('班委按名单引用发起接龙', !!jl.id, JSON.stringify(jl));
       if (jl.id) {
@@ -2197,6 +2237,55 @@ async function uget(sid, path) {
     const stuRos = await fetch(BASE + '/api/rosters', { headers: { Cookie: await userSession('2023002') } });
     ok('学生不能读名单列表（401）', stuRos.status === 401, 'status=' + stuRos.status);
     if (mkRos.body.id) await j('/api/rosters/' + mkRos.body.id, { method: 'DELETE' });
+  }
+
+  /* ---------- 邮件催办：自助绑定 QQ、批量导入、催办限频 ---------- */
+  if (authRequired) {
+    console.log('\n—— 邮件催办 ——');
+    r = await upost('2023001', '/api/me/qq/code', { qq: '111111111' });
+    ok('纯 QQ 号不再接受（要求完整邮箱，400）', r.status === 400, 'status=' + r.status);
+    r = await upost('2023001', '/api/me/qq/code', { qq: 'stu2023001@example.com' });
+    ok('发送验证码（完整邮箱形式）', r.status === 200 && r.body.target === 'stu2023001@example.com' && !!r.body.devCode, JSON.stringify(r.body));
+    const vcode = r.body.devCode || '';
+    r = await uput('2023001', '/api/me/qq', { qq: 'stu2023001@example.com', code: vcode === '000000' ? '000001' : '000000' });
+    ok('错误验证码被拒（400）', r.status === 400, 'status=' + r.status);
+    r = await uput('2023001', '/api/me/qq', { qq: 'stu2023001@example.com', code: vcode });
+    ok('验证码通过完成绑定（完整邮箱入库）', r.status === 200 && r.body.qq === 'stu2023001@example.com', JSON.stringify(r.body));
+    r = await uget('2023001', '/api/me');
+    ok('me 接口回传完整邮箱', r.status === 200 && r.body.qq === 'stu2023001@example.com', JSON.stringify(r.body).slice(0, 100));
+    r = await upost('2023001', '/api/me/qq/code', { qq: 'stu2023001@example.com' });
+    ok('60 秒内重发验证码被拒（429）', r.status === 429, 'status=' + r.status);
+    r = await post('/api/users/qq-import', { text: '2023002 stu2023002@example.com\n2023002 222222222\n2023999 333333333\nbadline' });
+    ok('管理员批量导入（只收完整邮箱，纯 QQ 号计入 bad）', r.status === 200 && r.body.updated === 1 && (r.body.bad || []).some((x) => String(x).indexOf('2023999') >= 0) && (r.body.bad || []).some((x) => String(x).indexOf('222222222') >= 0), JSON.stringify(r.body));
+    const padRm = (n) => String(n).padStart(2, '0');
+    const pastD = new Date(Date.now() - 2 * 3600 * 1000);
+    const pastDeadline = pastD.getFullYear() + '-' + padRm(pastD.getMonth() + 1) + '-' + padRm(pastD.getDate()) + ' ' + padRm(pastD.getHours()) + ':' + padRm(pastD.getMinutes());
+    r = await post('/api/jielong', {
+      title: '自检提醒接龙', description: '截止提醒用',
+      rosterRaw: '2023001 张三\n2023002 李四\n2023003 王五\n2023004 赵六', keepId: true,
+      deadline: pastDeadline, allowOutside: true, fields: [],
+    });
+    const rmJl = (r.body || {}).id;
+    if (rmJl) (created.jielongIds = created.jielongIds || []).push(rmJl);
+    ok('创建逾期测试接龙', r.status === 200 && !!rmJl);
+    r = await post('/api/jielong/' + rmJl + '/remind-mail', {});
+    ok('手动邮件催办发出（含未绑定计数）', r.status === 200 && r.body.sent === 2 && r.body.noQQ === 2, JSON.stringify(r.body).slice(0, 140));
+    ok('导入与验证的邮箱都能收到催办', ((r.body.mails || []).some((m) => m.to === 'stu2023001@example.com')) && ((r.body.mails || []).some((m) => m.to === 'stu2023002@example.com')), JSON.stringify(r.body.mails));
+    r = await post('/api/jielong/' + rmJl + '/remind-mail', { slots: [0] });
+    ok('管理员勾选收件人只发给勾选的人', r.status === 200 && r.body.sent === 0 && r.body.skipped === 1 && r.body.noQQ === 0, JSON.stringify(r.body).slice(0, 140));
+    r = await post('/api/jielong/' + rmJl + '/remind-mail', {});
+    ok('30 分钟内重复催办被限频', r.status === 200 && r.body.sent === 0 && r.body.skipped === 2, JSON.stringify(r.body).slice(0, 140));
+    r = await upost('2023002', '/api/jielong/' + rmJl + '/remind-mail', {});
+    ok('学生不能邮件催办（401/403）', r.status === 401 || r.status === 403, 'status=' + r.status);
+    /* 批量导入已接：QQ 接龙原文粘贴 → 按学号/姓名匹配名单 */
+    r = await post('/api/jielong/' + rmJl + '/import', { text: '2023001 张三\n2. 李四\n王五\n路人甲' });
+    ok('批量导入已接（学号/序号/纯姓名混合，未匹配回报）', r.status === 200 && r.body.imported === 3 && r.body.unmatchedCount === 1, JSON.stringify(r.body).slice(0, 140));
+    r = await j('/api/jielong/' + rmJl);
+    ok('导入后完成统计生效', r.status === 200 && r.body.done === 3 && (r.body.missing || []).length === 1, JSON.stringify({ done: r.body.done, missing: r.body.missing }));
+    r = await post('/api/jielong/' + rmJl + '/import', { text: '2023001 张三\n2023002 李四' });
+    ok('重复导入按已接跳过', r.status === 200 && r.body.imported === 0 && r.body.already === 2, JSON.stringify(r.body));
+    r = await upost('2023002', '/api/jielong/' + rmJl + '/import', { text: 'x' });
+    ok('学生不能批量导入（401/403）', r.status === 401 || r.status === 403, 'status=' + r.status);
   }
 
   // ---- 清理自检数据 ----
