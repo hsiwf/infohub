@@ -1651,7 +1651,15 @@ route('POST', '/api/jielong', (ctx) => {
   const b = ctx.body || {};
   const title = sField(b.title, 60);
   if (!title) throw new HttpError(400, '请填写接龙标题');
-  const roster = JL.parseRoster(String(b.rosterRaw || ''), b.keepId === true).list;
+  // 名单两种来源：引用已有班级名单（rosterId，学号内容不经发起人）或直接粘贴文本
+  let roster;
+  if (b.rosterId != null && b.rosterId !== '') {
+    const r = db.prepare('SELECT * FROM rosters WHERE id = ?').get(Number(b.rosterId));
+    if (!r) throw new HttpError(400, '所选名单不存在，请重新选择');
+    roster = JL.parseRoster(r.roster, !!r.keep_id).list;
+  } else {
+    roster = JL.parseRoster(String(b.rosterRaw || ''), b.keepId === true).list;
+  }
   if (roster.length > 500) throw new HttpError(400, '名单最多 500 人');
   const deadline = cleanDT(b.deadline) || '';
   const id = JL.genId(7);
@@ -1837,14 +1845,19 @@ route('GET', '/api/jielong/:id/export', (ctx) => {
 
 /* ---------- 班级名单库（名单存一份，创建接龙 / 签箱时直接选用） ---------- */
 route('GET', '/api/rosters', (ctx) => {
-  // 名单含全班学号与姓名（敏感），仅管理员可读
-  if (!authOk(ctx.req)) throw new HttpError(401, '需要管理员登录');
+  // 名单全文（学号姓名）只归系统管理员；班委发起接龙 / 投票 / 问卷需要用到名单，
+  // 返回名称与人数的元数据供选用——选用后由服务器按 id 读取名单，学号内容不经过班委
+  const role = roleOf(ctx.req);
+  if (role !== 'admin' && role !== 'officer') throw new HttpError(401, '需要管理员或班委登录');
+  const metaOnly = role === 'officer';
   return {
   items: db.prepare('SELECT * FROM rosters ORDER BY updated_at DESC, id DESC').all().map((r) => {
     const keepId = !!r.keep_id;
+    const count = JL.parseRoster(r.roster, keepId).list.length;
+    if (metaOnly) return { id: r.id, name: r.name, count, updated_at: r.updated_at };
     return {
       id: r.id, name: r.name, roster: r.roster, keepId,
-      count: JL.parseRoster(r.roster, keepId).list.length, updated_at: r.updated_at,
+      count, updated_at: r.updated_at,
     };
   }),
   };
@@ -1974,7 +1987,15 @@ route('POST', '/api/draw', (ctx) => {
   const b = ctx.body || {};
   const title = sField(b.title, 60);
   if (!title) throw new HttpError(400, '请填写抽签标题');
-  const roster = JL.parseRoster(String(b.rosterRaw || ''), b.keepId === true).list;
+  // 名单两种来源：引用已有班级名单（rosterId）或直接粘贴文本，与接龙 / 投票同口径
+  let roster;
+  if (b.rosterId != null && b.rosterId !== '') {
+    const r = db.prepare('SELECT * FROM rosters WHERE id = ?').get(Number(b.rosterId));
+    if (!r) throw new HttpError(400, '所选名单不存在，请重新选择');
+    roster = JL.parseRoster(r.roster, !!r.keep_id).list;
+  } else {
+    roster = JL.parseRoster(String(b.rosterRaw || ''), b.keepId === true).list;
+  }
   if (!roster.length) throw new HttpError(400, '请粘贴名单，至少 1 人');
   if (roster.length > 500) throw new HttpError(400, '名单最多 500 人');
   const id = JL.genId(7);

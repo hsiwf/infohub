@@ -1357,7 +1357,7 @@ function openVoteModal() {
   // 投票按学号定位投票人（身份来自登录账号），名单缺学号的人根本投不了票——发起前就点出来
   bindRosterFields({
     prefix: 'vt', mode: 'ref', sidFor: '投票',
-    applyRoster: (r) => { $('#vt-roster').value = r.roster; $('#vt-keepid').checked = !!r.keepId; },
+    applyRoster: (r) => { if (r && r.refOnly) return; $('#vt-roster').value = r.roster; $('#vt-keepid').checked = !!r.keepId; },
   });
   $('#vt-save').addEventListener('click', async () => {
     const title = $('#vt-title').value.trim();
@@ -1895,14 +1895,9 @@ async function setupRosterLib(prefix, applyRoster) {
   const sel = $('#' + prefix + '-roster-lib');
   const delBtn = $('#' + prefix + '-roster-lib-del');
   if (!sel) return;
-  // 班级名单里存的是全班学号，只有系统管理员能读；班委在这里直接粘贴名单即可，
-  // 整行藏掉比留一个空下拉框诚实。弹窗是动态插入的，.admin-only 的批量切换覆盖不到，只能就地处理。
-  if (!isSysAdmin()) {
-    const row = sel.parentElement;
-    if (row) row.style.display = 'none';
-    if (delBtn) delBtn.style.display = 'none';
-    return;
-  }
+  // 名单全文（学号姓名）只归系统管理员；班委在这里按名称选用名单——
+  // 选中项只传 id，由服务器读取名单，学号内容不经过班委（能看到名字与人数，看不到名单全文）
+  const officer = !isSysAdmin();
   let lib = [];
   try { lib = (await api('/api/rosters')).items; } catch (e) { /* 拉取失败按空处理 */ }
   const renderOptions = () => {
@@ -1910,6 +1905,29 @@ async function setupRosterLib(prefix, applyRoster) {
       lib.map((r) => `<option value="${r.id}">${esc(r.name)}（${r.count} 人）</option>`).join('');
   };
   renderOptions();
+  if (officer) {
+    // 班委：按名称选用名单（只看到名字与人数），选中即由服务器读取——学号全文不经过班委
+    const ta = $('#' + prefix + '-roster');
+    const cb = $('#' + prefix + '-keepid');
+    const refHint = document.createElement('p');
+    refHint.className = 'hint';
+    refHint.style.margin = '6px 0 0';
+    sel.parentElement.after(refHint);
+    const sync = () => {
+      const chosen = !!sel.value;
+      if (ta) ta.style.display = chosen ? 'none' : '';
+      const kl = cb ? cb.closest('label') : null;
+      if (kl) kl.style.display = chosen ? 'none' : '';
+      refHint.textContent = chosen ? '✓ 已选用该名单，提交时由服务器读取（名单学号对你不可见）' : '';
+    };
+    sel.addEventListener('change', () => {
+      const r = lib.find((x) => String(x.id) === sel.value);
+      sync();
+      applyRoster(r ? { ...r, refOnly: true } : null);
+    });
+    sync();
+    return;
+  }
   sel.addEventListener('change', () => {
     const r = lib.find((x) => String(x.id) === sel.value);
     delBtn.style.display = r ? '' : 'none';
@@ -2009,7 +2027,11 @@ function bindRosterFields(o) {
     const k = jlParseRoster(ta.value, true).hasIds;
     if (k !== cb.checked) { cb.checked = k; draw(); }
   };
-  ta.addEventListener('input', () => { auto(); draw(); });
+  ta.addEventListener('input', () => {
+    // 手动编辑名单文本即脱离按 id 引用（否则引用的名单会覆盖手改内容）
+    if (libSel && libSel.value) { libSel.value = ''; if (delBtn) delBtn.style.display = 'none'; }
+    auto(); draw();
+  });
   cb.addEventListener('change', () => { touched = true; draw(); });
   if (libSel) {
     libSel.addEventListener('change', draw);
@@ -2426,20 +2448,21 @@ function openJielongCreateModal() {
     renderFields();
   });
   gateRosterLibSave('jl');
-  bindRosterFields({ prefix: 'jl', mode: 'copy' });
+  bindRosterFields({ prefix: 'jl', mode: 'ref' });
 
   $('#jl-save').addEventListener('click', async () => {
     const title = $('#jl-title').value.trim();
     if (!title) { toast('请填写接龙标题', 'error'); return; }
-    const ros = readRoster('jl');
+    const ros = readRoster('jl', 'ref');
     try {
       // 名单本身选填：只填了库名没贴名单时跳过保存，别让辅助字段把主流程 400 卡断
       if (ros.libName && ros.raw.trim()) await saveRosterToLib('jl', ros.libName, ros.raw, ros.keepId);
       const r = await api('/api/jielong', { method: 'POST', body: {
         title,
         description: $('#jl-desc').value.trim(),
-        rosterRaw: ros.raw,
-        keepId: ros.keepId,
+        rosterId: ros.libId || null,
+        rosterRaw: ros.libId ? '' : ros.raw,
+        keepId: ros.libId ? undefined : ros.keepId,
         deadline: valToDt($('#jl-deadline').value) || null,
         allowOutside: $('#jl-outside').checked,
         fields: fields.filter((f) => f.label.trim()).map((f) => ({ label: f.label.trim(), type: f.type, required: f.required, options: f.options || [] })),
@@ -2640,17 +2663,18 @@ function openDrawCreateModal() {
       <button class="primary" id="dw-save">创建签箱</button>
     </div>`);
   gateRosterLibSave('dw');
-  bindRosterFields({ prefix: 'dw', mode: 'copy' });
+  bindRosterFields({ prefix: 'dw', mode: 'ref' });
   $('#dw-save').addEventListener('click', async () => {
     const title = $('#dw-title').value.trim();
     if (!title) { toast('请填写抽签标题', 'error'); return; }
-    const ros = readRoster('dw');
+    const ros = readRoster('dw', 'ref');
     try {
-      if (ros.libName) await saveRosterToLib('dw', ros.libName, ros.raw, ros.keepId);
+      if (ros.libName && ros.raw.trim()) await saveRosterToLib('dw', ros.libName, ros.raw, ros.keepId);
       const r = await api('/api/draw', { method: 'POST', body: {
         title,
-        rosterRaw: ros.raw,
-        keepId: ros.keepId,
+        rosterId: ros.libId || null,
+        rosterRaw: ros.libId ? '' : ros.raw,
+        keepId: ros.libId ? undefined : ros.keepId,
         perDraw: Number($('#dw-perdraw').value) || 1,
       } });
       closeModal();
@@ -3490,7 +3514,7 @@ function openSurveyModal(initial = null) {
 
   bindRosterFields({
     prefix: 'sv', mode: 'ref', sidFor: '提交',
-    applyRoster: (r) => { $('#sv-roster').value = r.roster; $('#sv-keepid').checked = !!r.keepId; },
+    applyRoster: (r) => { if (r && r.refOnly) return; $('#sv-roster').value = r.roster; $('#sv-keepid').checked = !!r.keepId; },
   });
 
   // 加载模板列表

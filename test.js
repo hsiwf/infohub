@@ -14,7 +14,7 @@ const DATA_DIR = process.env.INFOHUB_DATA_DIR
   : require('path').join(__dirname, 'data');
 let passed = 0;
 let failed = 0;
-const created = { groups: [], messages: [], campaigns: [], surveys: [] };
+const created = { groups: [], messages: [], campaigns: [], surveys: [], jielongIds: [] };
 let cookie = ''; // 管理员登录后的会话 Cookie
 let auditBaseline = 0; // 本轮自检开始前操作记录的最大 id
 
@@ -1004,8 +1004,9 @@ async function uget(sid, path) {
       && /process\.env\.INFOHUB_DATA_DIR/.test(dbSrc) && /purgeStaleFixtures\(/.test(launcherSrc)
       // test.js 直连库文件的地方必须跟着 DATA_DIR，否则收尾清理会去删真实库
       && !/join\(__dirname, 'data', 'infohub\.db'\)/.test(testSrc) && /join\(DATA_DIR, 'infohub\.db'\)/.test(testSrc));
-    ok('班委发起时用不了班级名单库（选了会 401 的入口整行藏掉）',
-      /if \(!isSysAdmin\(\)\) \{[\s\S]{0,240}row\.style\.display = 'none'/.test(appSrc3)
+    ok('班委发起时可从班级名单选用（引用模式，学号全文不经过班委）',
+      /const officer = !isSysAdmin\(\)/.test(appSrc3)
+      && /refOnly: true/.test(appSrc3)
       && (appSrc3.match(/gateRosterLibSave\('/g) || []).length === 2);
     ok('班委可用的命令面板项与页面按钮同一口径',
       /if \(canPost\(\)\) \{\s*cmds\.push\(\s*\{ iconHtml: icon\('plus'\), label: '添加信息'/.test(appSrc3)
@@ -1850,7 +1851,10 @@ async function uget(sid, path) {
     const noDel = await od('/api/messages/' + mkId);
     ok('班委不能删除信息（401）', noDel.status === 401, 'status=' + noDel.status);
     const noRoster = await og('/api/rosters');
-    ok('班委看不到班级名单（401）', noRoster.status === 401);
+    const rosMeta = noRoster.body && Array.isArray(noRoster.body.items) ? noRoster.body.items : null;
+    ok('班委可选用班级名单（只见名称与人数，无学号全文）', noRoster.status === 200
+      && rosMeta !== null && rosMeta.every((x) => x.roster === undefined),
+      'status=' + noRoster.status);
     const noUsers = await og('/api/users');
     ok('班委看不到账号管理（401）', noUsers.status === 401);
     const noFund = await op('/api/funds', { type: 'expense', amount: 1 });
@@ -2165,6 +2169,36 @@ async function uget(sid, path) {
     }
   }
 
+  // ---- 班委按名单引用发起接龙（学号全文不经过班委） ----
+  {
+    const mkRos = await post('/api/rosters', { name: '自检引用名单', rosterRaw: '2023001 张三\n2023002 李四', keepId: true });
+    if (mkRos.body.id) {
+      (created.rosters = created.rosters || []).push(mkRos.body.id);
+      // 先提班委再登录：角色变更会使旧会话立即作废
+      await j('/api/users/2023001', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: 'officer' }) });
+      delete userSess['2023001'];
+      const offCk = await userSession('2023001');
+      const rosRes = await fetch(BASE + '/api/rosters', { headers: { Cookie: offCk } });
+      const rosList = await rosRes.json();
+      const mine = (rosList.items || []).find((x) => x.name === '自检引用名单');
+      ok('班委名单列表只见名称与人数（无学号全文）', rosRes.status === 200 && !!mine
+        && mine.roster === undefined && typeof mine.count === 'number', JSON.stringify(mine));
+      const jl = await fetch(BASE + '/api/jielong', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: offCk }, body: JSON.stringify({ title: '自检引用接龙', rosterId: mkRos.body.id, fields: [{ label: '是否参加', type: 'select', options: ['参加', '不参加'], required: true }] }) }).then(r => r.json());
+      ok('班委按名单引用发起接龙', !!jl.id, JSON.stringify(jl));
+      if (jl.id) {
+        (created.jielongIds = created.jielongIds || []).push(jl.id);
+        const jdRes = await fetch(BASE + '/api/jielong/' + jl.id, { headers: { Cookie: offCk } });
+        const jd = { status: jdRes.status, body: await jdRes.json().catch(() => ({})) };
+        ok('引用的名单已生效（班委视角不含学号）', (jd.body.roster || []).length === 2, JSON.stringify(jd.body.roster));
+      }
+      await j('/api/users/2023001', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: 'student' }) });
+      delete userSess['2023001'];
+    }
+    const stuRos = await fetch(BASE + '/api/rosters', { headers: { Cookie: await userSession('2023002') } });
+    ok('学生不能读名单列表（401）', stuRos.status === 401, 'status=' + stuRos.status);
+    if (mkRos.body.id) await j('/api/rosters/' + mkRos.body.id, { method: 'DELETE' });
+  }
+
   // ---- 清理自检数据 ----
   for (const id of created.messages) await j('/api/messages/' + id, { method: 'DELETE' });
   for (const id of created.groups) await j('/api/groups/' + id, { method: 'DELETE' });
@@ -2174,6 +2208,7 @@ async function uget(sid, path) {
   for (const id of (created.rosters || [])) await j('/api/rosters/' + id, { method: 'DELETE' });
   for (const id of (created.surveyTemplates || [])) await j('/api/survey-template/' + id, { method: 'DELETE' });
   for (const id of (created.surveys || [])) await j('/api/survey/' + id, { method: 'DELETE' });
+  for (const id of (created.jielongIds || [])) await j('/api/jielong/' + id, { method: 'DELETE' });
   for (const sid of (created.userSids || [])) await j('/api/users/' + encodeURIComponent(sid), { method: 'DELETE' });
   console.log(`\n（自检数据已清理：${created.messages.length} 条信息、${created.groups.length} 个群）`);
   // 自检这一跑写进「操作记录」的行按 tag 清掉——否则一次自检几百条，真实使用记录会被埋掉。
